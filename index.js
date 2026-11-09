@@ -1,3 +1,4 @@
+
 // PROFINO Telegram Bot
 // Telegram updates are received through polling by default.
 
@@ -42,7 +43,8 @@ async function main() {
     console.log("[database] server time:", result.server_time)
   } catch (err) {
     console.error("[database] connection test failed:", err?.message ?? err)
-    console.error("[database] Telegram bot will continue running.")
+    console.error("[database] startup aborted. Telegram bot will not start.")
+    process.exit(1)
   }
 
   let me
@@ -164,3 +166,4 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 main()
+      
