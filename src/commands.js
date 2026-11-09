@@ -18,8 +18,6 @@ const backMenu = new Keyboard()
   .resized()
 
 async function getOrCreateUser(ctx) {
-  const telegramId = ctx.from.id
-
   const result = await pool.query(
     `INSERT INTO users
       (telegram_id, username, first_name, last_name, referral_code, status)
@@ -32,7 +30,7 @@ async function getOrCreateUser(ctx) {
      RETURNING id, telegram_id, username, first_name,
                last_name, referral_code, status, created_at`,
     [
-      telegramId,
+      ctx.from.id,
       ctx.from.username ?? null,
       ctx.from.first_name ?? null,
       ctx.from.last_name ?? null,
@@ -43,13 +41,62 @@ async function getOrCreateUser(ctx) {
   return result.rows[0]
 }
 
+async function getWalletBalances(userId) {
+  const result = await pool.query(
+    `SELECT
+       la.account_type,
+       COALESCE(
+         SUM(
+           CASE
+             WHEN le.entry_type = 'credit' THEN le.amount
+             WHEN le.entry_type = 'debit' THEN -le.amount
+             ELSE 0
+           END
+         ), 0
+       ) AS balance
+     FROM ledger_accounts la
+     LEFT JOIN ledger_entries le
+       ON le.account_id = la.id
+      AND le.transaction_id IN (
+        SELECT id
+        FROM ledger_transactions
+        WHERE status = 'posted'
+      )
+     WHERE la.user_id = $1
+       AND la.currency = 'USDT'
+     GROUP BY la.account_type
+     ORDER BY la.account_type`,
+    [userId]
+  )
+
+  const balances = {
+    AVAILABLE: null,
+    INVESTED: null,
+    PROFIT: null
+  }
+
+  for (const row of result.rows) {
+    if (Object.hasOwn(balances, row.account_type)) {
+      balances[row.account_type] = row.balance
+    }
+  }
+
+  if (Object.values(balances).some(value => value === null)) {
+    throw new Error("Wallet accounts are incomplete")
+  }
+
+  return balances
+}
+
 export function registerCommands(bot) {
   bot.command("start", async (ctx) => {
     try {
       const user = await getOrCreateUser(ctx)
 
       if (user.status !== "active") {
-        return ctx.reply("Your account is not active. Please contact support.")
+        return ctx.reply(
+          "Your account is not active. Please contact support."
+        )
       }
 
       await ctx.reply(
@@ -58,7 +105,9 @@ export function registerCommands(bot) {
       )
     } catch (error) {
       console.error("[registration] Failed:", error.message)
-      await ctx.reply("Unable to load your account. Please try again later.")
+      await ctx.reply(
+        "Unable to load your account. Please try again later."
+      )
     }
   })
 
@@ -75,7 +124,9 @@ export function registerCommands(bot) {
       return ctx.reply("Access denied.")
     }
 
-    return ctx.reply("PROFINO Admin Panel\n\nAdmin access confirmed.")
+    return ctx.reply(
+      "PROFINO Admin Panel\n\nAdmin access confirmed."
+    )
   })
 
   bot.on("message:text", async (ctx) => {
@@ -87,7 +138,7 @@ export function registerCommands(bot) {
 
     if (choice === "My Account") {
       try {
-        const user = await pool.query(
+        const result = await pool.query(
           `SELECT id, telegram_id, username, first_name,
                   last_name, referral_code, status, created_at
            FROM users
@@ -95,11 +146,11 @@ export function registerCommands(bot) {
           [ctx.from.id]
         )
 
-        if (user.rowCount === 0) {
+        if (result.rowCount === 0) {
           return ctx.reply("Please send /start to register first.")
         }
 
-        const account = user.rows[0]
+        const account = result.rows[0]
 
         return ctx.reply(
           `MY ACCOUNT\n\n` +
@@ -114,24 +165,66 @@ export function registerCommands(bot) {
         )
       } catch (error) {
         console.error("[account] Failed:", error.message)
-        return ctx.reply("Unable to load account information. Please try again later.")
+        return ctx.reply(
+          "Unable to load account information. Please try again later."
+        )
+      }
+    }
+
+    if (choice === "My Wallet") {
+      try {
+        const userResult = await pool.query(
+          `SELECT id FROM users WHERE telegram_id = $1`,
+          [ctx.from.id]
+        )
+
+        if (userResult.rowCount === 0) {
+          return ctx.reply("Please send /start to register first.")
+        }
+
+        const balances = await getWalletBalances(userResult.rows[0].id)
+
+        const format = value =>
+          Number(value).toFixed(8)
+
+        return ctx.reply(
+          `MY WALLET\n\n` +
+          `Available Balance: ${format(balances.AVAILABLE)} USDT\n` +
+          `Invested Balance: ${format(balances.INVESTED)} USDT\n` +
+          `Recorded Profit: ${format(balances.PROFIT)} USDT\n\n` +
+          `Balances reflect posted ledger transactions only.`,
+          { reply_markup: backMenu }
+        )
+      } catch (error) {
+        console.error("[wallet] Failed:", error.message)
+        return ctx.reply(
+          "Unable to load wallet balances. Please try again later.",
+          { reply_markup: backMenu }
+        )
       }
     }
 
     const sections = {
-      "My Wallet": "MY WALLET\n\nYour verified wallet balances will appear here.",
-      "Investment Plans": "INVESTMENT PLANS\n\nAvailable plans will appear here after configuration and verification.",
-      "My Investments": "MY INVESTMENTS\n\nYour active investments will appear here.",
-      "Deposit": "DEPOSIT\n\nAutomatic deposit verification is not enabled yet. Do not send funds until an official deposit address is displayed.",
-      "Withdraw": "WITHDRAW\n\nWithdrawal services are not enabled yet.",
-      "Daily Profits": "DAILY PROFITS\n\nVerified profit records will appear here when available.",
-      "Referral Program": "REFERRAL PROGRAM\n\nYour referral details will appear here.",
-      "Transaction History": "TRANSACTION HISTORY\n\nYour transaction records will appear here.",
-      "Support": "SUPPORT\n\nPlease contact our support team."
+      "Investment Plans":
+        "INVESTMENT PLANS\n\nAvailable plans will appear here after configuration and verification.",
+      "My Investments":
+        "MY INVESTMENTS\n\nYour active investments will appear here.",
+      "Deposit":
+        "DEPOSIT\n\nAutomatic deposit verification is not enabled yet. Do not send funds until an official deposit address is displayed.",
+      "Withdraw":
+        "WITHDRAW\n\nWithdrawal services are not enabled yet.",
+      "Daily Profits":
+        "DAILY PROFITS\n\nVerified profit records will appear here when available.",
+      "Referral Program":
+        "REFERRAL PROGRAM\n\nYour referral details will appear here.",
+      "Transaction History":
+        "TRANSACTION HISTORY\n\nYour transaction records will appear here.",
+      "Support":
+        "SUPPORT\n\nPlease contact our support team."
     }
 
     if (sections[choice]) {
       return ctx.reply(sections[choice], { reply_markup: backMenu })
     }
   })
-                         }
+        }
