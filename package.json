@@ -1,7 +1,7 @@
 {
-  "name": "fadehost-telegram-starter-bot",
+  "name": "profino-telegram-bot",
   "version": "1.0.0",
-  "description": "A Telegram bot starter: commands, an inline button, an echo, polling or webhook mode. Hosted by FadeHost.",
+  "description": "PROFINO Telegram Platform",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -11,7 +11,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "grammy": "^1.30.0"
+    "grammy": "^1.30.0",
+    "pg": "^8.16.3"
   },
   "license": "MIT"
 }
