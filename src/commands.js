@@ -1,5 +1,7 @@
 
 import { Keyboard } from "grammy"
+import { randomBytes } from "node:crypto"
+import { pool } from "./database.js"
 
 const ADMIN_ID = 8810232463
 
@@ -15,12 +17,49 @@ const backMenu = new Keyboard()
   .text("⬅ Main Menu")
   .resized()
 
+async function getOrCreateUser(ctx) {
+  const telegramId = ctx.from.id
+
+  const result = await pool.query(
+    `INSERT INTO users
+      (telegram_id, username, first_name, last_name, referral_code, status)
+     VALUES ($1, $2, $3, $4, $5, 'active')
+     ON CONFLICT (telegram_id)
+     DO UPDATE SET
+       username = EXCLUDED.username,
+       first_name = EXCLUDED.first_name,
+       last_name = EXCLUDED.last_name
+     RETURNING id, telegram_id, username, first_name,
+               last_name, referral_code, status, created_at`,
+    [
+      telegramId,
+      ctx.from.username ?? null,
+      ctx.from.first_name ?? null,
+      ctx.from.last_name ?? null,
+      randomBytes(8).toString("hex")
+    ]
+  )
+
+  return result.rows[0]
+}
+
 export function registerCommands(bot) {
   bot.command("start", async (ctx) => {
-    await ctx.reply(
-      `Welcome to PROFINO, ${ctx.from?.first_name ?? "User"}!\n\nManage your account using the buttons below.`,
-      { reply_markup: mainMenu }
-    )
+    try {
+      const user = await getOrCreateUser(ctx)
+
+      if (user.status !== "active") {
+        return ctx.reply("Your account is not active. Please contact support.")
+      }
+
+      await ctx.reply(
+        `Welcome to PROFINO, ${user.first_name ?? "User"}!\n\nYour account is ready. Use the buttons below to continue.`,
+        { reply_markup: mainMenu }
+      )
+    } catch (error) {
+      console.error("[registration] Failed:", error.message)
+      await ctx.reply("Unable to load your account. Please try again later.")
+    }
   })
 
   bot.command("help", (ctx) =>
@@ -42,71 +81,57 @@ export function registerCommands(bot) {
   bot.on("message:text", async (ctx) => {
     const choice = ctx.message.text
 
-    switch (choice) {
-      case "⬅ Main Menu":
-        return ctx.reply("Main Menu", {
-          reply_markup: mainMenu
-        })
+    if (choice === "⬅ Main Menu") {
+      return ctx.reply("Main Menu", { reply_markup: mainMenu })
+    }
 
-      case "My Account":
-        return ctx.reply(
-          "MY ACCOUNT\n\nYour account information will appear here once registration is connected.",
-          { reply_markup: backMenu }
+    if (choice === "My Account") {
+      try {
+        const user = await pool.query(
+          `SELECT id, telegram_id, username, first_name,
+                  last_name, referral_code, status, created_at
+           FROM users
+           WHERE telegram_id = $1`,
+          [ctx.from.id]
         )
 
-      case "My Wallet":
-        return ctx.reply(
-          "MY WALLET\n\nWallet balances will appear here after account integration.",
-          { reply_markup: backMenu }
-        )
+        if (user.rowCount === 0) {
+          return ctx.reply("Please send /start to register first.")
+        }
 
-      case "Investment Plans":
-        return ctx.reply(
-          "INVESTMENT PLANS\n\nAvailable plans will be displayed here after configuration and verification.",
-          { reply_markup: backMenu }
-        )
+        const account = user.rows[0]
 
-      case "My Investments":
         return ctx.reply(
-          "MY INVESTMENTS\n\nYour active investments will appear here.",
+          `MY ACCOUNT\n\n` +
+          `Account ID: ${account.id}\n` +
+          `Telegram ID: ${account.telegram_id}\n` +
+          `Username: ${account.username ? "@" + account.username : "Not set"}\n` +
+          `Name: ${account.first_name ?? ""} ${account.last_name ?? ""}\n` +
+          `Status: ${account.status.toUpperCase()}\n` +
+          `Referral Code: ${account.referral_code}\n` +
+          `Joined: ${new Date(account.created_at).toLocaleDateString("en-GB")}`,
           { reply_markup: backMenu }
         )
+      } catch (error) {
+        console.error("[account] Failed:", error.message)
+        return ctx.reply("Unable to load account information. Please try again later.")
+      }
+    }
 
-      case "Deposit":
-        return ctx.reply(
-          "DEPOSIT\n\nAutomatic BEP20 deposit verification is not enabled yet.\n\nDo not send funds until an official deposit address is displayed.",
-          { reply_markup: backMenu }
-        )
+    const sections = {
+      "My Wallet": "MY WALLET\n\nYour verified wallet balances will appear here.",
+      "Investment Plans": "INVESTMENT PLANS\n\nAvailable plans will appear here after configuration and verification.",
+      "My Investments": "MY INVESTMENTS\n\nYour active investments will appear here.",
+      "Deposit": "DEPOSIT\n\nAutomatic deposit verification is not enabled yet. Do not send funds until an official deposit address is displayed.",
+      "Withdraw": "WITHDRAW\n\nWithdrawal services are not enabled yet.",
+      "Daily Profits": "DAILY PROFITS\n\nVerified profit records will appear here when available.",
+      "Referral Program": "REFERRAL PROGRAM\n\nYour referral details will appear here.",
+      "Transaction History": "TRANSACTION HISTORY\n\nYour transaction records will appear here.",
+      "Support": "SUPPORT\n\nPlease contact our support team."
+    }
 
-      case "Withdraw":
-        return ctx.reply(
-          "WITHDRAW\n\nWithdrawal services are not enabled yet.",
-          { reply_markup: backMenu }
-        )
-
-      case "Daily Profits":
-        return ctx.reply(
-          "DAILY PROFITS\n\nVerified profit records will appear here when available.",
-          { reply_markup: backMenu }
-        )
-
-      case "Referral Program":
-        return ctx.reply(
-          "REFERRAL PROGRAM\n\nYour personal referral link and referral statistics will appear here.",
-          { reply_markup: backMenu }
-        )
-
-      case "Transaction History":
-        return ctx.reply(
-          "TRANSACTION HISTORY\n\nYour deposits, withdrawals and other transactions will appear here.",
-          { reply_markup: backMenu }
-        )
-
-      case "Support":
-        return ctx.reply(
-          "SUPPORT\n\nOur support section will be available here.",
-          { reply_markup: backMenu }
-        )
+    if (sections[choice]) {
+      return ctx.reply(sections[choice], { reply_markup: backMenu })
     }
   })
-}
+                         }
