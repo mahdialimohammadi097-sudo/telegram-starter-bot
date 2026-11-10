@@ -433,6 +433,46 @@ export function registerAdminOps(bot) {
     }
   });
 
+  bot.command("adminschema", async (ctx) => {
+    if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    try {
+      const result = await pool.query(`
+        SELECT c.column_name, c.data_type, c.is_nullable,
+               tc.constraint_type,
+               ccu.table_name AS referenced_table,
+               ccu.column_name AS referenced_column
+        FROM information_schema.columns c
+        LEFT JOIN information_schema.key_column_usage kcu
+          ON kcu.table_schema = c.table_schema
+         AND kcu.table_name = c.table_name
+         AND kcu.column_name = c.column_name
+        LEFT JOIN information_schema.table_constraints tc
+          ON tc.constraint_schema = kcu.constraint_schema
+         AND tc.constraint_name = kcu.constraint_name
+        LEFT JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_schema = tc.constraint_schema
+         AND ccu.constraint_name = tc.constraint_name
+        WHERE c.table_schema = current_schema()
+          AND c.table_name = 'admin_audit_logs'
+        ORDER BY c.ordinal_position
+      `);
+      const lines = result.rows.map(row =>
+        row.column_name + " | " + row.data_type +
+        " | nullable: " + row.is_nullable +
+        (row.constraint_type ? " | " + row.constraint_type : "") +
+        (row.referenced_table ? " -> " + row.referenced_table + "." + row.referenced_column : "")
+      );
+      await ctx.reply(
+        "PROFINO — ADMIN AUDIT SCHEMA\n\n" +
+        (lines.length ? lines.join("\n") : "admin_audit_logs table not found.")
+      );
+    } catch (error) {
+      console.error("[admin-ops] schema diagnostic failed:", error);
+      await ctx.reply("Unable to inspect admin audit schema. Diagnostic: " +
+        String(error?.message || error).slice(0, 500));
+    }
+  });
+
   bot.command("adminlogs", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const auditWrite = await recordAdminActivity(ctx, "admin_activity_viewed");
