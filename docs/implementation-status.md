@@ -20,7 +20,7 @@ Percentages below describe implementation completeness in the audited source. A 
 | Referral program | 5% | Referral code is generated at registration; referral details and reward processing remain placeholders. |
 | Admin operations | 75% | Owner-only dashboard, user lookup/status operations, audit logging, persisted language preference and bilingual publishing/history workflows exist; some diagnostic/error screens still need localization and production verification. |
 | Scheduled channel publishing | 90% | Drafting, preview, approval, scheduling, history and interrupted-operation recovery exist; admin-facing preview, approval, scheduling and history messages now support English/Persian. Production end-to-end testing remains necessary. |
-| Internal and external monitoring | 95% | Internal Telegram/database checks and independent HTTP uptime workflow exist; alert delivery, recovery, and live health endpoints were verified. |
+| Internal and external monitoring | 90% (code) | Internal Telegram/database checks and independent HTTP uptime workflow exist; historical FadeHost health checks are recorded, but end-to-end external alert delivery and recovery are not yet independently verified. |
 | Security and financial risk controls | 50% | Private-chat checks, rate limiting and admin guards exist; custody, withdrawal approval, reconciliation, AML/KYC and financial risk controls are not complete. |
 | Admin language selector (English/Persian) | 70% | Persistent preference, language selector, dashboard, user operations, publishing previews, scheduler feedback, post history, and core admin diagnostic/error feedback are bilingual; a final sweep and production verification remain. |
 
