@@ -23,7 +23,6 @@ Percentages below describe implementation completeness in the audited source. A 
 | Internal and external monitoring | 95% | Internal Telegram/database checks and independent HTTP uptime workflow exist; alert delivery, recovery, and live health endpoints were verified. |
 | Security and financial risk controls | 50% | Private-chat checks, rate limiting and admin guards exist; custody, withdrawal approval, reconciliation, AML/KYC and financial risk controls are not complete. |
 | Admin language selector (English/Persian) | 70% | Persistent preference, language selector, dashboard, user operations, publishing previews, scheduler feedback, post history, and core admin diagnostic/error feedback are bilingual; a final sweep and production verification remain. |
-| Automated arbitrage engine | 0% | No exchange connectivity, executable strategy engine, order lifecycle, or reconciliation process was found in the reviewed source. |
 
 **No single overall completion percentage is published.** A simple average would give equal weight to monitoring and custody/financial execution, which would materially misrepresent readiness.
 
@@ -55,7 +54,7 @@ Percentages below describe implementation completeness in the audited source. A 
 7. Add integration tests with a disposable database and testnet-only payment flows; do not test with customer funds.
 
 ## Next safe implementation sequence
-- **Completed runtime foundation:** startup/readiness/reconnect/shutdown implementation and automated tests; live FadeHost smoke test remains pending.
+- **Completed runtime foundation:** startup/readiness/reconnect/shutdown implementation and automated tests; the Phase 1 audit records FadeHost deployment, `/healthz` HTTP 200, and owner-confirmed `/start`. Ongoing alert delivery still requires separate verification.
 - **Completed admin localization foundation:** persisted language preference and the principal admin workflows.
 - **Phase 1:** Production schema review and ledger invariant tests (read-only first); read-only schema diagnostics and exact eight-decimal helper hardening are merged in PR #29.
 - **Phase 3:** Referral attribution without monetary rewards.
