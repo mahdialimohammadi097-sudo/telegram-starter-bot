@@ -12,16 +12,25 @@
 - Deposit UI explicitly says automatic verification is disabled and warns users not to send funds until an official address is shown.
 - Withdrawal UI explicitly says withdrawals are disabled.
 
-## What is not implemented or not evidenced in this repository
+## Subsequent isolated-branch evidence (not merged into main)
+
+The following work was added after the revision audited above. It is evidence of a development foundation only; it does not change the audit conclusion for the current `main` branch and does not authorize production use.
+
+- Draft PR [#35](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/pull/35) adds an isolated PostgreSQL ledger-posting service with exact eight-decimal USDT normalization, balanced journal validation, transaction-scoped idempotency locking, account-row locking, and rollback handling. It is not wired to Telegram/customer actions.
+- Draft PR [#36](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/pull/36) adds disposable PostgreSQL 17 integration tests using a per-run temporary schema.
+- GitHub Actions run [#239](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/42914533133) passed on PR #36 head `5e5cc5579666090b8e98a91bd9804d2d1bdfc0e1`. The job initialized the PostgreSQL service, installed dependencies, checked JavaScript syntax, and ran `npm test`. The PR reports 43 tests passed, 0 failed, 0 skipped; the two PostgreSQL concurrency cases executed rather than being skipped.
+- The integration schema is deliberately minimal. It does not reproduce the actual FadeHost production schema, deferred trigger/function bodies, all production constraints, or immutable-posting rules. Therefore this CI result is not production-schema verification.
+
+## What is not implemented or not evidenced in the current main branch
 
 - No ledger schema migration or DDL is present in the repository tree for `ledger_accounts`, `ledger_transactions`, or `ledger_entries`. The schema diagnostics can inspect these tables if they exist, but cannot prove the live database has the required structure.
-- No production ledger-posting service was found that atomically writes balanced debit/credit entries and transitions a transaction to `posted`.
-- No verified idempotency-key enforcement, duplicate deposit protection, immutable journal enforcement, reversal workflow, or reconciliation job was found.
-- No transaction-level check was found that prevents an `AVAILABLE` account from becoming negative.
+- No ledger-posting service is merged into the current `main` branch. The service in draft PR #35 remains isolated and is not production-enabled.
+- No verified production idempotency enforcement, duplicate deposit protection, immutable journal enforcement, reversal workflow, or reconciliation job is available in the current main branch.
+- No production-verified transaction-level control is evidenced that prevents an `AVAILABLE` account from becoming negative.
 - The balance query is a display read model; it is not a financial control and must not be treated as authorization to withdraw or invest.
 - Investment, deposit, withdrawal, profit accrual/distribution, and referral reward execution remain disabled or placeholders in the customer flow.
 
-## Safe code improvements in this revision
+## Safe code improvements in the audited revision
 
 - Added exact eight-decimal USDT formatting using `BigInt`-based integer units; wallet display no longer converts database numeric strings to floating-point values.
 - Added pure ledger invariant helpers and unit tests for balanced entries, positive amounts, currency grouping, and non-negative available-balance checks. These are validation primitives only; they do not create or post ledger transactions.
@@ -29,10 +38,10 @@
 ## Release blockers before real funds
 
 1. Obtain a read-only snapshot of the actual production schema and verify columns, precision, foreign keys, unique constraints, indexes, and triggers.
-2. Add versioned migrations for the ledger schema, including a documented account model and transaction state machine.
-3. Implement a single atomic posting service with per-currency debit/credit equality, unique idempotency keys, row-level locking, and no-negative-available-balance enforcement.
+2. Reconcile the draft ledger foundation with the exact production DDL and deferred trigger/function definitions; add migrations only after an independently reviewed schema design.
+3. Verify production idempotency, transaction rollback, concurrent duplicate requests, concurrent available-balance debits, and immutable posted-row behavior against the real schema contract in a disposable database.
 4. Make posted journal rows immutable; corrections must use compensating/reversal entries with audit records.
-5. Add integration tests against a disposable PostgreSQL database, including concurrency, duplicate requests, rollback, and reconciliation.
-6. Complete legal, custody, sanctions/AML, and operational review before enabling deposits, withdrawals, investment allocations, or live arbitrage.
+5. Add reconciliation and operational recovery procedures, then test them independently.
+6. Complete legal, custody, sanctions/AML, and operational review before enabling deposits, withdrawals, investment allocations, or other real-funds flows.
 
-**Conclusion:** The current code can display posted-ledger balances, but it is not yet a complete or production-safe financial ledger. No real-money workflow should be enabled on the basis of the current wallet screen or these helper tests.
+**Conclusion:** The current main branch can display posted-ledger balances and contains validation helpers, but it is not a complete or production-safe financial ledger. Draft PRs #35 and #36 are useful isolated development work, not production approval. No real-money workflow should be enabled on the basis of the wallet screen, mocked tests, or the minimal-schema PostgreSQL integration suite.
