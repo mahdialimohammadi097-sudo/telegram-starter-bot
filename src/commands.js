@@ -161,6 +161,38 @@ async function showScheduledPosts(ctx) {
 }
 
 export function registerCommands(bot) {
+  // Enforce account status on every private-chat interaction, not only /start.
+  // The owner account is exempt and remains protected from suspension.
+  bot.use(async (ctx, next) => {
+    if (!ctx.from || ctx.from.id === ADMIN_ID || ctx.chat?.type !== "private") {
+      return next();
+    }
+
+    try {
+      const account = await pool.query(
+        "SELECT status FROM users WHERE telegram_id = $1",
+        [ctx.from.id]
+      );
+
+      if (account.rowCount && account.rows[0].status !== "active") {
+        const message = "Your account is not active. Please contact support.";
+        if (ctx.callbackQuery) {
+          return ctx.answerCallbackQuery({ text: message, show_alert: true });
+        }
+        return ctx.reply(message);
+      }
+    } catch (error) {
+      console.error("[access-control] status check failed:", error.message);
+      const message = "We cannot verify your account right now. Please try again later.";
+      if (ctx.callbackQuery) {
+        return ctx.answerCallbackQuery({ text: message, show_alert: true });
+      }
+      return ctx.reply(message);
+    }
+
+    return next();
+  });
+
   registerPostManagement(bot);
   registerPostHistory(bot);
   registerAdminOps(bot);
