@@ -27,7 +27,7 @@ test("ledger entries must balance per currency without rounding", () => {
   ]), /Unbalanced/);
   assert.throws(() => assertBalancedLedgerEntries([
     { currency: "USDT", entry_type: "debit", amount: "1.000000001" },
-    { currency: "USDT", entry_type: "credit", amount: "1"
+    { currency: "USDT", entry_type: "credit", amount: "1" }
   ]), /exceeds eight decimal places/);
 });
 
