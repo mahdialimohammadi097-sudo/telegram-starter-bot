@@ -13,8 +13,8 @@ test("formats existing core tables with columns and constraints", () => {
       { table_name: "users", constraint_name: "users_pkey", constraint_type: "p", definition: "PRIMARY KEY (id)" }
     ]
   });
-  assert.match(messages[0], /telegram_id \\| bigint \\| nullable: NO/);
-  assert.match(messages[0], /users_pkey \\| p \\| PRIMARY KEY/);
+  assert.match(messages[0], /telegram_id \| bigint \| nullable: NO/);
+  assert.match(messages[0], /users_pkey \| p \| PRIMARY KEY/);
 });
 
 test("clearly reports expected tables missing from the live schema", () => {
@@ -24,5 +24,5 @@ test("clearly reports expected tables missing from the live schema", () => {
     columns: [],
     constraints: []
   });
-  assert.equal(messages[0], "TABLE: ledger_entries\\nNOT FOUND");
+  assert.equal(messages[0], "TABLE: ledger_entries\nNOT FOUND");
 });
