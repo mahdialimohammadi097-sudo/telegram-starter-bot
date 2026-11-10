@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { formatUsdt, toUsdtUnits, toUsdtUnitsExact, assertBalancedLedgerEntries, assertNonNegativeAvailableBalance } from "./ledger-safety.js";
+import { isConfirmationCurrent } from "./admin-status-guard.js";
 
 test("USDT formatting preserves eight-decimal precision", () => {
   assert.equal(formatUsdt("0.00000001"), "0.00000001");
@@ -70,8 +71,6 @@ test("ledger balancing requires at least two valid entries", () => {
     { currency: "", entry_type: "credit", amount: "1" }
   ]), /Invalid ledger entry/);
 });
-
-import { isConfirmationCurrent } from "./admin-status-guard.js";
 
 test("admin status confirmation rejects stale, repeated, and unknown transitions", () => {
   assert.equal(isConfirmationCurrent("active", "active", "blocked"), true);
