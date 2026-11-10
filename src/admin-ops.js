@@ -462,9 +462,52 @@ export function registerAdminOps(bot) {
         (row.constraint_type ? " | " + row.constraint_type : "") +
         (row.referenced_table ? " -> " + row.referenced_table + "." + row.referenced_column : "")
       );
+      const adminColumns = await pool.query(`
+        SELECT c.column_name, c.data_type, c.is_nullable,
+               c.column_default, tc.constraint_type,
+               ccu.table_name AS referenced_table,
+               ccu.column_name AS referenced_column
+        FROM information_schema.columns c
+        LEFT JOIN information_schema.key_column_usage kcu
+          ON kcu.table_schema = c.table_schema
+         AND kcu.table_name = c.table_name
+         AND kcu.column_name = c.column_name
+        LEFT JOIN information_schema.table_constraints tc
+          ON tc.constraint_schema = kcu.constraint_schema
+         AND tc.constraint_name = kcu.constraint_name
+        LEFT JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_schema = tc.constraint_schema
+         AND ccu.constraint_name = tc.constraint_name
+        WHERE c.table_schema = current_schema()
+          AND c.table_name = 'admin_users'
+        ORDER BY c.ordinal_position
+      `);
+      const membership = await pool.query(`
+        SELECT u.id AS users_id, u.telegram_id,
+               (au.user_id IS NOT NULL) AS admin_record_exists
+        FROM users u
+        LEFT JOIN admin_users au ON au.user_id = u.id
+        WHERE u.telegram_id = $1
+        LIMIT 1
+      `, [ctx.from.id]);
+      const adminLines = adminColumns.rows.map(row =>
+        row.column_name + " | " + row.data_type +
+        " | nullable: " + row.is_nullable +
+        (row.column_default ? " | default: " + row.column_default : "") +
+        (row.constraint_type ? " | " + row.constraint_type : "") +
+        (row.referenced_table ? " -> " + row.referenced_table + "." + row.referenced_column : "")
+      );
+      const membershipLine = membership.rows.length
+        ? "Super Admin users.id: " + membership.rows[0].users_id +
+          " | admin_users record exists: " + membership.rows[0].admin_record_exists
+        : "Super Admin Telegram account is not present in users table.";
+
       await ctx.reply(
-        "PROFINO — ADMIN AUDIT SCHEMA\n\n" +
-        (lines.length ? lines.join("\n") : "admin_audit_logs table not found.")
+        "PROFINO — ADMIN AUDIT SCHEMA\\n\\n" +
+        (lines.length ? lines.join("\\n") : "admin_audit_logs table not found.") +
+        "\\n\\nADMIN_USERS TABLE SCHEMA\\n" +
+        (adminLines.length ? adminLines.join("\\n") : "admin_users table not found.") +
+        "\\n\\nADMIN MEMBERSHIP CHECK\\n" + membershipLine
       );
     } catch (error) {
       console.error("[admin-ops] schema diagnostic failed:", error);
