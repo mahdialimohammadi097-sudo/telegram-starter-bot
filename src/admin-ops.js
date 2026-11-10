@@ -22,13 +22,13 @@ async function getAdminLanguage(ctx) {
   return result.rows[0]?.language === "fa" ? "fa" : "en";
 }
 
-function formatDate(value) {
+function formatDate(value, language = "en") {
   if (!value) return "—";
-  return new Date(value).toLocaleString("en-GB", {
+  return new Date(value).toLocaleString(language === "fa" ? "fa-IR" : "en-GB", {
     timeZone: "UTC",
     dateStyle: "medium",
     timeStyle: "short"
-  }) + " UTC";
+  }) + (language === "fa" ? " (UTC)" : " UTC");
 }
 
 function dashboardKeyboard(language = "en") {
@@ -214,6 +214,7 @@ async function showUsers(ctx, page = 0, edit = false) {
 }
 
 async function showUser(ctx, telegramId, edit = false) {
+  const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     `SELECT id, telegram_id, username, first_name, last_name,
             status, referral_code, created_at
@@ -222,69 +223,94 @@ async function showUser(ctx, telegramId, edit = false) {
   );
 
   if (!result.rowCount) {
-    const message = "User not found / کاربر پیدا نشد.";
-    if (edit) return ctx.editMessageText(message, { reply_markup: dashboardKeyboard() });
+    const message = language === "fa" ? "کاربر پیدا نشد." : "User not found.";
+    if (edit) return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language) });
     return ctx.reply(message);
   }
 
   const user = result.rows[0];
-  const message = [
-    "PROFINO — USER DETAILS",
-    "جزئیات کاربر",
-    "",
-    "Database ID: " + user.id,
-    "Telegram ID: " + user.telegram_id,
-    "Username: " + (user.username ? "@" + user.username : "Not set"),
-    "Name: " + [user.first_name, user.last_name].filter(Boolean).join(" "),
-    "Status / وضعیت: " + user.status.toUpperCase(),
-    "Referral code: " + (user.referral_code || "—"),
-    "Registered / عضویت: " + formatDate(user.created_at),
-    "",
-    "User status changes are logged.",
-    "تغییر وضعیت کاربر در گزارش فعالیت ثبت می‌شود."
-  ].join("\n");
+  const message = language === "fa"
+    ? [
+        "پروفینو — جزئیات کاربر",
+        "",
+        "شناسه پایگاه داده: " + user.id,
+        "شناسه تلگرام: " + user.telegram_id,
+        "نام کاربری: " + (user.username ? "@" + user.username : "تنظیم نشده"),
+        "نام: " + [user.first_name, user.last_name].filter(Boolean).join(" "),
+        "وضعیت: " + user.status.toUpperCase(),
+        "کد معرف: " + (user.referral_code || "—"),
+        "تاریخ عضویت: " + formatDate(user.created_at, language),
+        "",
+        "تغییر وضعیت کاربر در گزارش فعالیت ثبت می‌شود."
+      ].join("\n")
+    : [
+        "PROFINO — USER DETAILS",
+        "",
+        "Database ID: " + user.id,
+        "Telegram ID: " + user.telegram_id,
+        "Username: " + (user.username ? "@" + user.username : "Not set"),
+        "Name: " + [user.first_name, user.last_name].filter(Boolean).join(" "),
+        "Status: " + user.status.toUpperCase(),
+        "Referral code: " + (user.referral_code || "—"),
+        "Registered: " + formatDate(user.created_at, language),
+        "",
+        "User status changes are logged."
+      ].join("\n");
 
   const keyboard = new InlineKeyboard();
   if (Number(user.telegram_id) !== SUPER_ADMIN_ID) {
     if (user.status === "active") {
-      keyboard.text("Suspend / تعلیق", "admin_user_action:" + user.telegram_id + ":blocked");
+      keyboard.text(language === "fa" ? "تعلیق کاربر" : "Suspend user", "admin_user_action:" + user.telegram_id + ":blocked");
     } else {
-      keyboard.text("Activate / فعال‌سازی", "admin_user_action:" + user.telegram_id + ":active");
+      keyboard.text(language === "fa" ? "فعال‌سازی کاربر" : "Activate user", "admin_user_action:" + user.telegram_id + ":active");
     }
   }
-  keyboard.row().text("Users / کاربران", "admin_users:0")
-    .text("Dashboard / داشبورد", "admin_home");
+  keyboard.row()
+    .text(language === "fa" ? "کاربران" : "Users", "admin_users:0")
+    .text(language === "fa" ? "داشبورد" : "Dashboard", "admin_home");
 
   if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
 async function showPosts(ctx, edit = false) {
+  const language = await getAdminLanguage(ctx);
   const result = await pool.query(`
     SELECT status, COUNT(*)::int AS total
     FROM scheduled_posts
     GROUP BY status
     ORDER BY status
   `);
-  const lines = result.rows.map(row => row.status.toUpperCase() + ": " + row.total);
-  const message = [
-    "PROFINO — POST OPERATIONS",
-    "عملیات پست‌ها",
-    "",
-    lines.length ? lines.join("\n") : "No posts found.",
-    "",
-    "Publication always requires a fresh manual approval.",
-    "انتشار همیشه به تأیید دستی جدید نیاز دارد."
-  ].join("\n");
+  const lines = result.rows.map(row =>
+    language === "fa"
+      ? row.status.toUpperCase() + ": " + row.total
+      : row.status.toUpperCase() + ": " + row.total
+  );
+  const message = language === "fa"
+    ? [
+        "پروفینو — عملیات انتشار",
+        "",
+        lines.length ? lines.join("\n") : "پستی پیدا نشد.",
+        "",
+        "انتشار هر پست به تأیید دستی جدید نیاز دارد."
+      ].join("\n")
+    : [
+        "PROFINO — POST OPERATIONS",
+        "",
+        lines.length ? lines.join("\n") : "No posts found.",
+        "",
+        "Publication always requires a fresh manual approval."
+      ].join("\n");
   const keyboard = new InlineKeyboard()
-    .text("Post History / تاریخچه پست‌ها", "admin_posthistory")
+    .text(language === "fa" ? "تاریخچه انتشار" : "Post history", "admin_posthistory")
     .row()
-    .text("Back / بازگشت", "admin_home");
+    .text(language === "fa" ? "بازگشت" : "Back", "admin_home");
   if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
 async function showAuditLog(ctx, edit = false) {
+  const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     `SELECT a.action, a.target_user_id, u.telegram_id AS target_telegram_id,
             a.details, a.created_at
@@ -294,51 +320,77 @@ async function showAuditLog(ctx, edit = false) {
      LIMIT 10`
   );
   const lines = result.rows.map(row =>
-    formatDate(row.created_at) + "\n" +
+    formatDate(row.created_at, language) + "\n" +
     row.action.toUpperCase() +
-    (row.target_telegram_id ? " | Telegram: " + row.target_telegram_id : "") +
-    (row.details?.new_status ? " | " + row.details.new_status.toUpperCase() : "")
+    (row.target_telegram_id
+      ? (language === "fa" ? " | شناسه تلگرام: " : " | Telegram: ") + row.target_telegram_id
+      : "") +
+    (row.details?.new_status
+      ? (language === "fa" ? " | وضعیت جدید: " : " | New status: ") + row.details.new_status.toUpperCase()
+      : "")
   );
-  const message = [
-    "PROFINO — USER STATUS AUDIT",
-    "گزارش تغییر وضعیت کاربران",
-    "",
-    lines.length ? lines.join("\n\n") : "No admin activity recorded yet."
-  ].join("\n");
-  const keyboard = new InlineKeyboard().text("Back / بازگشت", "admin_home");
+  const message = language === "fa"
+    ? [
+        "پروفینو — گزارش فعالیت مدیر",
+        "",
+        lines.length ? lines.join("\n\n") : "هنوز فعالیت مدیریتی ثبت نشده است."
+      ].join("\n")
+    : [
+        "PROFINO — ADMIN ACTIVITY AUDIT",
+        "",
+        lines.length ? lines.join("\n\n") : "No admin activity recorded yet."
+      ].join("\n");
+  const keyboard = new InlineKeyboard().text(language === "fa" ? "بازگشت" : "Back", "admin_home");
   if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
 async function confirmUserStatus(ctx, telegramId, newStatus) {
+  const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     "SELECT telegram_id, status FROM users WHERE telegram_id = $1",
     [telegramId]
   );
   if (!result.rowCount || Number(telegramId) === SUPER_ADMIN_ID) {
-    return ctx.answerCallbackQuery({ text: "User unavailable.", show_alert: true });
+    return ctx.answerCallbackQuery({
+      text: language === "fa" ? "کاربر در دسترس نیست." : "User unavailable.",
+      show_alert: true
+    });
   }
 
   const current = result.rows[0];
   if (current.status === newStatus) {
-    return ctx.answerCallbackQuery({ text: "No status change is needed." });
+    return ctx.answerCallbackQuery({
+      text: language === "fa" ? "نیازی به تغییر وضعیت نیست." : "No status change is needed."
+    });
   }
 
   const action = newStatus === "active" ? "activate" : "suspend";
   const keyboard = new InlineKeyboard()
-    .text("Confirm / تأیید", "admin_user_confirm:" + telegramId + ":" + newStatus + ":" + current.status)
-    .text("Cancel / انصراف", "admin_user:" + telegramId);
+    .text(language === "fa" ? "تأیید" : "Confirm", "admin_user_confirm:" + telegramId + ":" + newStatus + ":" + current.status)
+    .text(language === "fa" ? "انصراف" : "Cancel", "admin_user:" + telegramId);
 
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText(
-    "CONFIRM USER " + action.toUpperCase() + "\n" +
-    "تأیید " + (newStatus === "active" ? "فعال‌سازی" : "تعلیق") + " کاربر" +
-    "\n\nTelegram ID: " + telegramId +
-    "\nCurrent status: " + current.status.toUpperCase() +
-    "\nNew status: " + newStatus.toUpperCase() +
-    "\n\nThis does not move or alter funds.",
-    { reply_markup: keyboard }
-  );
+  const message = language === "fa"
+    ? [
+        "تأیید " + (newStatus === "active" ? "فعال‌سازی" : "تعلیق") + " کاربر",
+        "",
+        "شناسه تلگرام: " + telegramId,
+        "وضعیت فعلی: " + current.status.toUpperCase(),
+        "وضعیت جدید: " + newStatus.toUpperCase(),
+        "",
+        "این عملیات هیچ وجهی را جابه‌جا یا تغییر نمی‌دهد."
+      ].join("\n")
+    : [
+        "CONFIRM USER " + action.toUpperCase(),
+        "",
+        "Telegram ID: " + telegramId,
+        "Current status: " + current.status.toUpperCase(),
+        "New status: " + newStatus.toUpperCase(),
+        "",
+        "This does not move or alter funds."
+      ].join("\n");
+  await ctx.editMessageText(message, { reply_markup: keyboard });
 }
 
 async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
@@ -468,7 +520,7 @@ async function showAdminLanguage(ctx, edit = false) {
     .text((language === "en" ? "✓ " : "") + "English", "admin_language_set:en")
     .text((language === "fa" ? "✓ " : "") + "فارسی", "admin_language_set:fa")
     .row()
-    .text("Back / بازگشت", "admin_home");
+    .text(language === "fa" ? "بازگشت" : "Back", "admin_home");
   const message = language === "fa"
     ? "تنظیم زبان پنل مدیریت\n\nزبان موردنظر را انتخاب کنید. این تنظیم فقط روی پنل خصوصی ادمین اثر دارد؛ رابط کاربران PROFINO انگلیسی باقی می‌ماند."
     : "ADMIN PANEL LANGUAGE\n\nChoose the language for the private admin panel. This preference does not change the customer-facing PROFINO interface, which remains English.";
