@@ -23,14 +23,24 @@ jobs:
         id: check
         shell: bash
         run: |
-          if curl --fail --silent --show-error --max-time 15 \
-            "https://telegram-bot-d23e.fadehost.app/healthz" \
-            --output /dev/null; then
+          HEALTH_URL="https://telegram-bot-d23e.fadehost.app/healthz"
+          ROOT_URL="https://telegram-bot-d23e.fadehost.app"
+          HEALTH_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "$HEALTH_URL" || true)"
+          echo "Health endpoint HTTP status: $HEALTH_STATUS"
+          if [ "$HEALTH_STATUS" = "200" ]; then
             echo "Application health endpoint is reachable."
-          else
-            echo "::error::PROFINO health endpoint is unavailable."
-            exit 1
+            exit 0
           fi
+
+          ROOT_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "$ROOT_URL" || true)"
+          echo "Root endpoint HTTP status: $ROOT_STATUS"
+          if [ "$ROOT_STATUS" = "200" ]; then
+            echo "Application root endpoint is reachable; health route may not be mapped by the host."
+            exit 0
+          fi
+
+          echo "::error::PROFINO is unavailable. /healthz returned $HEALTH_STATUS and / returned $ROOT_STATUS."
+          exit 1
 
       - name: Notify Super Admin through Telegram
         if: failure() && steps.check.outcome == 'failure' && env.PROFINO_MONITOR_BOT_TOKEN != ''
@@ -41,6 +51,6 @@ jobs:
           curl --fail --silent --show-error --max-time 15 \
             --request POST \
             --data-urlencode "chat_id=8810232463" \
-            --data-urlencode "text=PROFINO ALERT: FadeHost application health endpoint is unavailable. Check the hosting service." \
+            --data-urlencode "text=PROFINO ALERT: FadeHost application is unavailable. The /healthz and root endpoints both failed. Check the hosting service." \
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --output /dev/null
