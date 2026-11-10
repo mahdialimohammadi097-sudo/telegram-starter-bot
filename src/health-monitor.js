@@ -70,11 +70,12 @@ export function startHealthMonitor({
   }
 
   // Run once immediately, then at a fixed interval. This never receives Telegram updates.
-  void check();
+  const ready = check();
   const timer = setInterval(() => void check(), intervalMs);
   timer.unref?.();
 
   return {
+    ready,
     stop() {
       clearInterval(timer);
     },

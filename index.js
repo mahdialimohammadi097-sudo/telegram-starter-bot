@@ -12,6 +12,7 @@ import { inspectCoreSchema } from "./src/database-diagnostics.js";
 import { formatStartupHealthReport } from "./src/health-report.js";
 import { startHealthMonitor } from "./src/health-monitor.js";
 import { createRuntimeHealthState } from "./src/runtime-health.js";
+import { startHealthHttpServer } from "./src/health-http.js";
 
 const ADMIN_ID = 8810232463;
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -43,57 +44,6 @@ let scheduler = null;
 let shuttingDown = false;
 let shutdownPromise = null;
 
-function startHealthHttpServer() {
-  const server = http.createServer((req, res) => {
-    const pathname = new URL(req.url || "/", "http://localhost").pathname;
-
-    if (req.method === "GET" && pathname === "/healthz") {
-      const state = runtimeHealth.snapshot();
-      const status = state.ready ? 200 : 503;
-      res.writeHead(status, {
-        "content-type": "application/json; charset=utf-8",
-        "cache-control": "no-store"
-      });
-      return res.end(JSON.stringify(state));
-    }
-
-    if (req.method === "GET" && pathname === "/livez") {
-      res.writeHead(200, {
-        "content-type": "text/plain; charset=utf-8",
-        "cache-control": "no-store"
-      });
-      return res.end("alive");
-    }
-
-    if (webhookHandler && req.method === "POST" && pathname === "/telegram") {
-      return webhookHandler(req, res);
-    }
-
-    if (req.method === "GET" && pathname === "/") {
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-      return res.end(`@${botUsername} is running`);
-    }
-
-    res.writeHead(404);
-    res.end();
-  });
-
-  return new Promise((resolve, reject) => {
-    const onError = (error) => {
-      server.off("listening", onListening);
-      reject(error);
-    };
-    const onListening = () => {
-      server.off("error", onError);
-      console.log(`[health] HTTP endpoints listening on port ${port}`);
-      resolve(server);
-    };
-
-    server.once("error", onError);
-    server.once("listening", onListening);
-    server.listen(port);
-  });
-}
 
 function explainTelegramError(error) {
   const code = error?.error_code ?? error?.response?.error_code;
@@ -250,7 +200,12 @@ async function startPolling() {
 }
 
 async function main() {
-  healthServer = await startHealthHttpServer();
+  healthServer = await startHealthHttpServer({
+    port,
+    runtimeHealth,
+    getBotUsername: () => botUsername,
+    getWebhookHandler: () => webhookHandler
+  });
 
   const dbResult = await retryUntilAvailable(
     testDatabaseConnection,
@@ -267,6 +222,7 @@ async function main() {
 
   const me = await retryUntilAvailable(() => bot.api.getMe(), "Telegram API authentication");
   botUsername = me.username;
+  runtimeHealth.setTelegramApiConnected(true);
   console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
 
   await sendStartupReport(me.username);
