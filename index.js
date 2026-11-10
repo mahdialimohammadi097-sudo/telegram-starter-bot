@@ -271,7 +271,7 @@ async function main() {
 
   await sendStartupReport(me.username);
 
-  const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\\/$/, "");
+  const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
   healthMonitor = startHealthMonitor({
     bot,
     pool,
@@ -290,7 +290,6 @@ async function main() {
   scheduler = startScheduler(bot);
 
   if (mode === "webhook") {
-    const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
     if (!webhookUrl.startsWith("https://")) {
       throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
     }
@@ -298,10 +297,10 @@ async function main() {
     const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined;
     webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
 
-    await bot.api.setWebhook(`${webhookUrl}/telegram`, {
+    await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
       secret_token: secret,
       drop_pending_updates: false
-    });
+    }), "Telegram webhook registration");
 
     runtimeHealth.setTelegramReceiverActive(true);
     console.log(`[bot] webhook registered at ${webhookUrl}/telegram`);
