@@ -99,7 +99,7 @@ async function main() {
   }
 
   // Start read-only periodic service monitoring. It does not receive Telegram updates.
-  const healthMonitor = startHealthMonitor({ bot, pool })
+  startHealthMonitor({ bot, pool })
   console.log("[health] automated monitor initialized (60-second interval).")
 
   // Start the PROFINO scheduled-post system.
