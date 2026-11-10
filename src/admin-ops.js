@@ -701,7 +701,9 @@ export function registerAdminOps(bot) {
         "Read-only inspection. No records or schema were changed."
       );
       for (const section of sections) {
-        await ctx.reply(section);
+        for (let offset = 0; offset < section.length; offset += 3500) {
+          await ctx.reply(section.slice(offset, offset + 3500));
+        }
       }
     } catch (error) {
       console.error("[admin-ops] core database schema inspection failed:", error);
