@@ -221,12 +221,15 @@ export async function postLedgerTransaction({
       );
     }
 
-    await client.query(
+    const posted = await client.query(
       `UPDATE ledger_transactions
        SET status = 'posted'
        WHERE id = $1 AND status = 'pending'`,
       [transactionId]
     );
+    if (posted.rowCount !== 1) {
+      throw new Error("Ledger transaction could not transition from pending to posted");
+    }
 
     await client.query("COMMIT");
     transactionOpen = false;
