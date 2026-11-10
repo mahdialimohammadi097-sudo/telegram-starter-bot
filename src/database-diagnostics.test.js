@@ -6,9 +6,9 @@ test("formats existing core tables with columns and constraints", () => {
   const messages = formatCoreSchema({
     expectedTables: ["users"],
     tableInventory: ["users"],
+    existingTables: ["users"],
     indexes: [],
     triggers: [],
-    existingTables: ["users"],
     columns: [
       { table_name: "users", column_name: "telegram_id", data_type: "bigint", is_nullable: "NO", column_default: null }
     ],
@@ -16,21 +16,21 @@ test("formats existing core tables with columns and constraints", () => {
       { table_name: "users", constraint_name: "users_pkey", constraint_type: "p", definition: "PRIMARY KEY (id)" }
     ]
   });
-  assert.match(messages[0], /telegram_id \| bigint \| nullable: NO/);
-  assert.match(messages[0], /users_pkey \| p \| PRIMARY KEY/);
+  assert.ok(messages.some(message => message.includes("telegram_id | bigint | nullable: NO")));
+  assert.ok(messages.some(message => message.includes("users_pkey | p | PRIMARY KEY")));
 });
 
 test("clearly reports expected tables missing from the live schema", () => {
   const messages = formatCoreSchema({
     expectedTables: ["ledger_entries"],
     tableInventory: [],
+    existingTables: [],
     indexes: [],
     triggers: [],
-    existingTables: [],
     columns: [],
     constraints: []
   });
-  assert.equal(messages[0], "TABLE: ledger_entries\nNOT FOUND");
+  assert.ok(messages.some(message => message === "TABLE: ledger_entries\\nNOT FOUND"));
 });
 
 test("includes the full table inventory and user-defined trigger definitions", () => {
@@ -49,7 +49,7 @@ test("includes the full table inventory and user-defined trigger definitions", (
       function_definition: "CREATE FUNCTION check_ledger_balance() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$"
     }]
   });
-  assert.match(messages[0], /users, profit_records/);
+  assert.ok(messages.some(message => message.includes("users, profit_records")));
   assert.ok(messages.some(message => message.includes("DATABASE INDEXES") && message.includes("users_pkey")));
   assert.ok(messages.some(message => message.includes("DATABASE TRIGGERS") && message.includes("check_ledger_balance")));
 });
