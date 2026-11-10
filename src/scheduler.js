@@ -1,6 +1,7 @@
 
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
+import { getAdminLanguage, adminText } from "./admin-language.js";
 
 const ADMIN_ID = 8810232463;
 const CHANNEL_USERNAME = "@PROFINO1";
@@ -78,6 +79,7 @@ async function claimScheduledPosts() {
 }
 
 async function sendPreview(bot, post) {
+  const language = await getAdminLanguage({ from: { id: ADMIN_ID } });
   try {
     const scheduledTime = new Date(post.scheduled_at).toLocaleString(
       "en-GB",
@@ -89,26 +91,26 @@ async function sendPreview(bot, post) {
     );
 
     const preview = [
-      "PROFINO — POST PREVIEW",
+      adminText(language, "PROFINO — POST PREVIEW", "پروفینو — پیش‌نمایش پست"),
       "",
-      `Post ID: ${post.id}`,
-      `Title: ${post.title}`,
+      adminText(language, "Post ID: ", "شناسه پست: ") + post.id,
+      adminText(language, "Title: ", "عنوان: ") + post.title,
       "",
       post.content,
       "",
-      `Scheduled time: ${scheduledTime} UTC`,
+      adminText(language, "Scheduled time: " + scheduledTime + " UTC", "زمان‌بندی: " + scheduledTime + " (UTC)"),
       "",
-      "This post will NOT be published until you approve it."
+      adminText(language, "This post will NOT be published until you approve it.", "این پست تا زمان تأیید شما منتشر نخواهد شد.")
     ].join("\n");
 
     const keyboard = new InlineKeyboard()
-      .text("Approve & Publish", `post_approve:${post.id}`)
-      .text("Reject", `post_reject:${post.id}`)
+      .text(adminText(language, "Approve & Publish", "تأیید و انتشار"), `post_approve:${post.id}`)
+      .text(adminText(language, "Reject", "رد کردن"), `post_reject:${post.id}`)
       .row()
-      .text("Edit Post", `post_edit:${post.id}`)
-      .text("Reschedule", `post_time:${post.id}`)
+      .text(adminText(language, "Edit Post", "ویرایش پست"), `post_edit:${post.id}`)
+      .text(adminText(language, "Reschedule", "تغییر زمان"), `post_time:${post.id}`)
       .row()
-      .text("Cancel Post", `post_cancel:${post.id}`);
+      .text(adminText(language, "Cancel Post", "لغو پست"), `post_cancel:${post.id}`);
 
     const message = await bot.api.sendMessage(
       ADMIN_ID,
@@ -181,12 +183,13 @@ async function updateAdminMessage(ctx, text) {
 }
 
 async function handlePostAction(ctx) {
+  const language = await getAdminLanguage(ctx);
   if (
     ctx.from?.id !== ADMIN_ID ||
     ctx.callbackQuery.message?.chat?.id !== ADMIN_ID
   ) {
     await ctx.answerCallbackQuery({
-      text: "Unauthorized.",
+      text: adminText(language, "Unauthorized.", "دسترسی غیرمجاز است."),
       show_alert: true
     });
     return;
@@ -198,7 +201,7 @@ async function handlePostAction(ctx) {
 
   if (!match) {
     await ctx.answerCallbackQuery({
-      text: "Invalid action."
+      text: adminText(language, "Invalid action.", "عملیات نامعتبر است.")
     });
     return;
   }
@@ -221,25 +224,25 @@ async function handlePostAction(ctx) {
 
       if (!result.rowCount) {
         await ctx.answerCallbackQuery({
-          text: "Post is no longer available.",
+          text: adminText(language, "Post is no longer available.", "این پست دیگر در دسترس نیست."),
           show_alert: true
         });
         return;
       }
 
       await ctx.answerCallbackQuery({
-        text: "Post rejected."
+        text: adminText(language, "Post rejected.", "پست رد شد.")
       });
 
       await updateAdminMessage(
         ctx,
-        `PROFINO — Post ${postId} rejected.`
+        adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
       );
     } catch (error) {
       console.error("[scheduler] rejection error:", error);
 
       await ctx.answerCallbackQuery({
-        text: "Database error. Please try again.",
+        text: adminText(language, "Database error. Please try again.", "خطای پایگاه داده. دوباره تلاش کنید."),
         show_alert: true
       });
     }
@@ -275,7 +278,7 @@ async function handlePostAction(ctx) {
     console.error("[scheduler] approval database error:", error);
 
     await ctx.answerCallbackQuery({
-      text: "Database error. Nothing was published.",
+      text: adminText(language, "Database error. Nothing was published.", "خطای پایگاه داده؛ هیچ چیزی منتشر نشد."),
       show_alert: true
     });
 
@@ -283,7 +286,7 @@ async function handlePostAction(ctx) {
   }
 
   await ctx.answerCallbackQuery({
-    text: "Approval received. Publishing..."
+    text: adminText(language, "Approval received. Publishing...", "تأیید دریافت شد. در حال انتشار...")
   });
 
   let published;
@@ -317,9 +320,7 @@ async function handlePostAction(ctx) {
     await updateAdminMessage(
       ctx,
       `PROFINO — Post ${postId}\n\n` +
-      "Publication result is uncertain.\n" +
-      "Check the channel before taking any further action.\n" +
-      "Automatic retry is disabled."
+      adminText(language, "Publication result is uncertain.\nCheck the channel before taking any further action.\nAutomatic retry is disabled.", "نتیجه انتشار نامشخص است.\nپیش از هر اقدام دیگری کانال را بررسی کنید.\nتلاش مجدد خودکار غیرفعال است.")
     );
 
     return;
@@ -340,9 +341,7 @@ async function handlePostAction(ctx) {
 
     await updateAdminMessage(
       ctx,
-      `PROFINO — Post ${postId} successfully published.\n\n` +
-      `Channel: ${CHANNEL_USERNAME}\n` +
-      `Message ID: ${published.message_id}`
+      adminText(language, "PROFINO — Post " + postId + " successfully published.\n\nChannel: " + CHANNEL_USERNAME + "\nMessage ID: " + published.message_id, "پروفینو — پست " + postId + " با موفقیت منتشر شد.\n\nکانال: " + CHANNEL_USERNAME + "\nشناسه پیام: " + published.message_id)
     );
   } catch (error) {
     console.error(
@@ -353,8 +352,7 @@ async function handlePostAction(ctx) {
     await updateAdminMessage(
       ctx,
       `PROFINO — Post ${postId} was sent to the channel.\n\n` +
-      "Database confirmation failed.\n" +
-      "Please verify the channel and database status manually."
+      adminText(language, "Database confirmation failed.\nPlease verify the channel and database status manually.", "تأیید پایگاه داده ناموفق بود.\nوضعیت کانال و پایگاه داده را دستی بررسی کنید.")
     );
   }
 }

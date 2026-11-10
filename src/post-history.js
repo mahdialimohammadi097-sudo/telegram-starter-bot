@@ -1,5 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
+import { getAdminLanguage, adminText } from "./admin-language.js";
 
 const ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -21,10 +22,10 @@ function parseUtcDateTime(value) {
   return date;
 }
 
-function formatUtc(value) {
-  return new Date(value).toLocaleString("en-GB", {
+function formatUtc(value, language = "en") {
+  return new Date(value).toLocaleString(language === "fa" ? "fa-IR" : "en-GB", {
     timeZone: "UTC", dateStyle: "medium", timeStyle: "short"
-  }) + " UTC";
+  }) + (language === "fa" ? " (UTC)" : " UTC");
 }
 
 export async function ensurePostHistorySchema() {
@@ -101,6 +102,7 @@ export async function ensurePostHistorySchema() {
 }
 
 async function showHistory(ctx, page = 0, status = "all", edit = false) {
+  const language = await getAdminLanguage(ctx);
   const offset = page * PAGE_SIZE;
   const result = await pool.query(
     `SELECT id, title, scheduled_at, status, updated_at
@@ -116,14 +118,14 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   );
   const total = count.rows[0].total;
   if (!total) {
-    const empty = "No posts found for status: " + status.toUpperCase() + ".";
+    const empty = adminText(language, "No posts found for status: ", "هیچ پستی با وضعیت ") + status.toUpperCase() + adminText(language, ".", " پیدا نشد.");
     if (edit) return ctx.editMessageText(empty);
     return ctx.reply(empty);
   }
 
   const keyboard = new InlineKeyboard();
   for (const filter of ["all", "scheduled", "preview_sent", "published", "rejected", "cancelled"]) {
-    keyboard.text(filter === "all" ? "All" : filter.replaceAll("_", " ").toUpperCase(),
+    keyboard.text(filter === "all" ? adminText(language, "All", "همه") : (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده" }[filter] || filter) : filter.replaceAll("_", " ").toUpperCase()),
       "posthist_filter:" + filter);
   }
   keyboard.row();
@@ -134,23 +136,23 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   if (offset + result.rowCount < total) keyboard.text("Next →", "posthist_page:" + status + ":" + (page + 1));
   const body = result.rows.map(post =>
     "#" + post.id + " — " + post.title + "\n" +
-    "Status: " + post.status.toUpperCase() + "\n" +
-    "Scheduled: " + formatUtc(post.scheduled_at)
+    adminText(language, "Status: ", "وضعیت: ") + (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده" }[post.status] || post.status) : post.status.toUpperCase()) + "\n" +
+    adminText(language, "Scheduled: ", "زمان‌بندی: ") + formatUtc(post.scheduled_at, language)
   ).join("\n\n");
-  const message = "PROFINO — POST HISTORY (" + status.toUpperCase() + ")\n\n" + body +
-    "\n\nShowing " + (offset + 1) + "–" + (offset + result.rowCount) + " of " + total;
+  const message = adminText(language, "PROFINO — POST HISTORY (", "پروفینو — تاریخچه پست‌ها (") + status.toUpperCase() + ")\n\n" + body + adminText(language, "\n\nShowing ", "\n\nنمایش ") + (offset + 1) + "–" + (offset + result.rowCount) + adminText(language, " of ", " از ") + total;
   if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
 async function showDetails(ctx, postId, edit = false) {
+  const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     "SELECT id, title, content, scheduled_at, status, created_at, updated_at, published_at, cancelled_at, cancellation_reason, published_message_id FROM scheduled_posts WHERE id = $1",
     [postId]
   );
   if (!result.rowCount) {
     if (ctx.callbackQuery) {
-      await ctx.answerCallbackQuery({ text: "Post not found.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Post not found.", "پست پیدا نشد."), show_alert: true });
     } else {
       await ctx.reply("Post not found.");
     }
@@ -162,31 +164,31 @@ async function showDetails(ctx, postId, edit = false) {
     [postId]
   );
   const historyText = history.rows.map(item =>
-    formatUtc(item.changed_at) + " — " + item.event_type.toUpperCase() +
+    formatUtc(item.changed_at, language) + " — " + (language === "fa" ? ({ created: "ایجاد شد", status_changed: "تغییر وضعیت", rescheduled: "تغییر زمان", content_edited: "ویرایش محتوا", tracking_started: "شروع ثبت تاریخچه" }[item.event_type] || item.event_type) : item.event_type.toUpperCase()) +
     (item.old_status || item.new_status ? " (" + (item.old_status || "—") + " → " + (item.new_status || "—") + ")" : "")
   ).join("\n");
   const text = [
-    "PROFINO — POST #" + post.id,
+    adminText(language, "PROFINO — POST #", "پروفینو — پست شماره ") + post.id,
     "",
-    "Title: " + post.title,
-    "Status: " + post.status.toUpperCase(),
-    "Scheduled: " + formatUtc(post.scheduled_at),
-    "Created: " + formatUtc(post.created_at),
-    "Updated: " + formatUtc(post.updated_at),
-    post.published_at ? "Published: " + formatUtc(post.published_at) : null,
-    post.cancelled_at ? "Cancelled: " + formatUtc(post.cancelled_at) : null,
-    post.cancellation_reason ? "Cancellation reason: " + post.cancellation_reason : null,
+    adminText(language, "Title: ", "عنوان: ") + post.title,
+    adminText(language, "Status: ", "وضعیت: ") + post.status.toUpperCase(),
+    adminText(language, "Scheduled: ", "زمان‌بندی: ") + formatUtc(post.scheduled_at, language),
+    adminText(language, "Created: ", "ایجاد: ") + formatUtc(post.created_at, language),
+    adminText(language, "Updated: ", "به‌روزرسانی: ") + formatUtc(post.updated_at, language),
+    post.published_at ? adminText(language, "Published: ", "انتشار: ") + formatUtc(post.published_at, language) : null,
+    post.cancelled_at ? adminText(language, "Cancelled: ", "لغو: ") + formatUtc(post.cancelled_at, language) : null,
+    post.cancellation_reason ? adminText(language, "Cancellation reason: ", "دلیل لغو: ") + post.cancellation_reason : null,
     "",
-    "CONTENT",
+    adminText(language, "CONTENT", "محتوا"),
     post.content,
     "",
-    "RECENT HISTORY",
-    historyText || "No history recorded."
+    adminText(language, "RECENT HISTORY", "تاریخچه اخیر"),
+    historyText || adminText(language, "No history recorded.", "تاریخچه‌ای ثبت نشده است.")
   ].filter(value => value !== null).join("\n");
 
-  const keyboard = new InlineKeyboard().text("Back to History", "posthist_filter:all");
+  const keyboard = new InlineKeyboard().text(adminText(language, "Back to History", "بازگشت به تاریخچه"), "posthist_filter:all");
   if (post.status === "rejected") {
-    keyboard.row().text("Restore to Schedule", "posthist_restore:" + post.id);
+    keyboard.row().text(adminText(language, "Restore to Schedule", "بازگردانی به زمان‌بندی"), "posthist_restore:" + post.id);
   }
   if (edit) {
     await ctx.editMessageText(text, { reply_markup: keyboard });
