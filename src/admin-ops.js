@@ -305,6 +305,14 @@ export async function ensureAdminOpsSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  // Upgrade installations created before the details field was introduced.
+  // This is additive and preserves all existing audit rows.
+  await pool.query(`
+    ALTER TABLE admin_audit_logs
+    ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb
+  `);
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created
     ON admin_audit_logs(id DESC)
