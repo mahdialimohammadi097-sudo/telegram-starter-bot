@@ -27,7 +27,9 @@ export function startHealthMonitor({
   pool,
   intervalMs = 60_000,
   logger = console,
-  now = () => new Date()
+  now = () => new Date(),
+  onStatus = () => {},
+  telegramCheck = async () => { await bot.api.getMe(); return true; }
 }) {
   let previous = { telegram: true, database: true };
   let running = false;
@@ -37,13 +39,14 @@ export function startHealthMonitor({
     running = true;
     try {
       const [telegramResult, databaseResult] = await Promise.allSettled([
-        bot.api.getMe(),
+        telegramCheck(),
         pool.query("SELECT 1 AS health_check")
       ]);
       const current = {
-        telegram: telegramResult.status === "fulfilled",
+        telegram: telegramResult.status === "fulfilled" && telegramResult.value !== false,
         database: databaseResult.status === "fulfilled"
       };
+      onStatus(current);
       const changes = getHealthChanges(previous, current);
 
       for (const change of changes) {
@@ -67,11 +70,12 @@ export function startHealthMonitor({
   }
 
   // Run once immediately, then at a fixed interval. This never receives Telegram updates.
-  void check();
+  const ready = check();
   const timer = setInterval(() => void check(), intervalMs);
   timer.unref?.();
 
   return {
+    ready,
     stop() {
       clearInterval(timer);
     },
