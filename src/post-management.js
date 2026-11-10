@@ -57,7 +57,7 @@ async function getCurrentPreview(ctx, postId) {
 
 async function invalidateOldPreview(ctx, chatId, messageId, text) {
   try {
-    await ctx.api.editMessageText(chatId, messageId, text);
+    await ctx.api.editMessageText(chatId, messageId, text, { reply_markup: { inline_keyboard: [] } });
   } catch (error) {
     console.error("[post-management] could not invalidate old preview:", error);
   }
