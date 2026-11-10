@@ -174,7 +174,7 @@ async function processScheduledPosts(bot) {
 
 async function updateAdminMessage(ctx, text) {
   try {
-    await ctx.editMessageText(text);
+    await ctx.editMessageText(text, { reply_markup: { inline_keyboard: [] } });
   } catch (error) {
     console.error("[scheduler] could not update admin message:", error);
   }
