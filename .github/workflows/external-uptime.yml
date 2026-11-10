@@ -12,6 +12,8 @@ jobs:
   uptime:
     name: Check FadeHost application availability
     runs-on: ubuntu-latest
+    env:
+      PROFINO_MONITOR_BOT_TOKEN: ${{ secrets.PROFINO_MONITOR_BOT_TOKEN }}
     timeout-minutes: 2
     steps:
       - name: Check public health endpoint
@@ -28,9 +30,9 @@ jobs:
           fi
 
       - name: Notify Super Admin through Telegram
-        if: failure() && steps.check.outcome == 'failure' && secrets.PROFINO_MONITOR_BOT_TOKEN != ''
+        if: failure() && steps.check.outcome == 'failure' && env.PROFINO_MONITOR_BOT_TOKEN != ''
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.PROFINO_MONITOR_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ env.PROFINO_MONITOR_BOT_TOKEN }}
         shell: bash
         run: |
           curl --fail --silent --show-error --max-time 15 \
