@@ -130,10 +130,10 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   }
   keyboard.row();
   for (const post of result.rows) {
-    keyboard.text("#" + post.id + " · " + post.status.toUpperCase(), "posthist_detail:" + post.id).row();
+    keyboard.text("#" + post.id + " · " + (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده" }[post.status] || post.status) : post.status.toUpperCase()), "posthist_detail:" + post.id).row();
   }
-  if (page > 0) keyboard.text("← Previous", "posthist_page:" + status + ":" + (page - 1));
-  if (offset + result.rowCount < total) keyboard.text("Next →", "posthist_page:" + status + ":" + (page + 1));
+  if (page > 0) keyboard.text(adminText(language, "← Previous", "← قبلی"), "posthist_page:" + status + ":" + (page - 1));
+  if (offset + result.rowCount < total) keyboard.text(adminText(language, "Next →", "بعدی →"), "posthist_page:" + status + ":" + (page + 1));
   const body = result.rows.map(post =>
     "#" + post.id + " — " + post.title + "\n" +
     adminText(language, "Status: ", "وضعیت: ") + (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده" }[post.status] || post.status) : post.status.toUpperCase()) + "\n" +
@@ -154,7 +154,7 @@ async function showDetails(ctx, postId, edit = false) {
     if (ctx.callbackQuery) {
       await ctx.answerCallbackQuery({ text: adminText(language, "Post not found.", "پست پیدا نشد."), show_alert: true });
     } else {
-      await ctx.reply("Post not found.");
+      await ctx.reply(adminText(language, "Post not found.", "پست پیدا نشد."));
     }
     return;
   }
@@ -171,7 +171,7 @@ async function showDetails(ctx, postId, edit = false) {
     adminText(language, "PROFINO — POST #", "پروفینو — پست شماره ") + post.id,
     "",
     adminText(language, "Title: ", "عنوان: ") + post.title,
-    adminText(language, "Status: ", "وضعیت: ") + post.status.toUpperCase(),
+    adminText(language, "Status: ", "وضعیت: ") + (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده", preview_unknown: "وضعیت پیش‌نمایش نامشخص", publishing: "در حال انتشار", publish_unknown: "وضعیت انتشار نامشخص", failed: "ناموفق" }[post.status] || post.status) : post.status.toUpperCase()),
     adminText(language, "Scheduled: ", "زمان‌بندی: ") + formatUtc(post.scheduled_at, language),
     adminText(language, "Created: ", "ایجاد: ") + formatUtc(post.created_at, language),
     adminText(language, "Updated: ", "به‌روزرسانی: ") + formatUtc(post.updated_at, language),
@@ -227,17 +227,19 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_filter:(all|scheduled|preview_sent|published|rejected|cancelled)$/, async (ctx) => {
-    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
+    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: adminText(language, "Unauthorized.", "دسترسی غیرمجاز است."), show_alert: true });
     try {
       await ctx.answerCallbackQuery();
       await showHistory(ctx, 0, ctx.callbackQuery.data.split(":")[1], true);
     } catch (error) {
       console.error("[post-history] filter failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to apply this filter.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to apply this filter.", "اعمال این فیلتر ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^posthist_page:(all|scheduled|preview_sent|published|rejected|cancelled):\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const [, status, pageText] = ctx.callbackQuery.data.split(":");
     try {
@@ -245,16 +247,17 @@ export function registerPostHistory(bot) {
       await showHistory(ctx, Number(pageText), status, true);
     } catch (error) {
       console.error("[post-history] pagination failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to load this page.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load this page.", "بارگذاری این صفحه ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^posthist_detail:\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     try { await showDetails(ctx, ctx.callbackQuery.data.split(":")[1], true); }
     catch (error) {
       console.error("[post-history] detail callback failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to load post details.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post details.", "بارگذاری جزئیات پست ممکن نشد."), show_alert: true });
     }
   });
 
@@ -274,6 +277,7 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_restore_confirm:\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const postId = ctx.callbackQuery.data.split(":")[1];
     const session = restoreSessions.get(ADMIN_ID);
@@ -298,6 +302,7 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_restore_cancel:\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     restoreSessions.delete(ADMIN_ID);
     await ctx.answerCallbackQuery({ text: adminText(language, "Restore cancelled.", "بازگردانی لغو شد.") });

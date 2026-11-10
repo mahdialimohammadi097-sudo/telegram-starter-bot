@@ -266,8 +266,7 @@ export function registerPostManagement(bot) {
       scheduledAt = parseUtcDateTime(value);
       if (!scheduledAt) {
         await ctx.reply(
-          "Invalid UTC date/time. Use YYYY-MM-DD HH:mm, choose a real calendar date, " +
-          "and set it at least one minute in the future. Or send /cancelpost."
+          adminText(language, "Invalid UTC date/time. Use YYYY-MM-DD HH:mm, choose a real calendar date, and set it at least one minute in the future. Or send /cancelpost.", "تاریخ یا زمان UTC نامعتبر است. قالب YYYY-MM-DD HH:mm را رعایت کنید، تاریخ واقعی و زمانی حداقل یک دقیقه بعد انتخاب کنید؛ یا /cancelpost را بفرستید.")
         );
         return;
       }
@@ -351,6 +350,6 @@ async function startFieldEdit(ctx, field) {
     );
   } catch (error) {
     console.error("[post-management] edit session failed:", error);
-    await ctx.answerCallbackQuery({ text: "Unable to start editing.", show_alert: true });
+    await ctx.answerCallbackQuery({ text: adminText(language, "Unable to start editing.", "شروع ویرایش ممکن نشد."), show_alert: true });
   }
 }
