@@ -635,7 +635,7 @@ export function registerAdminOps(bot) {
     }
   });
 
-  bot.callbackQuery(/^admin_user_confirm:\d+:(active|blocked):(active|blocked)$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user_confirm:\d+:(active|blocked):(active|blocked|pending)$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const [, telegramId, status, expectedStatus] = ctx.callbackQuery.data.split(":");
     try { await applyUserStatus(ctx, telegramId, status, expectedStatus); }
