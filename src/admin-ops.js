@@ -1,6 +1,7 @@
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
 import { isConfirmationCurrent } from "./admin-status-guard.js";
+import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -687,6 +688,27 @@ export function registerAdminOps(bot) {
       } catch (replyError) {
         console.error("[admin-ops] activity fallback reply failed:", replyError);
       }
+    }
+  });
+
+  bot.command("dbschema", async (ctx) => {
+    if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    try {
+      const snapshot = await inspectCoreSchema(pool);
+      const sections = formatCoreSchema(snapshot);
+      await ctx.reply(
+        "PROFINO — CORE DATABASE SCHEMA\\n" +
+        "Read-only inspection. No records or schema were changed."
+      );
+      for (const section of sections) {
+        await ctx.reply(section);
+      }
+    } catch (error) {
+      console.error("[admin-ops] core database schema inspection failed:", error);
+      await ctx.reply(
+        "Unable to inspect the core database schema.\\nDiagnostic: " +
+        String(error?.message || error).slice(0, 500)
+      );
     }
   });
 }
