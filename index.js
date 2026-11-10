@@ -7,6 +7,7 @@ import { Bot, webhookCallback } from "grammy"
 import { registerCommands } from "./src/commands.js"
 import { testDatabaseConnection } from "./src/database.js"
 import { startScheduler } from "./src/scheduler.js"
+import { ensurePostHistorySchema } from "./src/post-history.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 
@@ -42,6 +43,8 @@ async function main() {
     const result = await testDatabaseConnection()
     console.log("[database] PostgreSQL connected successfully.")
     console.log("[database] server time:", result.server_time)
+    await ensurePostHistorySchema()
+    console.log("[post-history] schema and audit trigger ready.")
   } catch (err) {
     console.error("[database] connection test failed:", err?.message ?? err)
     console.error("[database] startup aborted. Telegram bot will not start.")

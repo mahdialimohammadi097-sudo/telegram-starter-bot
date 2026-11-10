@@ -3,6 +3,7 @@ import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
+import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
 
 const ADMIN_ID = 8810232463;
 const CHANNEL_USERNAME = "@PROFINO1";
@@ -160,6 +161,7 @@ async function showScheduledPosts(ctx) {
 
 export function registerCommands(bot) {
   registerPostManagement(bot);
+  registerPostHistory(bot);
   bot.command("start", async (ctx) => {
     try {
       const user = await getOrCreateUser(ctx);
@@ -193,7 +195,9 @@ export function registerCommands(bot) {
       "/newpost - Create a scheduled post\n" +
       "/scheduledposts - View pending posts\n" +
       "/cancelpost - Cancel the current draft\n" +
-      "/channelcheck - Verify channel permissions";
+      "/channelcheck - Verify channel permissions\n" +
+      "/posthistory - View all posts and history\n" +
+      "/postdetails <id> - View post details";
 
     return ctx.reply(
       userHelp + (isAdmin(ctx) ? adminHelp : "")
@@ -216,7 +220,9 @@ export function registerCommands(bot) {
       "/newpost\n" +
       "/scheduledposts\n" +
       "/cancelpost\n" +
-      "/channelcheck"
+      "/channelcheck\n" +
+      "/posthistory\n" +
+      "/postdetails <id>"
     );
   });
 
@@ -291,9 +297,10 @@ export function registerCommands(bot) {
 
     const existed = adminDrafts.delete(ADMIN_ID);
     const managementExisted = clearPostManagementSession(ADMIN_ID);
+    const historyExisted = clearPostHistorySession(ADMIN_ID);
 
     return ctx.reply(
-      existed || managementExisted
+      existed || managementExisted || historyExisted
         ? "Current post operation cancelled."
         : "There is no active post draft or edit session."
     );
