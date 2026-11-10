@@ -56,7 +56,7 @@ async function recordAdminActivity(ctx, action, targetUserIdInput = null, detail
       `SELECT au.user_id
        FROM admin_users au
        JOIN users u ON u.id = au.user_id
-       WHERE u.telegram_id = $1 AND au.status = 'active'
+       WHERE u.telegram_id = $1 AND au.role = 'owner' AND au.status = 'active'
        LIMIT 1`,
       [ctx.from.id]
     );
@@ -427,7 +427,7 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
       `SELECT au.user_id
        FROM admin_users au
        JOIN users u ON u.id = au.user_id
-       WHERE u.telegram_id = $1 AND au.status = 'active'
+       WHERE u.telegram_id = $1 AND au.role = 'owner' AND au.status = 'active'
        LIMIT 1`,
       [SUPER_ADMIN_ID]
     );
