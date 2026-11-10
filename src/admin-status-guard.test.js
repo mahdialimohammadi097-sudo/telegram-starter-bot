@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { isConfirmationCurrent } from "./admin-status-guard.js";
 
 test("accepts a confirmation when the user's status is unchanged", () => {
-  assert.equal(isConfirmationCurrent("active", "active", "suspended"), true);
+  assert.equal(isConfirmationCurrent("active", "active", "blocked"), true);
 });
 
 test("rejects a confirmation after the user's status changed", () => {
-  assert.equal(isConfirmationCurrent("suspended", "active", "suspended"), false);
+  assert.equal(isConfirmationCurrent("blocked", "active", "blocked"), false);
 });
 
 test("rejects a confirmation that requests the current status", () => {
@@ -16,4 +16,8 @@ test("rejects a confirmation that requests the current status", () => {
 
 test("rejects unknown statuses", () => {
   assert.equal(isConfirmationCurrent("deleted", "deleted", "active"), false);
+});
+
+test("accepts pending accounts for an admin activation confirmation", () => {
+  assert.equal(isConfirmationCurrent("pending", "pending", "active"), true);
 });

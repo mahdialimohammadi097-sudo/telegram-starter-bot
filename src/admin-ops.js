@@ -198,7 +198,7 @@ async function showUser(ctx, telegramId, edit = false) {
   const keyboard = new InlineKeyboard();
   if (Number(user.telegram_id) !== SUPER_ADMIN_ID) {
     if (user.status === "active") {
-      keyboard.text("Suspend / تعلیق", "admin_user_action:" + user.telegram_id + ":suspended");
+      keyboard.text("Suspend / تعلیق", "admin_user_action:" + user.telegram_id + ":blocked");
     } else {
       keyboard.text("Activate / فعال‌سازی", "admin_user_action:" + user.telegram_id + ":active");
     }
@@ -342,7 +342,7 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
       [
         admin.rows[0].user_id,
         SUPER_ADMIN_ID,
-        newStatus === "active" ? "user_activated" : "user_suspended",
+        newStatus === "active" ? "user_activated" : "user_blocked",
         updated.rows[0].id,
         auditDetails
       ]
@@ -625,7 +625,7 @@ export function registerAdminOps(bot) {
     }
   });
 
-  bot.callbackQuery(/^admin_user_action:\d+:(active|suspended)$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user_action:\d+:(active|blocked)$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const [, telegramId, status] = ctx.callbackQuery.data.split(":");
     try { await confirmUserStatus(ctx, telegramId, status); }
@@ -635,7 +635,7 @@ export function registerAdminOps(bot) {
     }
   });
 
-  bot.callbackQuery(/^admin_user_confirm:\d+:(active|suspended):(active|suspended)$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user_confirm:\d+:(active|blocked):(active|blocked|pending)$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const [, telegramId, status, expectedStatus] = ctx.callbackQuery.data.split(":");
     try { await applyUserStatus(ctx, telegramId, status, expectedStatus); }
