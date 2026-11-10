@@ -55,4 +55,9 @@ the token.
 
 See `.env.example`.
 
+## PROFINO deployment
+
+The production bot is deployed from the `main` branch on FadeHost. Pushes to
+`main` trigger automatic deployment through the FadeHost GitHub App.
+
 MIT licensed. Built and maintained by FadeHost.
