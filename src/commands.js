@@ -194,6 +194,10 @@ export function registerCommands(bot) {
 
     const adminHelp =
       "\n\nADMIN COMMANDS\n" +
+      "/admin - Open the admin dashboard\n" +
+      "/adminstats - View operations overview\n" +
+      "/user <telegram_id> - Inspect a user\n" +
+      "/adminlogs - View admin activity\n" +
       "/newpost - Create a scheduled post\n" +
       "/scheduledposts - View pending posts\n" +
       "/cancelpost - Cancel the current draft\n" +
