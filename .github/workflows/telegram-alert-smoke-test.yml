@@ -1,0 +1,38 @@
+name: PROFINO Telegram Alert Smoke Test
+
+on:
+  push:
+    branches:
+      - test/profino-telegram-alert-smoke-20261111
+
+permissions:
+  contents: read
+
+jobs:
+  send-test-alert:
+    name: Send one controlled Telegram test message
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Validate secret availability
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.PROFINO_MONITOR_BOT_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::PROFINO_MONITOR_BOT_TOKEN is missing or unavailable to this workflow."
+            exit 1
+          fi
+          echo "Telegram bot token is available to this workflow (value withheld)."
+
+      - name: Send one test message and verify Telegram response
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.PROFINO_MONITOR_BOT_TOKEN }}
+        shell: bash
+        run: |
+          RESPONSE="$(curl --fail --silent --show-error --max-time 20 \
+            --request POST \
+            --data-urlencode "chat_id=8810232463" \
+            --data-urlencode "text=PROFINO TEST: External monitoring Telegram delivery check. This is a one-time test; no service state or user data was changed." \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage")"
+          printf '%s' "$RESPONSE" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") is True, d; print("Telegram accepted test message. message_id=" + str(d["result"]["message_id"]))'
