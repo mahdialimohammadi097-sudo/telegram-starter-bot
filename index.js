@@ -7,6 +7,7 @@ import { Bot, webhookCallback } from "grammy"
 import { registerCommands } from "./src/commands.js"
 import { testDatabaseConnection } from "./src/database.js"
 import { startScheduler } from "./src/scheduler.js"
+import { ensurePostHistorySchema } from "./src/post-history.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 
