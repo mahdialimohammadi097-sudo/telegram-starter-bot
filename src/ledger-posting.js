@@ -88,6 +88,8 @@ export async function postLedgerTransaction({
 
   const type = String(transactionType ?? "").trim();
   const key = String(idempotencyKey ?? "").trim();
+  const normalizedReferenceId = referenceId == null ? null : String(referenceId);
+  const normalizedDescription = description == null ? null : String(description);
   if (!type || type.length > 100) throw new TypeError("Invalid transaction type");
   if (!key || key.length > 200) throw new TypeError("Invalid idempotency key");
 
@@ -129,8 +131,8 @@ export async function postLedgerTransaction({
 
       const sameMetadata =
         transaction.transaction_type === type &&
-        (transaction.reference_id ?? null) === (referenceId ?? null) &&
-        (transaction.description ?? null) === (description ?? null);
+        (transaction.reference_id ?? null) === normalizedReferenceId &&
+        (transaction.description ?? null) === normalizedDescription;
 
       if (!sameMetadata || !sameEntries(priorEntries.rows, normalizedEntries)) {
         throw new Error("Idempotency key was already used for a different request");
@@ -203,7 +205,7 @@ export async function postLedgerTransaction({
          (transaction_type, reference_id, idempotency_key, description, status)
        VALUES ($1, $2, $3, $4, 'pending')
        RETURNING id`,
-      [type, referenceId, key, description]
+      [type, normalizedReferenceId, key, normalizedDescription]
     );
     const transactionId = inserted.rows[0]?.id;
     if (transactionId === undefined || transactionId === null) {
