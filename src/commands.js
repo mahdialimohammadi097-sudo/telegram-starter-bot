@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
 import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
+import { registerAdminOps } from "./admin-ops.js";
 
 const ADMIN_ID = 8810232463;
 const CHANNEL_USERNAME = "@PROFINO1";
@@ -162,6 +163,7 @@ async function showScheduledPosts(ctx) {
 export function registerCommands(bot) {
   registerPostManagement(bot);
   registerPostHistory(bot);
+  registerAdminOps(bot);
   bot.command("start", async (ctx) => {
     try {
       const user = await getOrCreateUser(ctx);
@@ -192,6 +194,10 @@ export function registerCommands(bot) {
 
     const adminHelp =
       "\n\nADMIN COMMANDS\n" +
+      "/admin - Open the admin dashboard\n" +
+      "/adminstats - View operations overview\n" +
+      "/user <telegram_id> - Inspect a user\n" +
+      "/adminlogs - View admin activity\n" +
       "/newpost - Create a scheduled post\n" +
       "/scheduledposts - View pending posts\n" +
       "/cancelpost - Cancel the current draft\n" +
@@ -207,24 +213,6 @@ export function registerCommands(bot) {
   bot.command("id", (ctx) =>
     ctx.reply(`Your Telegram ID: ${ctx.from?.id ?? "Unknown"}`)
   );
-
-  bot.command("admin", (ctx) => {
-    if (!isAdmin(ctx)) {
-      return ctx.reply("Access denied.");
-    }
-
-    return ctx.reply(
-      "PROFINO Admin Panel\n\n" +
-      "Admin access confirmed.\n\n" +
-      "Available commands:\n" +
-      "/newpost\n" +
-      "/scheduledposts\n" +
-      "/cancelpost\n" +
-      "/channelcheck\n" +
-      "/posthistory\n" +
-      "/postdetails <id>"
-    );
-  });
 
   bot.command("channelcheck", async (ctx) => {
     if (!isAdmin(ctx)) {
