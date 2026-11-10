@@ -40,7 +40,6 @@ Verified evidence available for this review:
 3. The `admin_audit_logs.admin_user_id` foreign key references `admin_users(user_id)`. Confirm that the actual Super Admin is present and active in `admin_users`; otherwise audit writes can fail even though the Telegram ID is recognized elsewhere.
 4. Schema presence does not prove application-level workflows are complete or safe. The current wallet screen is a read-only balance view; no complete deposit, withdrawal, investment, or profit lifecycle is implemented.
 5. Referral code generation exists, but referral attribution and rewards remain placeholders.
-6. No exchange-connected arbitrage engine or order lifecycle is implemented.
 7. The original shared amount parser rounded inputs beyond eight decimal places. A branch-only fix now separates display rounding from exact financial validation: `formatUsdt()` may round for display, while ledger invariant and available-balance helpers reject inputs exceeding eight decimal places. New unit tests cover this boundary. This remains a helper-level safeguard, not a production posting service.
 8. User registration currently creates new accounts with status `active`; there is no pending/manual approval step in the `/start` path. Existing blocked/pending accounts are not automatically reactivated by the upsert, but the onboarding policy should be explicitly decided.
 9. Rate limiting is process-local and stored in memory. It is not shared across multiple bot replicas and resets on restart; it is a useful basic throttle, not a distributed abuse-control system.
@@ -58,7 +57,7 @@ Verified evidence available for this review:
 3. Trace every ledger read and write path; confirm transaction atomicity, immutable posting, idempotency, and reversal controls.
 4. Decide whether USDT values with more than eight decimal places should be rejected; add explicit tests either way.
 5. Add disposable-PostgreSQL integration tests for schema migrations and ledger invariants. The current branch adds unit coverage for strict eight-decimal financial validation; PostgreSQL concurrency and trigger behavior remain untested.
-6. Keep deposits, withdrawals, investment execution, profit distribution, and live arbitrage disabled until independently reviewed and explicitly authorized.
+6. Keep deposits, withdrawals, investment execution, and profit distribution disabled until independently reviewed and explicitly authorized.
 
 ## Release boundary
 
