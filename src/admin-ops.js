@@ -29,16 +29,21 @@ function dashboardKeyboard() {
 }
 
 async function recordAdminActivity(ctx, action, targetUserId = null, details = {}) {
-  if (!isSuperAdminPrivate(ctx)) return;
+  if (!isSuperAdminPrivate(ctx)) {
+    return { ok: false, error: "Super Admin private-chat check did not pass." };
+  }
   try {
-    await pool.query(
+    const result = await pool.query(
       `INSERT INTO admin_audit_logs
         (actor_telegram_id, action, target_user_id, details)
-       VALUES ($1, $2, $3, $4::jsonb)`,
+       VALUES ($1, $2, $3, $4::jsonb)
+       RETURNING id, created_at`,
       [ctx.from.id, action, targetUserId, JSON.stringify(details)]
     );
+    return { ok: result.rowCount === 1, id: result.rows[0]?.id };
   } catch (error) {
     console.error("[admin-ops] activity recording failed:", error.message);
+    return { ok: false, error: String(error?.message || error).slice(0, 500) };
   }
 }
 
@@ -418,7 +423,13 @@ export function registerAdminOps(bot) {
 
   bot.command("adminlogs", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
-    await recordAdminActivity(ctx, "admin_activity_viewed");
+    const auditWrite = await recordAdminActivity(ctx, "admin_activity_viewed");
+    if (!auditWrite.ok) {
+      await ctx.reply(
+        "AUDIT WRITE FAILED\nDiagnostic: " +
+        String(auditWrite.error || "No audit row returned").slice(0, 500)
+      );
+    }
     try { await showAuditLog(ctx); }
     catch (error) {
       console.error("[admin-ops] audit log failed:", error);
