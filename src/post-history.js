@@ -100,35 +100,47 @@ export async function ensurePostHistorySchema() {
   `);
 }
 
-async function showHistory(ctx, page = 0) {
+async function showHistory(ctx, page = 0, status = "all", edit = false) {
   const offset = page * PAGE_SIZE;
   const result = await pool.query(
     `SELECT id, title, scheduled_at, status, updated_at
      FROM scheduled_posts
+     WHERE ($1 = 'all' OR status = $1)
      ORDER BY updated_at DESC, id DESC
-     LIMIT $1 OFFSET $2`,
-    [PAGE_SIZE, offset]
+     LIMIT $2 OFFSET $3`,
+    [status, PAGE_SIZE, offset]
   );
-  const count = await pool.query("SELECT COUNT(*)::int AS total FROM scheduled_posts");
+  const count = await pool.query(
+    "SELECT COUNT(*)::int AS total FROM scheduled_posts WHERE ($1 = 'all' OR status = $1)",
+    [status]
+  );
   const total = count.rows[0].total;
-  if (!total) return ctx.reply("No posts have been created yet.");
+  if (!total) {
+    const empty = "No posts found for status: " + status.toUpperCase() + ".";
+    if (edit) return ctx.editMessageText(empty);
+    return ctx.reply(empty);
+  }
 
   const keyboard = new InlineKeyboard();
+  for (const filter of ["all", "scheduled", "preview_sent", "published", "rejected", "cancelled"]) {
+    keyboard.text(filter === "all" ? "All" : filter.replaceAll("_", " ").toUpperCase(),
+      "posthist_filter:" + filter);
+  }
+  keyboard.row();
   for (const post of result.rows) {
     keyboard.text("#" + post.id + " · " + post.status.toUpperCase(), "posthist_detail:" + post.id).row();
   }
-  if (page > 0) keyboard.text("← Previous", "posthist_page:" + (page - 1));
-  if (offset + result.rowCount < total) keyboard.text("Next →", "posthist_page:" + (page + 1));
+  if (page > 0) keyboard.text("← Previous", "posthist_page:" + status + ":" + (page - 1));
+  if (offset + result.rowCount < total) keyboard.text("Next →", "posthist_page:" + status + ":" + (page + 1));
   const body = result.rows.map(post =>
     "#" + post.id + " — " + post.title + "\n" +
     "Status: " + post.status.toUpperCase() + "\n" +
     "Scheduled: " + formatUtc(post.scheduled_at)
   ).join("\n\n");
-  await ctx.reply(
-    "PROFINO — POST HISTORY\n\n" + body +
-    "\n\nShowing " + (offset + 1) + "–" + (offset + result.rowCount) + " of " + total,
-    { reply_markup: keyboard }
-  );
+  const message = "PROFINO — POST HISTORY (" + status.toUpperCase() + ")\n\n" + body +
+    "\n\nShowing " + (offset + 1) + "–" + (offset + result.rowCount) + " of " + total;
+  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  return ctx.reply(message, { reply_markup: keyboard });
 }
 
 async function showDetails(ctx, postId, edit = false) {
@@ -172,7 +184,7 @@ async function showDetails(ctx, postId, edit = false) {
     historyText || "No history recorded."
   ].filter(value => value !== null).join("\n");
 
-  const keyboard = new InlineKeyboard().text("Back to History", "posthist_page:0");
+  const keyboard = new InlineKeyboard().text("Back to History", "posthist_filter:all");
   if (post.status === "rejected") {
     keyboard.row().text("Restore to Schedule", "posthist_restore:" + post.id);
   }
@@ -187,7 +199,12 @@ async function showDetails(ctx, postId, edit = false) {
 export function registerPostHistory(bot) {
   bot.command("posthistory", async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.reply("Access denied.");
-    try { await showHistory(ctx); }
+    const requestedStatus = ctx.match?.trim().toLowerCase() || "all";
+    const validStatuses = ["all", "scheduled", "preview_sending", "preview_sent", "preview_unknown", "approved", "publishing", "publish_unknown", "published", "rejected", "cancelled", "failed"];
+    if (!validStatuses.includes(requestedStatus)) {
+      return ctx.reply("Invalid status. Use /posthistory followed by: all, scheduled, preview_sent, published, rejected, cancelled, or failed.");
+    }
+    try { await showHistory(ctx, 0, requestedStatus); }
     catch (error) {
       console.error("[post-history] list failed:", error);
       await ctx.reply("Unable to load post history. Please try again.");
@@ -205,26 +222,23 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^posthist_page:\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_filter:(all|scheduled|preview_sent|published|rejected|cancelled)$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const page = Number(ctx.callbackQuery.data.split(":")[1]);
     try {
       await ctx.answerCallbackQuery();
-      // Replace the current list message with the requested page.
-      const offset = page * PAGE_SIZE;
-      const result = await pool.query(
-        "SELECT id, title, scheduled_at, status FROM scheduled_posts ORDER BY updated_at DESC, id DESC LIMIT $1 OFFSET $2",
-        [PAGE_SIZE, offset]
-      );
-      const count = await pool.query("SELECT COUNT(*)::int AS total FROM scheduled_posts");
-      const total = count.rows[0].total;
-      if (!total) return ctx.editMessageText("No posts have been created yet.");
-      const keyboard = new InlineKeyboard();
-      for (const post of result.rows) keyboard.text("#" + post.id + " · " + post.status.toUpperCase(), "posthist_detail:" + post.id).row();
-      if (page > 0) keyboard.text("← Previous", "posthist_page:" + (page - 1));
-      if (offset + result.rowCount < total) keyboard.text("Next →", "posthist_page:" + (page + 1));
-      const body = result.rows.map(post => "#" + post.id + " — " + post.title + "\nStatus: " + post.status.toUpperCase() + "\nScheduled: " + formatUtc(post.scheduled_at)).join("\n\n");
-      await ctx.editMessageText("PROFINO — POST HISTORY\n\n" + body + "\n\nShowing " + (offset + 1) + "–" + (offset + result.rowCount) + " of " + total, { reply_markup: keyboard });
+      await showHistory(ctx, 0, ctx.callbackQuery.data.split(":")[1], true);
+    } catch (error) {
+      console.error("[post-history] filter failed:", error);
+      await ctx.answerCallbackQuery({ text: "Unable to apply this filter.", show_alert: true });
+    }
+  });
+
+  bot.callbackQuery(/^posthist_page:(all|scheduled|preview_sent|published|rejected|cancelled):\\d+$/, async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const [, status, pageText] = ctx.callbackQuery.data.split(":");
+    try {
+      await ctx.answerCallbackQuery();
+      await showHistory(ctx, Number(pageText), status, true);
     } catch (error) {
       console.error("[post-history] pagination failed:", error);
       await ctx.answerCallbackQuery({ text: "Unable to load this page.", show_alert: true });
