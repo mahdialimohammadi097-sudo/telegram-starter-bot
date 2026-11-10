@@ -267,6 +267,7 @@ export function registerCommands(bot) {
       );
     }
 
+    clearPostManagementSession(ADMIN_ID);
     adminDrafts.set(ADMIN_ID, {
       step: "title",
       title: null,
