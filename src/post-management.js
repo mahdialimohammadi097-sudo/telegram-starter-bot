@@ -125,6 +125,7 @@ export function registerPostManagement(bot) {
 
   bot.callbackQuery(/^post_edit_back:\d+$/, async (ctx) => {
     const postId = ctx.callbackQuery.data.split(":")[1];
+    sessions.delete(ADMIN_ID);
     try {
       const post = await getCurrentPreview(ctx, postId);
       if (!post) {
@@ -336,6 +337,9 @@ async function startFieldEdit(ctx, field) {
       previewChatId: post.preview_chat_id
     });
     await ctx.answerCallbackQuery();
+    await ctx.editMessageReplyMarkup({
+      reply_markup: new InlineKeyboard().text("Back", "post_edit_back:" + postId)
+    });
     await ctx.reply(
       field === "title"
         ? "Send the new title for post #" + postId + " (1–255 characters). Send /cancelpost to stop."
