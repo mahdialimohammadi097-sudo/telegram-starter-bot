@@ -10,6 +10,18 @@ function isSuperAdminPrivate(ctx) {
   return ctx.from?.id === SUPER_ADMIN_ID && ctx.chat?.type === "private";
 }
 
+async function getAdminLanguage(ctx) {
+  const result = await pool.query(
+    `SELECT ap.language
+     FROM users u
+     LEFT JOIN admin_preferences ap ON ap.user_id = u.id
+     WHERE u.telegram_id = $1
+     LIMIT 1`,
+    [ctx.from.id]
+  );
+  return result.rows[0]?.language === "fa" ? "fa" : "en";
+}
+
 function formatDate(value) {
   if (!value) return "—";
   return new Date(value).toLocaleString("en-GB", {
@@ -19,16 +31,19 @@ function formatDate(value) {
   }) + " UTC";
 }
 
-function dashboardKeyboard() {
+function dashboardKeyboard(language = "en") {
+  const labels = language === "fa"
+    ? { overview: "نمای کلی", users: "کاربران", posts: "پست‌ها", activity: "فعالیت‌ها", language: "زبان", refresh: "بروزرسانی" }
+    : { overview: "Overview", users: "Users", posts: "Posts", activity: "Activity", language: "Language", refresh: "Refresh" };
   return new InlineKeyboard()
-    .text("Overview / نمای کلی", "admin_home")
+    .text(labels.overview, "admin_home")
     .row()
-    .text("Users / کاربران", "admin_users:0")
-    .text("Posts / پست‌ها", "admin_posts")
+    .text(labels.users, "admin_users:0")
+    .text(labels.posts, "admin_posts")
     .row()
-    .text("Activity / فعالیت‌ها", "admin_logs")
-    .text("Language / زبان", "admin_language")
-    .text("Refresh / بروزرسانی", "admin_refresh");
+    .text(labels.activity, "admin_logs")
+    .text(labels.language, "admin_language")
+    .text(labels.refresh, "admin_refresh");
 }
 
 async function recordAdminActivity(ctx, action, targetUserIdInput = null, details = {}) {
@@ -73,6 +88,7 @@ async function recordAdminActivity(ctx, action, targetUserIdInput = null, detail
 }
 
 async function showDashboard(ctx, edit = false) {
+  const language = await getAdminLanguage(ctx);
   const [users, posts] = await Promise.all([
     pool.query(`
       SELECT COUNT(*)::int AS total,
@@ -94,33 +110,50 @@ async function showDashboard(ctx, edit = false) {
 
   const u = users.rows[0];
   const p = posts.rows[0];
-  const message = [
-    "PROFINO — ADMIN OPERATIONS",
-    "پنل مدیریت و عملیات",
-    "",
-    "USER OVERVIEW / وضعیت کاربران",
-    "Total / کل: " + u.total,
-    "Active / فعال: " + u.active,
-    "Other statuses / سایر وضعیت‌ها: " + u.other,
-    "",
-    "POST OVERVIEW / وضعیت پست‌ها",
-    "Total / کل: " + p.total,
-    "Pending / در انتظار: " + p.pending,
-    "Published / منتشرشده: " + p.published,
-    "Rejected / ردشده: " + p.rejected,
-    "",
-    "Super Admin / مدیر ارشد: Owner only",
-    "Use /user <telegram_id> to inspect a user.",
-    "برای بررسی کاربر از دستور /user <telegram_id> استفاده کنید."
-  ].join("\n");
+  const message = language === "fa"
+    ? [
+        "پروفینو — پنل مدیریت",
+        "",
+        "وضعیت کاربران",
+        "تعداد کل: " + u.total,
+        "فعال: " + u.active,
+        "سایر وضعیت‌ها: " + u.other,
+        "",
+        "وضعیت پست‌ها",
+        "تعداد کل: " + p.total,
+        "در انتظار: " + p.pending,
+        "منتشرشده: " + p.published,
+        "ردشده: " + p.rejected,
+        "",
+        "مدیر ارشد: فقط مالک",
+        "برای مشاهده اطلاعات کاربر از دستور /user <telegram_id> استفاده کنید."
+      ].join("\n")
+    : [
+        "PROFINO — ADMIN OPERATIONS",
+        "",
+        "USER OVERVIEW",
+        "Total: " + u.total,
+        "Active: " + u.active,
+        "Other statuses: " + u.other,
+        "",
+        "POST OVERVIEW",
+        "Total: " + p.total,
+        "Pending: " + p.pending,
+        "Published: " + p.published,
+        "Rejected: " + p.rejected,
+        "",
+        "Super Admin: Owner only",
+        "Use /user <telegram_id> to inspect a user."
+      ].join("\n");
 
   if (edit) {
-    return ctx.editMessageText(message, { reply_markup: dashboardKeyboard() });
+    return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language) });
   }
-  return ctx.reply(message, { reply_markup: dashboardKeyboard() });
+  return ctx.reply(message, { reply_markup: dashboardKeyboard(language) });
 }
 
 async function showUsers(ctx, page = 0, edit = false) {
+  const language = await getAdminLanguage(ctx);
   const offset = page * PAGE_SIZE;
   const result = await pool.query(
     `SELECT telegram_id, username, first_name, status
@@ -142,24 +175,39 @@ async function showUsers(ctx, page = 0, edit = false) {
     ).row();
   }
 
-  if (page > 0) keyboard.text("← Previous", "admin_users:" + (page - 1));
-  if (offset + result.rowCount < total) keyboard.text("Next →", "admin_users:" + (page + 1));
-  keyboard.row().text("Back / بازگشت", "admin_home");
+  if (page > 0) keyboard.text(language === "fa" ? "← قبلی" : "← Previous", "admin_users:" + (page - 1));
+  if (offset + result.rowCount < total) keyboard.text(language === "fa" ? "بعدی →" : "Next →", "admin_users:" + (page + 1));
+  keyboard.row().text(language === "fa" ? "بازگشت" : "Back", "admin_home");
 
-  const message = [
-    "PROFINO — USERS / کاربران",
-    "",
-    result.rows.length
-      ? result.rows.map(user =>
-          "ID: " + user.telegram_id +
-          " | " + (user.username ? "@" + user.username : (user.first_name || "No name")) +
-          " | " + user.status.toUpperCase()
-        ).join("\n")
-      : "No users found / کاربری یافت نشد",
-    "",
-    "Showing " + (total ? offset + 1 : 0) + "–" + (offset + result.rowCount) + " of " + total,
-    "Search by Telegram ID: /user <telegram_id>"
-  ].join("\n");
+  const message = language === "fa"
+    ? [
+        "پروفینو — کاربران",
+        "",
+        result.rows.length
+          ? result.rows.map(user =>
+              "شناسه: " + user.telegram_id +
+              " | " + (user.username ? "@" + user.username : (user.first_name || "بدون نام")) +
+              " | " + user.status.toUpperCase()
+            ).join("\n")
+          : "کاربری پیدا نشد.",
+        "",
+        "نمایش " + (total ? offset + 1 : 0) + " تا " + (offset + result.rowCount) + " از " + total,
+        "جست‌وجو با شناسه تلگرام: /user <telegram_id>"
+      ].join("\n")
+    : [
+        "PROFINO — USERS",
+        "",
+        result.rows.length
+          ? result.rows.map(user =>
+              "ID: " + user.telegram_id +
+              " | " + (user.username ? "@" + user.username : (user.first_name || "No name")) +
+              " | " + user.status.toUpperCase()
+            ).join("\n")
+          : "No users found.",
+        "",
+        "Showing " + (total ? offset + 1 : 0) + "–" + (offset + result.rowCount) + " of " + total,
+        "Search by Telegram ID: /user <telegram_id>"
+      ].join("\n");
 
   if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
   return ctx.reply(message, { reply_markup: keyboard });
