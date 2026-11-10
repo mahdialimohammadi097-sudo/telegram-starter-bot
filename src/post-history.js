@@ -10,7 +10,7 @@ function isAdminPrivate(ctx) {
 }
 
 function parseUtcDateTime(value) {
-  const match = /^(\\d{4})-(\\d{2})-(\\d{2}) (\\d{2}):(\\d{2})$/.exec(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(value);
   if (!match) return null;
   const [year, month, day, hour, minute] = match.slice(1).map(Number);
   if (year < 2000 || month < 1 || month > 12 || hour > 23 || minute > 59) return null;
@@ -120,13 +120,13 @@ async function showHistory(ctx, page = 0) {
   if (page > 0) keyboard.text("← Previous", "posthist_page:" + (page - 1));
   if (offset + result.rowCount < total) keyboard.text("Next →", "posthist_page:" + (page + 1));
   const body = result.rows.map(post =>
-    "#" + post.id + " — " + post.title + "\\n" +
-    "Status: " + post.status.toUpperCase() + "\\n" +
+    "#" + post.id + " — " + post.title + "\n" +
+    "Status: " + post.status.toUpperCase() + "\n" +
     "Scheduled: " + formatUtc(post.scheduled_at)
-  ).join("\\n\\n");
+  ).join("\n\n");
   await ctx.reply(
-    "PROFINO — POST HISTORY\\n\\n" + body +
-    "\\n\\nShowing " + (offset + 1) + "–" + (offset + result.rowCount) + " of " + total,
+    "PROFINO — POST HISTORY\n\n" + body +
+    "\n\nShowing " + (offset + 1) + "–" + (offset + result.rowCount) + " of " + total,
     { reply_markup: keyboard }
   );
 }
@@ -148,7 +148,7 @@ async function showDetails(ctx, postId, edit = false) {
   const historyText = history.rows.map(item =>
     formatUtc(item.changed_at) + " — " + item.event_type.toUpperCase() +
     (item.old_status || item.new_status ? " (" + (item.old_status || "—") + " → " + (item.new_status || "—") + ")" : "")
-  ).join("\\n");
+  ).join("\n");
   const text = [
     "PROFINO — POST #" + post.id,
     "",
@@ -166,7 +166,7 @@ async function showDetails(ctx, postId, edit = false) {
     "",
     "RECENT HISTORY",
     historyText || "No history recorded."
-  ].filter(value => value !== null).join("\\n");
+  ].filter(value => value !== null).join("\n");
 
   const keyboard = new InlineKeyboard().text("Back to History", "posthist_page:0");
   if (post.status === "rejected") {
@@ -193,7 +193,7 @@ export function registerPostHistory(bot) {
   bot.command("postdetails", async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const postId = ctx.match?.trim();
-    if (!/^\\d+$/.test(postId || "")) return ctx.reply("Usage: /postdetails <post_id>");
+    if (!/^\d+$/.test(postId || "")) return ctx.reply("Usage: /postdetails <post_id>");
     try { await showDetails(ctx, postId); }
     catch (error) {
       console.error("[post-history] details failed:", error);
@@ -201,7 +201,7 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^posthist_page:\\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_page:\d+$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const page = Number(ctx.callbackQuery.data.split(":")[1]);
     try {
@@ -219,15 +219,15 @@ export function registerPostHistory(bot) {
       for (const post of result.rows) keyboard.text("#" + post.id + " · " + post.status.toUpperCase(), "posthist_detail:" + post.id).row();
       if (page > 0) keyboard.text("← Previous", "posthist_page:" + (page - 1));
       if (offset + result.rowCount < total) keyboard.text("Next →", "posthist_page:" + (page + 1));
-      const body = result.rows.map(post => "#" + post.id + " — " + post.title + "\\nStatus: " + post.status.toUpperCase() + "\\nScheduled: " + formatUtc(post.scheduled_at)).join("\\n\\n");
-      await ctx.editMessageText("PROFINO — POST HISTORY\\n\\n" + body + "\\n\\nShowing " + (offset + 1) + "–" + (offset + result.rowCount) + " of " + total, { reply_markup: keyboard });
+      const body = result.rows.map(post => "#" + post.id + " — " + post.title + "\nStatus: " + post.status.toUpperCase() + "\nScheduled: " + formatUtc(post.scheduled_at)).join("\n\n");
+      await ctx.editMessageText("PROFINO — POST HISTORY\n\n" + body + "\n\nShowing " + (offset + 1) + "–" + (offset + result.rowCount) + " of " + total, { reply_markup: keyboard });
     } catch (error) {
       console.error("[post-history] pagination failed:", error);
       await ctx.answerCallbackQuery({ text: "Unable to load this page.", show_alert: true });
     }
   });
 
-  bot.callbackQuery(/^posthist_detail:\\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_detail:\d+$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     try { await showDetails(ctx, ctx.callbackQuery.data.split(":")[1], true); }
     catch (error) {
@@ -236,7 +236,7 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^posthist_restore:\\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_restore:\d+$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const postId = ctx.callbackQuery.data.split(":")[1];
     const result = await pool.query("SELECT id, status FROM scheduled_posts WHERE id = $1", [postId]);
@@ -246,11 +246,11 @@ export function registerPostHistory(bot) {
     restoreSessions.set(ADMIN_ID, { postId, step: "time" });
     await ctx.answerCallbackQuery();
     await ctx.reply(
-      "RESTORE POST #" + postId + "\\n\\nSend a new future date and time in UTC.\\nFormat: YYYY-MM-DD HH:mm\\nExample: 2026-11-12 18:30\\n\\nThe post will return to the schedule and require a fresh approval before publication. Send /cancelpost to stop."
+      "RESTORE POST #" + postId + "\n\nSend a new future date and time in UTC.\nFormat: YYYY-MM-DD HH:mm\nExample: 2026-11-12 18:30\n\nThe post will return to the schedule and require a fresh approval before publication. Send /cancelpost to stop."
     );
   });
 
-  bot.callbackQuery(/^posthist_restore_confirm:\\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_restore_confirm:\d+$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const postId = ctx.callbackQuery.data.split(":")[1];
     const session = restoreSessions.get(ADMIN_ID);
@@ -266,10 +266,10 @@ export function registerPostHistory(bot) {
       if (!result.rowCount) return ctx.answerCallbackQuery({ text: "Post is no longer rejected.", show_alert: true });
       await ctx.answerCallbackQuery({ text: "Post restored to schedule." });
       await ctx.editMessageText(
-        "PROFINO — POST RESTORED\\n\\nPost: #" + postId +
-        "\\nTitle: " + result.rows[0].title +
-        "\\nNew schedule: " + formatUtc(result.rows[0].scheduled_at) +
-        "\\nStatus: SCHEDULED\\n\\nA new private preview will be sent at the scheduled time. Publication still requires your approval."
+        "PROFINO — POST RESTORED\n\nPost: #" + postId +
+        "\nTitle: " + result.rows[0].title +
+        "\nNew schedule: " + formatUtc(result.rows[0].scheduled_at) +
+        "\nStatus: SCHEDULED\n\nA new private preview will be sent at the scheduled time. Publication still requires your approval."
       );
     } catch (error) {
       console.error("[post-history] restore failed:", error);
@@ -277,7 +277,7 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^posthist_restore_cancel:\\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_restore_cancel:\d+$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     restoreSessions.delete(ADMIN_ID);
     await ctx.answerCallbackQuery({ text: "Restore cancelled." });
@@ -301,9 +301,9 @@ export function registerPostHistory(bot) {
       .text("Confirm Restore", "posthist_restore_confirm:" + session.postId)
       .text("Cancel", "posthist_restore_cancel:" + session.postId);
     await ctx.reply(
-      "CONFIRM POST RESTORATION\\n\\nPost: #" + session.postId +
-      "\\nNew schedule: " + formatUtc(session.scheduledAt) +
-      "\\n\\nThe post will be scheduled, not published. A fresh preview and your approval will still be required.",
+      "CONFIRM POST RESTORATION\n\nPost: #" + session.postId +
+      "\nNew schedule: " + formatUtc(session.scheduledAt) +
+      "\n\nThe post will be scheduled, not published. A fresh preview and your approval will still be required.",
       { reply_markup: keyboard }
     );
   });
