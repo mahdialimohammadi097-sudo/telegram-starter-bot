@@ -27,6 +27,7 @@ function dashboardKeyboard() {
     .text("Posts / پست‌ها", "admin_posts")
     .row()
     .text("Activity / فعالیت‌ها", "admin_logs")
+    .text("Language / زبان", "admin_language")
     .text("Refresh / بروزرسانی", "admin_refresh");
 }
 
@@ -359,6 +360,16 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
 }
 
 export async function ensureAdminOpsSchema() {
+  // Per-admin UI preference. This is additive and does not touch financial records.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_preferences (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      language VARCHAR(2) NOT NULL DEFAULT 'en'
+        CHECK (language IN ('en', 'fa')),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_audit_logs (
       id BIGSERIAL PRIMARY KEY,
@@ -395,7 +406,73 @@ export async function ensureAdminOpsSchema() {
   `);
 }
 
+async function showAdminLanguage(ctx, edit = false) {
+  const result = await pool.query(
+    `SELECT ap.language
+     FROM users u
+     LEFT JOIN admin_preferences ap ON ap.user_id = u.id
+     WHERE u.telegram_id = $1
+     LIMIT 1`,
+    [ctx.from.id]
+  );
+  const language = result.rows[0]?.language || "en";
+  const keyboard = new InlineKeyboard()
+    .text((language === "en" ? "✓ " : "") + "English", "admin_language_set:en")
+    .text((language === "fa" ? "✓ " : "") + "فارسی", "admin_language_set:fa")
+    .row()
+    .text("Back / بازگشت", "admin_home");
+  const message = language === "fa"
+    ? "تنظیم زبان پنل مدیریت\n\nزبان موردنظر را انتخاب کنید. این تنظیم فقط روی پنل خصوصی ادمین اثر دارد؛ رابط کاربران PROFINO انگلیسی باقی می‌ماند."
+    : "ADMIN PANEL LANGUAGE\n\nChoose the language for the private admin panel. This preference does not change the customer-facing PROFINO interface, which remains English.";
+  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  return ctx.reply(message, { reply_markup: keyboard });
+}
+
 export function registerAdminOps(bot) {
+  bot.command("adminlanguage", async (ctx) => {
+    if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    try {
+      await showAdminLanguage(ctx);
+    } catch (error) {
+      console.error("[admin-ops] language settings failed:", error);
+      await ctx.reply("Unable to load language settings.");
+    }
+  });
+
+  bot.callbackQuery(/^admin_language$/, async (ctx) => {
+    if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    try {
+      await ctx.answerCallbackQuery();
+      await showAdminLanguage(ctx, true);
+    } catch (error) {
+      console.error("[admin-ops] language screen failed:", error);
+      await ctx.answerCallbackQuery({ text: "Unable to load language settings.", show_alert: true });
+    }
+  });
+
+  bot.callbackQuery(/^admin_language_set:(en|fa)$/, async (ctx) => {
+    if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = ctx.callbackQuery.data.split(":")[1];
+    try {
+      const result = await pool.query(
+        `INSERT INTO admin_preferences (user_id, language, updated_at)
+         SELECT id, $2, NOW() FROM users WHERE telegram_id = $1
+         ON CONFLICT (user_id)
+         DO UPDATE SET language = EXCLUDED.language, updated_at = NOW()
+         RETURNING language`,
+        [ctx.from.id, language]
+      );
+      if (!result.rowCount) {
+        return ctx.answerCallbackQuery({ text: "Admin account is not registered.", show_alert: true });
+      }
+      await ctx.answerCallbackQuery({ text: language === "fa" ? "زبان فارسی ذخیره شد." : "English preference saved." });
+      await showAdminLanguage(ctx, true);
+    } catch (error) {
+      console.error("[admin-ops] language preference update failed:", error);
+      await ctx.answerCallbackQuery({ text: "Unable to save language preference.", show_alert: true });
+    }
+  });
+
   bot.command("admin", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     await recordAdminActivity(ctx, "admin_dashboard_opened");
