@@ -1,6 +1,6 @@
 # PROFINO Implementation Status
 **Audit date:** 2026-11-10  
-**Audited source revision:** `4b0941276263fb12b512820a33754997b4e9e909`  
+**Audited source revision:** `516730193d3c60ec91736a9d1e1ca37167abf283`  
 **Scope:** Static review of the repository source. Production database schema, live Telegram flows, and live financial transactions were not exercised during this audit.
 
 ## Progress snapshot
@@ -22,7 +22,7 @@ Percentages below are implementation-maturity estimates based on code present in
 | Scheduled channel publishing | 90% | Drafting, preview, approval, scheduling, history and interrupted-operation recovery exist; admin-facing preview, approval, scheduling and history messages now support English/Persian. Production end-to-end testing remains necessary. |
 | Internal and external monitoring | 95% | Internal Telegram/database checks and independent HTTP uptime workflow exist; alert delivery and recovery were verified in a prior workflow run. |
 | Security and financial risk controls | 50% | Private-chat checks, rate limiting and admin guards exist; custody, withdrawal approval, reconciliation, AML/KYC and financial risk controls are not complete. |
-| Admin language selector (English/Persian) | 70% | Persistent preference, language selector, dashboard, user operations, publishing previews, scheduler feedback and post history are bilingual; remaining diagnostics and edge-case messages need review. |
+| Admin language selector (English/Persian) | 70% | Persistent preference, language selector, dashboard, user operations, publishing previews, scheduler feedback, post history, and core admin diagnostic/error feedback are bilingual; a final sweep and production verification remain. |
 | Automated arbitrage engine | 0% | No exchange connectivity, executable strategy engine, order lifecycle, or reconciliation process was found in the reviewed source. |
 
 **No single overall completion percentage is published.** A simple average would give equal weight to monitoring and custody/financial execution, which would materially misrepresent readiness.
