@@ -258,6 +258,7 @@ export function registerCommands(bot) {
     const adminHelp =
       "\n\nADMIN COMMANDS\n" +
       "/admin - Open the admin dashboard\n" +
+      "/adminlanguage - Choose the admin panel language (English/Persian)\n" +
       "/adminstats - View operations overview\n" +
       "/user <telegram_id> - Inspect a user\n" +
       "/adminlogs - View admin activity\n" +
