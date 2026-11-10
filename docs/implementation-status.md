@@ -1,6 +1,6 @@
 # PROFINO Implementation Status
 **Audit date:** 2026-11-10  
-**Audited source revision:** `d08731326624653347b148cc07d85c80c0c5ad61` (main at 2026-11-10)  
+**Audited source revision:** `f48e6c330bf2319095e3f7630ebb3a9c3df5a1c1` (main after Phase 1 merge)  
 **Scope:** Static review of the repository source. Production runtime and `/start` were verified; a read-only production schema report was reviewed. No live financial transaction was performed.
 
 ## Progress snapshot
@@ -57,11 +57,12 @@ Percentages below describe implementation completeness in the audited source. A 
 ## Next safe implementation sequence
 - **Completed runtime foundation:** startup/readiness/reconnect/shutdown implementation and automated tests; live FadeHost smoke test remains pending.
 - **Completed admin localization foundation:** persisted language preference and the principal admin workflows.
-- **Phase 1:** Production schema review and ledger invariant tests (read-only first); initial report and exact eight-decimal helper hardening are in draft PR #29.
+- **Phase 1:** Production schema review and ledger invariant tests (read-only first); read-only schema diagnostics and exact eight-decimal helper hardening are merged in PR #29.
 - **Phase 3:** Referral attribution without monetary rewards.
 - **Phase 4:** Testnet deposit watcher and reconciliation, behind a disabled-by-default feature flag.
 - **Phase 5:** Withdrawal workflow and risk controls, also disabled until independently reviewed.
-- **Phase 6:** Strategy simulation/paper trading before any live arbitrage integration.
+- **Product scope decision:** Arbitrage, exchange trading and automated order execution are explicitly out of scope.
+- **Next financial foundation:** Follow `docs/financial-product-implementation-plan.md`; no production financial workflow is enabled.
 
 ## Files reviewed
 - `src/admin-language.js`
