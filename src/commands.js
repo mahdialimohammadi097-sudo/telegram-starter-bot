@@ -578,5 +578,5 @@ export function registerCommands(bot) {
       });
     }
   });
-  }
-          
+                              }
+    
