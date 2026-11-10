@@ -349,7 +349,10 @@ export function registerAdminOps(bot) {
     try { await showAuditLog(ctx); }
     catch (error) {
       console.error("[admin-ops] audit log failed:", error);
-      await ctx.reply("Unable to load admin activity.");
+      await ctx.reply(
+        "Unable to load admin activity.\nDiagnostic: " +
+        String(error?.message || error).slice(0, 700)
+      );
     }
   });
 
@@ -434,7 +437,9 @@ export function registerAdminOps(bot) {
     await ctx.answerCallbackQuery();
 
     try {
-      await showAuditLog(ctx, true);
+      // Send the activity report as a new message rather than editing the
+      // dashboard message; this avoids Telegram edit restrictions.
+      await showAuditLog(ctx, false);
     } catch (error) {
       console.error("[admin-ops] activity view failed:", error);
 
@@ -442,8 +447,8 @@ export function registerAdminOps(bot) {
       // fails (or the audit query fails), send a visible fallback message.
       try {
         await ctx.reply(
-          "Unable to load admin activity. Please try /adminlogs.\n" +
-          "The error has been recorded in the server logs."
+          "Unable to load admin activity.\nDiagnostic: " +
+          String(error?.message || error).slice(0, 700)
         );
       } catch (replyError) {
         console.error("[admin-ops] activity fallback reply failed:", replyError);
