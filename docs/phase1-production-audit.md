@@ -35,7 +35,7 @@ Verified evidence available for this review:
 6. The schema output confirms many useful indexes, including ledger transaction lookup, user investment lookup, pending profit lookup, due scheduled posts, and unique active wallet assignment per user/type.
 
 ### Important limitations / open verification
-1. The supplied output lists all tables but only includes full column/constraint detail for selected tables. Full definitions for `deposit_requests`, `withdrawal_requests`, `investment_plans`, `investment_plan_versions`, `investments`, `wallets`, `wallet_transfers`, `wallet_transfer_approvals`, `reserve_wallets`, `reserve_balance_snapshots`, and `referrals` are still needed before those workflows can be assessed.
+1. The supplied production output listed all tables but only included full column/constraint detail for selected tables. The branch now expands the read-only diagnostic to cover all 25 known tables; those new diagnostic results are not yet available from production because the branch has not been deployed.
 2. The output identifies deferred ledger triggers but does not include their function bodies or full trigger definitions. We must inspect those definitions to confirm exactly when and how balance is enforced.
 3. The `admin_audit_logs.admin_user_id` foreign key references `admin_users(user_id)`. Confirm that the actual Super Admin is present and active in `admin_users`; otherwise audit writes can fail even though the Telegram ID is recognized elsewhere.
 4. Schema presence does not prove application-level workflows are complete or safe. The current wallet screen is a read-only balance view; no complete deposit, withdrawal, investment, or profit lifecycle is implemented.
@@ -53,7 +53,7 @@ Verified evidence available for this review:
 
 ## Next actions
 
-1. Obtain full schema details for the remaining financial and wallet tables, plus the definitions of the deferred ledger triggers and their trigger functions.
+1. The read-only `/dbschema` diagnostic has now been expanded on this branch to report columns and constraints for all 25 known production tables, in addition to indexes and trigger/function definitions. After this branch is reviewed and explicitly deployed, rerun `/dbschema` and provide the remaining financial-table sections and complete `DATABASE TRIGGERS` output.
 2. Verify the Super Admin has an active `admin_users` row so audit writes satisfy the production foreign key.
 3. Trace every ledger read and write path; confirm transaction atomicity, immutable posting, idempotency, and reversal controls.
 4. Decide whether USDT values with more than eight decimal places should be rejected; add explicit tests either way.
