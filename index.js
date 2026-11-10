@@ -1,7 +1,6 @@
 // PROFINO Telegram Bot runtime
 // Polling is the default; webhook mode is optional.
 
-import http from "node:http";
 import { Bot, webhookCallback } from "grammy";
 import { registerCommands } from "./src/commands.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
