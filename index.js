@@ -42,6 +42,8 @@ async function main() {
     const result = await testDatabaseConnection()
     console.log("[database] PostgreSQL connected successfully.")
     console.log("[database] server time:", result.server_time)
+    await ensurePostHistorySchema()
+    console.log("[post-history] schema and audit trigger ready.")
   } catch (err) {
     console.error("[database] connection test failed:", err?.message ?? err)
     console.error("[database] startup aborted. Telegram bot will not start.")
