@@ -2,7 +2,7 @@ const SCALE = 100000000n;
 
 export function toUsdtUnits(value) {
   const raw = String(value ?? "").trim();
-  const match = /^([+-]?)(\\d+)(?:\\.(\\d+))?$/.exec(raw);
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(raw);
   if (!match) throw new TypeError("Invalid USDT amount");
   const sign = match[1] === "-" ? -1n : 1n;
   const whole = BigInt(match[2]);
