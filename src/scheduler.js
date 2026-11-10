@@ -82,7 +82,7 @@ async function sendPreview(bot, post) {
     const scheduledTime = new Date(post.scheduled_at).toLocaleString(
       "en-GB",
       {
-        timeZone: "Asia/Tehran",
+        timeZone: "UTC",
         dateStyle: "medium",
         timeStyle: "short"
       }
@@ -96,14 +96,19 @@ async function sendPreview(bot, post) {
       "",
       post.content,
       "",
-      `Scheduled time: ${scheduledTime}`,
+      `Scheduled time: ${scheduledTime} UTC`,
       "",
       "This post will NOT be published until you approve it."
     ].join("\n");
 
     const keyboard = new InlineKeyboard()
       .text("Approve & Publish", `post_approve:${post.id}`)
-      .text("Reject", `post_reject:${post.id}`);
+      .text("Reject", `post_reject:${post.id}`)
+      .row()
+      .text("Edit Post", `post_edit:${post.id}`)
+      .text("Reschedule", `post_time:${post.id}`)
+      .row()
+      .text("Cancel Post", `post_cancel:${post.id}`);
 
     const message = await bot.api.sendMessage(
       ADMIN_ID,
@@ -209,8 +214,10 @@ async function handlePostAction(ctx) {
             updated_at = NOW()
         WHERE id = $1
           AND status = 'preview_sent'
+          AND preview_message_id = $2
+          AND preview_chat_id = $3
         RETURNING id
-      `, [postId]);
+      `, [postId, ctx.callbackQuery.message.message_id, ctx.callbackQuery.message.chat.id]);
 
       if (!result.rowCount) {
         await ctx.answerCallbackQuery({
@@ -250,8 +257,10 @@ async function handlePostAction(ctx) {
           updated_at = NOW()
       WHERE id = $2
         AND status = 'preview_sent'
+        AND preview_message_id = $3
+        AND preview_chat_id = $4
       RETURNING id, title, content
-    `, [ADMIN_ID, postId]);
+    `, [ADMIN_ID, postId, ctx.callbackQuery.message.message_id, ctx.callbackQuery.message.chat.id]);
 
     if (!result.rowCount) {
       await ctx.answerCallbackQuery({
