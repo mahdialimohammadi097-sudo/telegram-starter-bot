@@ -78,12 +78,13 @@ jobs:
             MESSAGE="PROFINO MONITOR CONNECTED: External monitoring is active and the FadeHost application is responding."
           fi
 
-          curl --fail --silent --show-error --max-time 15 \
+          RESPONSE="$(curl --fail --silent --show-error --max-time 15 \
             --request POST \
             --data-urlencode "chat_id=8810232463" \
             --data-urlencode "text=$MESSAGE" \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            --output /dev/null
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage")"
+
+          printf '%s' "$RESPONSE" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok") is True, "Telegram API rejected sendMessage"; print("Telegram accepted alert; message_id=" + str(d["result"]["message_id"]))'
 
       - name: Prepare monitor state
         if: steps.notify.outcome == 'success'
