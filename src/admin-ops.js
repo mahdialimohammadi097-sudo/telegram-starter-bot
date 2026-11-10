@@ -325,8 +325,13 @@ export async function ensureAdminOpsSchema() {
     )
   `);
 
-  // Upgrade installations created before the details field was introduced.
-  // This is additive and preserves all existing audit rows.
+  // Upgrade legacy audit tables without deleting or rewriting existing rows.
+  // Historical rows may not have an identifiable actor, so this column stays nullable.
+  await pool.query(`
+    ALTER TABLE admin_audit_logs
+    ADD COLUMN IF NOT EXISTS actor_telegram_id BIGINT
+  `);
+
   await pool.query(`
     ALTER TABLE admin_audit_logs
     ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb
