@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto"
 import { pool } from "./database.js"
 
 const ADMIN_ID = 8810232463
+const CHANNEL_USERNAME = "@PROFINO1"
 
 const mainMenu = new Keyboard()
   .text("My Account").text("My Wallet").row()
@@ -129,6 +130,46 @@ export function registerCommands(bot) {
     )
   })
 
+  // Verify PROFINO channel connection
+  bot.command("channelcheck", async (ctx) => {
+    if (ctx.from?.id !== ADMIN_ID) {
+      return ctx.reply("Access denied.")
+    }
+
+    try {
+      const chat = await ctx.api.getChat(CHANNEL_USERNAME)
+      const me = await ctx.api.getMe()
+      const member = await ctx.api.getChatMember(chat.id, me.id)
+
+      const isAdmin =
+        member.status === "creator" ||
+        (
+          member.status === "administrator" &&
+          member.can_post_messages === true
+        )
+
+      if (!isAdmin) {
+        return ctx.reply(
+          "Channel access found, but posting permission is not confirmed."
+        )
+      }
+
+      return ctx.reply(
+        "PROFINO CHANNEL CONNECTION\n\n" +
+        "Channel: @PROFINO1\n" +
+        "Bot status: Administrator\n" +
+        "Posting permission: Confirmed\n\n" +
+        "Connection test successful."
+      )
+    } catch (error) {
+      console.error("[channel] Check failed:", error.message)
+
+      return ctx.reply(
+        "Channel connection failed. Please check the bot permissions."
+      )
+    }
+  })
+
   bot.on("message:text", async (ctx) => {
     const choice = ctx.message.text
 
@@ -207,24 +248,33 @@ export function registerCommands(bot) {
     const sections = {
       "Investment Plans":
         "INVESTMENT PLANS\n\nAvailable plans will appear here after configuration and verification.",
+
       "My Investments":
         "MY INVESTMENTS\n\nYour active investments will appear here.",
+
       "Deposit":
         "DEPOSIT\n\nAutomatic deposit verification is not enabled yet. Do not send funds until an official deposit address is displayed.",
+
       "Withdraw":
         "WITHDRAW\n\nWithdrawal services are not enabled yet.",
+
       "Daily Profits":
         "DAILY PROFITS\n\nVerified profit records will appear here when available.",
+
       "Referral Program":
         "REFERRAL PROGRAM\n\nYour referral details will appear here.",
+
       "Transaction History":
         "TRANSACTION HISTORY\n\nYour transaction records will appear here.",
+
       "Support":
         "SUPPORT\n\nPlease contact our support team."
     }
 
     if (sections[choice]) {
-      return ctx.reply(sections[choice], { reply_markup: backMenu })
+      return ctx.reply(sections[choice], {
+        reply_markup: backMenu
+      })
     }
   })
-        }
+      }
