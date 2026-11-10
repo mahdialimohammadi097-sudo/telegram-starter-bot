@@ -308,3 +308,7 @@ export function registerPostHistory(bot) {
     );
   });
 }
+
+export function clearPostHistorySession(userId) {
+  return restoreSessions.delete(userId);
+}
