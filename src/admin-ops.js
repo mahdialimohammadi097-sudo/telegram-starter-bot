@@ -734,7 +734,9 @@ export function registerAdminOps(bot) {
       `);
       const membership = await pool.query(`
         SELECT u.id AS users_id, u.telegram_id,
-               (au.user_id IS NOT NULL) AS admin_record_exists
+               (au.user_id IS NOT NULL) AS admin_record_exists,
+               au.role AS admin_role,
+               au.status AS admin_status
         FROM users u
         LEFT JOIN admin_users au ON au.user_id = u.id
         WHERE u.telegram_id = $1
@@ -749,7 +751,15 @@ export function registerAdminOps(bot) {
       );
       const membershipLine = membership.rows.length
         ? "Super Admin users.id: " + membership.rows[0].users_id +
-          " | admin_users record exists: " + membership.rows[0].admin_record_exists
+          " | admin_users record exists: " + membership.rows[0].admin_record_exists +
+          " | role: " + (membership.rows[0].admin_role ?? "N/A") +
+          " | status: " + (membership.rows[0].admin_status ?? "N/A") +
+          " | active owner check: " + (
+            membership.rows[0].admin_role === "owner" &&
+            membership.rows[0].admin_status === "active"
+              ? "PASS"
+              : "NOT VERIFIED"
+          )
         : "Super Admin Telegram account is not present in users table.";
 
       await ctx.reply(
