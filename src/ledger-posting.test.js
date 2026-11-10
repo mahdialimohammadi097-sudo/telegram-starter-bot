@@ -41,3 +41,102 @@ test("canonical request comparison is independent of entry order", () => {
   const b = [...a].reverse();
   assert.deepEqual(canonicalEntries(a), canonicalEntries(b));
 });
+
+
+function makePostingPool({ balance = "10.00000000" } = {}) {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      const normalized = sql.replace(/\\s+/g, " ").trim();
+      calls.push({ sql: normalized, params });
+      if (normalized === "BEGIN" || normalized === "COMMIT" || normalized === "ROLLBACK") {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes("pg_advisory_xact_lock")) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (normalized.includes("FROM ledger_transactions") &&
+          normalized.includes("idempotency_key = $1")) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes("FROM ledger_accounts")) {
+        return {
+          rowCount: 2,
+          rows: [
+            { id: "1", account_type: "AVAILABLE", currency: "USDT" },
+            { id: "2", account_type: "CLEARING", currency: "USDT" }
+          ]
+        };
+      }
+      if (normalized.includes("FROM ledger_entries le") &&
+          normalized.includes("lt.status = 'posted'")) {
+        return { rowCount: 1, rows: [{ balance }] };
+      }
+      if (normalized.startsWith("INSERT INTO ledger_transactions")) {
+        return { rowCount: 1, rows: [{ id: "77" }] };
+      }
+      if (normalized.startsWith("INSERT INTO ledger_entries")) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (normalized.startsWith("UPDATE ledger_transactions")) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error("Unexpected SQL in test: " + normalized);
+    },
+    release() {
+      calls.push({ sql: "RELEASE", params: [] });
+    }
+  };
+  return {
+    calls,
+    pool: { async connect() { return client; } }
+  };
+}
+
+test("posts a balanced journal atomically and releases the client", async () => {
+  const { pool, calls } = makePostingPool({ balance: "5.00000000" });
+  const { postLedgerTransaction } = await import("./ledger-posting.js");
+  const result = await postLedgerTransaction({
+    pool,
+    transactionType: "internal_transfer",
+    referenceId: 123,
+    idempotencyKey: "test-transfer-001",
+    description: "test only",
+    entries: [
+      { account_id: "1", entry_type: "debit", amount: "2", currency: "USDT" },
+      { account_id: "2", entry_type: "credit", amount: "2", currency: "USDT" }
+    ]
+  });
+
+  assert.deepEqual(result, {
+    transactionId: "77",
+    posted: true,
+    idempotent: false
+  });
+  assert.equal(calls[0].sql, "BEGIN");
+  assert.equal(calls.at(-2).sql, "COMMIT");
+  assert.equal(calls.at(-1).sql, "RELEASE");
+  assert.equal(calls.filter(call => call.sql.startsWith("INSERT INTO ledger_entries")).length, 2);
+});
+
+test("rolls back when an AVAILABLE account would become negative", async () => {
+  const { pool, calls } = makePostingPool({ balance: "1.00000000" });
+  const { postLedgerTransaction } = await import("./ledger-posting.js");
+
+  await assert.rejects(
+    postLedgerTransaction({
+      pool,
+      transactionType: "internal_transfer",
+      idempotencyKey: "test-transfer-overdraft",
+      entries: [
+        { account_id: "1", entry_type: "debit", amount: "2", currency: "USDT" },
+        { account_id: "2", entry_type: "credit", amount: "2", currency: "USDT" }
+      ]
+    }),
+    /Insufficient available balance/
+  );
+
+  assert.equal(calls.at(-2).sql, "ROLLBACK");
+  assert.equal(calls.at(-1).sql, "RELEASE");
+  assert.equal(calls.some(call => call.sql.startsWith("INSERT INTO ledger_transactions")), false);
+});
