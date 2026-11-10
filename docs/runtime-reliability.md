@@ -9,7 +9,7 @@
 
 ## Startup
 
-1. Bind the HTTP server before waiting for external dependencies so the hosting platform can observe process liveness.
+1. Bind the HTTP server to `0.0.0.0` before waiting for external dependencies so the hosting platform can reach the process. The default port is `8080`; always honor the hosting platform's injected `PORT` value.
 2. Retry transient PostgreSQL connection and Telegram API failures with capped exponential backoff.
 3. Fail fast on invalid Telegram credentials.
 4. Initialize the existing post-history and admin audit schemas.

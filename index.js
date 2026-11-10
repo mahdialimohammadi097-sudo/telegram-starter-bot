@@ -16,7 +16,7 @@ import { startHealthHttpServer } from "./src/health-http.js";
 const ADMIN_ID = 8810232463;
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const mode = (process.env.TELEGRAM_MODE || "polling").trim().toLowerCase();
-const port = Number(process.env.PORT || 3000);
+const port = Number(process.env.PORT || 8080);
 
 if (!token) {
   console.error("[startup] TELEGRAM_BOT_TOKEN is missing.");
