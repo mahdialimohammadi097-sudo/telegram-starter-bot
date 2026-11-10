@@ -137,7 +137,11 @@ async function showDetails(ctx, postId, edit = false) {
     [postId]
   );
   if (!result.rowCount) {
-    await ctx.answerCallbackQuery({ text: "Post not found.", show_alert: true });
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery({ text: "Post not found.", show_alert: true });
+    } else {
+      await ctx.reply("Post not found.");
+    }
     return;
   }
   const post = result.rows[0];
