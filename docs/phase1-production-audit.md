@@ -46,10 +46,6 @@ Verified evidence available for this review:
 9. Rate limiting is process-local and stored in memory. It is not shared across multiple bot replicas and resets on restart; it is a useful basic throttle, not a distributed abuse-control system.
 10. Scheduled-post processing uses database row claims with `FOR UPDATE SKIP LOCKED`, which is a useful concurrency safeguard. However, startup recovery changes every `preview_sending` and `publishing` row to an unknown state; in a multi-instance deployment this could incorrectly mark another live instance's in-flight operation as uncertain. Deployment should remain single-instance until recovery is made lease/heartbeat-aware.
 11. Post-edit and restore conversations use in-memory Maps. Sessions are lost on restart and are not shared across replicas; persistent admin workflow sessions would be needed for robust multi-instance operation.
-2. The current wallet screen is a read-only balance view; no complete deposit, withdrawal, investment, or profit lifecycle is implemented.
-3. Referral code generation exists, but referral attribution and rewards remain placeholders.
-4. The repository has no implemented exchange-connected arbitrage engine or order lifecycle.
-5. No real-funds workflow should be enabled until database invariants, atomic posting, idempotency, reconciliation, authorization, operational controls, and applicable legal requirements have been reviewed. Exchange-connected arbitrage and automated trading are permanently outside the approved product scope.
 
 ## Next actions
 
