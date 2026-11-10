@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { formatUsdt, toUsdtUnits, toUsdtUnitsExact, assertBalancedLedgerEntries, assertNonNegativeAvailableBalance } from "./ledger-safety.js";
+import { isConfirmationCurrent } from "./admin-status-guard.js";
 
 test("USDT formatting preserves eight-decimal precision", () => {
   assert.equal(formatUsdt("0.00000001"), "0.00000001");
@@ -51,4 +52,13 @@ test("available balance cannot be overdrawn or rounded", () => {
   assert.throws(() => assertNonNegativeAvailableBalance("10", "10.00000001"), /Insufficient/);
   assert.throws(() => assertNonNegativeAvailableBalance("0", "0"), /Insufficient/);
   assert.throws(() => assertNonNegativeAvailableBalance("1.000000001", "1"), /exceeds eight decimal places/);
+});
+
+
+test("admin status confirmation rejects stale, repeated, and unknown transitions", () => {
+  assert.equal(isConfirmationCurrent("active", "active", "blocked"), true);
+  assert.equal(isConfirmationCurrent("blocked", "blocked", "active"), true);
+  assert.equal(isConfirmationCurrent("blocked", "active", "blocked"), false);
+  assert.equal(isConfirmationCurrent("active", "active", "active"), false);
+  assert.equal(isConfirmationCurrent("deleted", "deleted", "active"), false);
 });
