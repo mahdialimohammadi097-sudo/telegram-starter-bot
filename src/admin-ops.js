@@ -426,7 +426,7 @@ export function registerAdminOps(bot) {
     const auditWrite = await recordAdminActivity(ctx, "admin_activity_viewed");
     if (!auditWrite.ok) {
       await ctx.reply(
-        "AUDIT WRITE FAILED\\nDiagnostic: " +
+        "AUDIT WRITE FAILED\nDiagnostic: " +
         String(auditWrite.error || "No audit row returned").slice(0, 500)
       );
     }
@@ -434,7 +434,7 @@ export function registerAdminOps(bot) {
     catch (error) {
       console.error("[admin-ops] audit log failed:", error);
       await ctx.reply(
-        "Unable to load admin activity.\\nDiagnostic: " +
+        "Unable to load admin activity.\nDiagnostic: " +
         String(error?.message || error).slice(0, 700)
       );
     }
