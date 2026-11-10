@@ -28,6 +28,20 @@ function dashboardKeyboard() {
     .text("Refresh / بروزرسانی", "admin_refresh");
 }
 
+async function recordAdminActivity(ctx, action, targetUserId = null, details = {}) {
+  if (!isSuperAdminPrivate(ctx)) return;
+  try {
+    await pool.query(
+      `INSERT INTO admin_audit_logs
+        (actor_telegram_id, action, target_user_id, details)
+       VALUES ($1, $2, $3, $4::jsonb)`,
+      [ctx.from.id, action, targetUserId, JSON.stringify(details)]
+    );
+  } catch (error) {
+    console.error("[admin-ops] activity recording failed:", error.message);
+  }
+}
+
 async function showDashboard(ctx, edit = false) {
   const [users, posts] = await Promise.all([
     pool.query(`
@@ -322,6 +336,7 @@ export async function ensureAdminOpsSchema() {
 export function registerAdminOps(bot) {
   bot.command("admin", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    await recordAdminActivity(ctx, "admin_dashboard_opened");
     try {
       await showDashboard(ctx);
     } catch (error) {
@@ -345,6 +360,7 @@ export function registerAdminOps(bot) {
     if (!/^\d{5,20}$/.test(telegramId || "")) {
       return ctx.reply("Usage: /user <telegram_id>\nExample: /user 123456789");
     }
+    await recordAdminActivity(ctx, "admin_user_lookup", telegramId);
     try { await showUser(ctx, telegramId); }
     catch (error) {
       console.error("[admin-ops] user lookup failed:", error);
@@ -359,6 +375,7 @@ export function registerAdminOps(bot) {
       return ctx.reply("Usage: /usersearch <Telegram ID, username, or name>");
     }
 
+    await recordAdminActivity(ctx, "admin_user_search", null, { query: term });
     try {
       const result = await pool.query(
         `SELECT telegram_id, username, first_name, last_name, status
@@ -401,6 +418,7 @@ export function registerAdminOps(bot) {
 
   bot.command("adminlogs", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    await recordAdminActivity(ctx, "admin_activity_viewed");
     try { await showAuditLog(ctx); }
     catch (error) {
       console.error("[admin-ops] audit log failed:", error);
