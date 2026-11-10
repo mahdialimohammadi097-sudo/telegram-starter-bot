@@ -71,6 +71,21 @@ function utcLabel(date) {
   }) + " UTC";
 }
 
+function previewText(post) {
+  return [
+    "PROFINO — POST PREVIEW",
+    "",
+    "Post ID: " + post.id,
+    "Title: " + post.title,
+    "",
+    post.content,
+    "",
+    "Scheduled time: " + utcLabel(post.scheduled_at),
+    "",
+    "This post will NOT be published until you approve it."
+  ].join("\n");
+}
+
 export function clearPostManagementSession(userId) {
   return sessions.delete(userId);
 }
@@ -109,16 +124,18 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_edit_back:\d+$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
+    const postId = ctx.callbackQuery.data.split(":")[1];
     try {
-      const postId = ctx.callbackQuery.data.split(":")[1];
-      await ctx.api.editMessageReplyMarkup(
-        ctx.callbackQuery.message.chat.id,
-        ctx.callbackQuery.message.message_id,
-        { reply_markup: previewKeyboard(postId) }
-      );
+      const post = await getCurrentPreview(ctx, postId);
+      if (!post) {
+        await ctx.answerCallbackQuery({ text: "This preview is no longer valid.", show_alert: true });
+        return;
+      }
+      await ctx.answerCallbackQuery();
+      await ctx.editMessageText(previewText(post), { reply_markup: previewKeyboard(postId) });
     } catch (error) {
-      console.error("[post-management] could not restore preview controls:", error);
+      console.error("[post-management] could not restore preview:", error);
+      await ctx.answerCallbackQuery({ text: "Unable to restore preview.", show_alert: true });
     }
   });
 
@@ -175,15 +192,17 @@ export function registerPostManagement(bot) {
 
   bot.callbackQuery(/^post_cancel_back:\d+$/, async (ctx) => {
     const postId = ctx.callbackQuery.data.split(":")[1];
-    await ctx.answerCallbackQuery({ text: "Post kept." });
     try {
-      await ctx.api.editMessageReplyMarkup(
-        ctx.callbackQuery.message.chat.id,
-        ctx.callbackQuery.message.message_id,
-        { reply_markup: previewKeyboard(postId) }
-      );
+      const post = await getCurrentPreview(ctx, postId);
+      if (!post) {
+        await ctx.answerCallbackQuery({ text: "This preview is no longer valid.", show_alert: true });
+        return;
+      }
+      await ctx.answerCallbackQuery({ text: "Post kept." });
+      await ctx.editMessageText(previewText(post), { reply_markup: previewKeyboard(postId) });
     } catch (error) {
       console.error("[post-management] could not restore preview after cancellation abort:", error);
+      await ctx.answerCallbackQuery({ text: "Unable to restore preview.", show_alert: true });
     }
   });
 
