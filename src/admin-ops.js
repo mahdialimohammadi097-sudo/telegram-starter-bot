@@ -58,7 +58,7 @@ async function recordAdminActivity(ctx, action, targetUserIdInput = null, detail
       `INSERT INTO admin_audit_logs
         (admin_user_id, actor_telegram_id, action, target_user_id,
          currency, metadata, details)
-       VALUES ($1, $2, $3, $4, 'N/A', $5::jsonb, $5::jsonb)
+       VALUES ($1, $2, $3, $4, 'USDT', $5::jsonb, $5::jsonb)
        RETURNING id, created_at`,
       [admin.rows[0].user_id, ctx.from.id, action, targetUserId, JSON.stringify(details)]
     );
@@ -332,7 +332,7 @@ async function applyUserStatus(ctx, telegramId, newStatus) {
       `INSERT INTO admin_audit_logs
         (admin_user_id, actor_telegram_id, action, target_user_id,
          currency, metadata, details)
-       VALUES ($1, $2, $3, $4, 'N/A', $5::jsonb, $5::jsonb)`,
+       VALUES ($1, $2, $3, $4, 'USDT', $5::jsonb, $5::jsonb)`,
       [
         admin.rows[0].user_id,
         SUPER_ADMIN_ID,
