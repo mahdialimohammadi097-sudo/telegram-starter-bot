@@ -521,6 +521,13 @@ export function registerAdminOps(bot) {
           AND c.table_name = 'admin_users'
         ORDER BY c.ordinal_position
       `);
+      const auditChecks = await pool.query(`
+        SELECT conname, pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+        WHERE conrelid = 'admin_audit_logs'::regclass
+          AND contype = 'c'
+        ORDER BY conname
+      `);
       const membership = await pool.query(`
         SELECT u.id AS users_id, u.telegram_id,
                (au.user_id IS NOT NULL) AS admin_record_exists
@@ -546,7 +553,11 @@ export function registerAdminOps(bot) {
         (lines.length ? lines.join("\\n") : "admin_audit_logs table not found.") +
         "\\n\\nADMIN_USERS TABLE SCHEMA\\n" +
         (adminLines.length ? adminLines.join("\\n") : "admin_users table not found.") +
-        "\\n\\nADMIN MEMBERSHIP CHECK\\n" + membershipLine
+        "\\n\\nADMIN MEMBERSHIP CHECK\\n" + membershipLine +
+        "\\n\\nADMIN AUDIT CHECK CONSTRAINTS\\n" +
+        (auditChecks.rows.length
+          ? auditChecks.rows.map(row => row.conname + " | " + row.definition).join("\\n")
+          : "No CHECK constraints found.")
       );
     } catch (error) {
       console.error("[admin-ops] schema diagnostic failed:", error);
