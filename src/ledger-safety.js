@@ -13,6 +13,22 @@ export function toUsdtUnits(value) {
   return sign * units;
 }
 
+// Financial validation must never round an input into a different amount.
+// Keep toUsdtUnits() for display formatting, where rounding to eight places is intentional.
+export function toUsdtUnitsExact(value) {
+  const raw = String(value ?? "").trim();
+  const match = /^([+-]?)(\\d+)(?:\\.(\\d+))?$/.exec(raw);
+  if (!match) throw new TypeError("Invalid USDT amount");
+  const fraction = match[3] || "";
+  if (fraction.length > 8) {
+    throw new RangeError("USDT amount exceeds eight decimal places");
+  }
+  const sign = match[1] === "-" ? -1n : 1n;
+  const whole = BigInt(match[2]);
+  const paddedFraction = (fraction + "00000000").slice(0, 8);
+  return sign * (whole * SCALE + BigInt(paddedFraction));
+}
+
 export function formatUsdt(value) {
   const units = toUsdtUnits(value);
   const negative = units < 0n;
@@ -30,7 +46,7 @@ export function assertBalancedLedgerEntries(entries) {
   for (const entry of entries) {
     const currency = String(entry.currency || "").trim().toUpperCase();
     const type = String(entry.entry_type || "").toLowerCase();
-    const amount = toUsdtUnits(entry.amount);
+    const amount = toUsdtUnitsExact(entry.amount);
     if (!currency || !["credit", "debit"].includes(type) || amount <= 0n) {
       throw new Error("Invalid ledger entry");
     }
@@ -46,8 +62,8 @@ export function assertBalancedLedgerEntries(entries) {
 }
 
 export function assertNonNegativeAvailableBalance(balance, debit) {
-  const available = toUsdtUnits(balance);
-  const requestedDebit = toUsdtUnits(debit);
+  const available = toUsdtUnitsExact(balance);
+  const requestedDebit = toUsdtUnitsExact(debit);
   if (available < 0n || requestedDebit <= 0n || requestedDebit > available) {
     throw new Error("Insufficient available balance");
   }
