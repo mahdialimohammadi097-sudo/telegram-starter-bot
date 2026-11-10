@@ -54,7 +54,7 @@ export function formatCoreSchema(snapshot) {
   const existing = new Set(snapshot.existingTables);
   return snapshot.expectedTables.map(tableName => {
     if (!existing.has(tableName)) {
-      return "TABLE: " + tableName + "\\nNOT FOUND";
+      return "TABLE: " + tableName + "\nNOT FOUND";
     }
 
     const columns = snapshot.columns.filter(row => row.table_name === tableName);
@@ -71,9 +71,9 @@ export function formatCoreSchema(snapshot) {
     return [
       "TABLE: " + tableName,
       "COLUMNS",
-      columnLines.length ? columnLines.join("\\n") : "No columns returned",
+      columnLines.length ? columnLines.join("\n") : "No columns returned",
       "CONSTRAINTS",
-      constraintLines.length ? constraintLines.join("\\n") : "No constraints found"
-    ].join("\\n");
+      constraintLines.length ? constraintLines.join("\n") : "No constraints found"
+    ].join("\n");
   });
 }
