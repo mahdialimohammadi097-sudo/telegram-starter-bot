@@ -41,7 +41,7 @@ Verified evidence available for this review:
 4. Schema presence does not prove application-level workflows are complete or safe. The current wallet screen is a read-only balance view; no complete deposit, withdrawal, investment, or profit lifecycle is implemented.
 5. Referral code generation exists, but referral attribution and rewards remain placeholders.
 6. No exchange-connected arbitrage engine or order lifecycle is implemented.
-7. `toUsdtUnits()` currently rounds inputs with more than eight fractional digits rather than rejecting excess precision. This should be assessed and covered by tests before any financial write path uses it.
+7. The original shared amount parser rounded inputs beyond eight decimal places. A branch-only fix now separates display rounding from exact financial validation: `formatUsdt()` may round for display, while ledger invariant and available-balance helpers reject inputs exceeding eight decimal places. New unit tests cover this boundary. This remains a helper-level safeguard, not a production posting service.
 2. The current wallet screen is a read-only balance view; no complete deposit, withdrawal, investment, or profit lifecycle is implemented.
 3. Referral code generation exists, but referral attribution and rewards remain placeholders.
 4. The repository has no implemented exchange-connected arbitrage engine or order lifecycle.
@@ -53,7 +53,7 @@ Verified evidence available for this review:
 2. Verify the Super Admin has an active `admin_users` row so audit writes satisfy the production foreign key.
 3. Trace every ledger read and write path; confirm transaction atomicity, immutable posting, idempotency, and reversal controls.
 4. Decide whether USDT values with more than eight decimal places should be rejected; add explicit tests either way.
-5. Add disposable-PostgreSQL integration tests for schema migrations and ledger invariants.
+5. Add disposable-PostgreSQL integration tests for schema migrations and ledger invariants. The current branch adds unit coverage for strict eight-decimal financial validation; PostgreSQL concurrency and trigger behavior remain untested.
 6. Keep deposits, withdrawals, investment execution, profit distribution, and live arbitrage disabled until independently reviewed and explicitly authorized.
 
 ## Release boundary
