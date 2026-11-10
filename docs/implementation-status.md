@@ -60,7 +60,6 @@ Percentages below describe implementation completeness in the audited source. A 
 - **Phase 3:** Referral attribution without monetary rewards.
 - **Phase 4:** Testnet deposit watcher and reconciliation, behind a disabled-by-default feature flag.
 - **Phase 5:** Withdrawal workflow and risk controls, also disabled until independently reviewed.
-- **Product scope decision:** Arbitrage, exchange trading and automated order execution are explicitly out of scope.
 - **Next financial foundation:** Follow `docs/financial-product-implementation-plan.md`; no production financial workflow is enabled.
 
 ## Files reviewed
