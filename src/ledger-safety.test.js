@@ -52,3 +52,21 @@ test("available balance cannot be overdrawn or rounded", () => {
   assert.throws(() => assertNonNegativeAvailableBalance("0", "0"), /Insufficient/);
   assert.throws(() => assertNonNegativeAvailableBalance("1.000000001", "1"), /exceeds eight decimal places/);
 });
+
+test("available-balance validation rejects malformed, negative, and zero requests", () => {
+  assert.throws(() => assertNonNegativeAvailableBalance("-0.00000001", "0.00000001"), /Insufficient/);
+  assert.throws(() => assertNonNegativeAvailableBalance("10", "-1"), /Insufficient/);
+  assert.throws(() => assertNonNegativeAvailableBalance("10", "0"), /Insufficient/);
+  assert.throws(() => assertNonNegativeAvailableBalance("1e2", "1"), /Invalid USDT amount/);
+});
+
+test("ledger balancing requires at least two valid entries", () => {
+  assert.throws(() => assertBalancedLedgerEntries([]), /at least two entries/);
+  assert.throws(() => assertBalancedLedgerEntries([
+    { currency: "USDT", entry_type: "debit", amount: "1" }
+  ]), /at least two entries/);
+  assert.throws(() => assertBalancedLedgerEntries([
+    { currency: "USDT", entry_type: "debit", amount: "1" },
+    { currency: "", entry_type: "credit", amount: "1" }
+  ]), /Invalid ledger entry/);
+});
