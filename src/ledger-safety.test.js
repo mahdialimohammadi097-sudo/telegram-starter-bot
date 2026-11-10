@@ -70,3 +70,13 @@ test("ledger balancing requires at least two valid entries", () => {
     { currency: "", entry_type: "credit", amount: "1" }
   ]), /Invalid ledger entry/);
 });
+
+import { isConfirmationCurrent } from "./admin-status-guard.js";
+
+test("admin status confirmation rejects stale, repeated, and unknown transitions", () => {
+  assert.equal(isConfirmationCurrent("active", "active", "blocked"), true);
+  assert.equal(isConfirmationCurrent("blocked", "blocked", "active"), true);
+  assert.equal(isConfirmationCurrent("blocked", "active", "blocked"), false);
+  assert.equal(isConfirmationCurrent("active", "active", "active"), false);
+  assert.equal(isConfirmationCurrent("deleted", "deleted", "active"), false);
+});
