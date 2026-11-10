@@ -10,47 +10,91 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   uptime:
     name: Check FadeHost application availability
     runs-on: ubuntu-latest
-    env:
-      PROFINO_MONITOR_BOT_TOKEN: ${{ secrets.PROFINO_MONITOR_BOT_TOKEN }}
     timeout-minutes: 2
     steps:
-      - name: Check public health endpoint
+      - name: Read previous monitor state
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          PREVIOUS="$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/PROFINO_UPTIME_STATE" --jq '.value' 2>/dev/null || echo unknown)"
+          echo "status=$PREVIOUS" >> "$GITHUB_OUTPUT"
+          echo "Previous monitor state: $PREVIOUS"
+
+      - name: Check public application endpoints
         id: check
         shell: bash
         run: |
-          HEALTH_URL="https://telegram-bot-d23e.fadehost.app/healthz"
-          ROOT_URL="https://telegram-bot-d23e.fadehost.app"
-          HEALTH_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "$HEALTH_URL" || true)"
+          HEALTH_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app/healthz" || true)"
+          ROOT_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app" || true)"
           echo "Health endpoint HTTP status: $HEALTH_STATUS"
-          if [ "$HEALTH_STATUS" = "200" ]; then
-            echo "Application health endpoint is reachable."
-            exit 0
-          fi
-
-          ROOT_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "$ROOT_URL" || true)"
           echo "Root endpoint HTTP status: $ROOT_STATUS"
-          if [ "$ROOT_STATUS" = "200" ]; then
-            echo "Application root endpoint is reachable; health route may not be mapped by the host."
-            exit 0
+
+          if [ "$HEALTH_STATUS" = "200" ] || [ "$ROOT_STATUS" = "200" ]; then
+            echo "status=up" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=down" >> "$GITHUB_OUTPUT"
           fi
+          echo "health_status=$HEALTH_STATUS" >> "$GITHUB_OUTPUT"
+          echo "root_status=$ROOT_STATUS" >> "$GITHUB_OUTPUT"
 
-          echo "::error::PROFINO is unavailable. /healthz returned $HEALTH_STATUS and / returned $ROOT_STATUS."
-          exit 1
-
-      - name: Notify Super Admin through Telegram
-        if: failure() && steps.check.outcome == 'failure' && env.PROFINO_MONITOR_BOT_TOKEN != ''
+      - name: Notify Super Admin only when status changes
+        id: notify
+        if: steps.check.outputs.status != steps.previous.outputs.status
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.PROFINO_MONITOR_BOT_TOKEN }}
+          CURRENT_STATUS: ${{ steps.check.outputs.status }}
+          PREVIOUS_STATUS: ${{ steps.previous.outputs.status }}
+          HEALTH_STATUS: ${{ steps.check.outputs.health_status }}
+          ROOT_STATUS: ${{ steps.check.outputs.root_status }}
         shell: bash
         run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "::error::PROFINO_MONITOR_BOT_TOKEN is not configured."
+            exit 1
+          fi
+
+          if [ "$CURRENT_STATUS" = "down" ]; then
+            MESSAGE="PROFINO ALERT: FadeHost application is unavailable. /healthz HTTP $HEALTH_STATUS; root HTTP $ROOT_STATUS. The monitor will keep checking every five minutes and will notify you when service recovers."
+          elif [ "$PREVIOUS_STATUS" = "down" ]; then
+            MESSAGE="PROFINO RECOVERED: FadeHost application is responding again. /healthz HTTP $HEALTH_STATUS; root HTTP $ROOT_STATUS."
+          else
+            MESSAGE="PROFINO MONITOR CONNECTED: External monitoring is active and the FadeHost application is responding."
+          fi
+
           curl --fail --silent --show-error --max-time 15 \
             --request POST \
             --data-urlencode "chat_id=8810232463" \
-            --data-urlencode "text=PROFINO ALERT: FadeHost application is unavailable. The /healthz and root endpoints both failed. Check the hosting service." \
+            --data-urlencode "text=$MESSAGE" \
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --output /dev/null
+
+      - name: Save current monitor state
+        if: steps.notify.outcome == 'success' || steps.notify.outcome == 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_STATUS: ${{ steps.check.outputs.status }}
+        shell: bash
+        run: |
+          if gh api --method PATCH "repos/$GITHUB_REPOSITORY/actions/variables/PROFINO_UPTIME_STATE" -f value="$CURRENT_STATUS" >/dev/null 2>&1; then
+            echo "Monitor state updated."
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/variables" \
+              -f name="PROFINO_UPTIME_STATE" \
+              -f value="$CURRENT_STATUS" >/dev/null
+            echo "Monitor state initialized."
+          fi
+
+      - name: Mark unavailable application check as failed
+        if: steps.check.outputs.status == 'down'
+        shell: bash
+        run: |
+          echo "::error::PROFINO is unavailable. A Telegram alert was sent on the state change."
+          exit 1
