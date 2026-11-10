@@ -161,12 +161,23 @@ async function showScheduledPosts(ctx) {
 }
 
 export function registerCommands(bot) {
-  // Enforce account status on every private-chat interaction, not only /start.
-  // The owner account is exempt and remains protected from suspension.
+  // Keep all bot interactions private. This prevents group-based access-control
+  // bypasses and avoids exposing account or administrative information in groups.
+  // The owner account remains exempt from user-status checks.
   bot.use(async (ctx, next) => {
-    if (!ctx.from || ctx.from.id === ADMIN_ID || ctx.chat?.type !== "private") {
-      return next();
+    if (!ctx.from) return;
+
+    if (ctx.chat?.type !== "private") {
+      if (ctx.callbackQuery) {
+        return ctx.answerCallbackQuery({
+          text: "Please use the bot in a private chat.",
+          show_alert: true
+        });
+      }
+      return;
     }
+
+    if (ctx.from.id === ADMIN_ID) return next();
 
     try {
       const account = await pool.query(
@@ -238,7 +249,7 @@ export function registerCommands(bot) {
       "/postdetails <id> - View post details";
 
     return ctx.reply(
-      userHelp + (isAdmin(ctx) ? adminHelp : "")
+      userHelp + (isAdmin(ctx) && isPrivateChat(ctx) ? adminHelp : "")
     );
   });
 
@@ -247,7 +258,7 @@ export function registerCommands(bot) {
   );
 
   bot.command("channelcheck", async (ctx) => {
-    if (!isAdmin(ctx)) {
+    if (!isAdmin(ctx) || !isPrivateChat(ctx)) {
       return ctx.reply("Access denied.");
     }
 
