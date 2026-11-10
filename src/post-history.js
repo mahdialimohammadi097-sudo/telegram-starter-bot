@@ -233,7 +233,7 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^posthist_page:(all|scheduled|preview_sent|published|rejected|cancelled):\\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_page:(all|scheduled|preview_sent|published|rejected|cancelled):\d+$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const [, status, pageText] = ctx.callbackQuery.data.split(":");
     try {
