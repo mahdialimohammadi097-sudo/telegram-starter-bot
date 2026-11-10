@@ -2,6 +2,7 @@ import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
 import { isConfirmationCurrent } from "./admin-status-guard.js";
 import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
+import { adminText } from "./admin-language.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -539,22 +540,24 @@ async function showAdminLanguage(ctx, edit = false) {
 export function registerAdminOps(bot) {
   bot.command("adminlanguage", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
     try {
       await showAdminLanguage(ctx);
     } catch (error) {
       console.error("[admin-ops] language settings failed:", error);
-      await ctx.reply("Unable to load language settings.");
+      await ctx.reply(adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."));
     }
   });
 
   bot.callbackQuery(/^admin_language$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
       await showAdminLanguage(ctx, true);
     } catch (error) {
       console.error("[admin-ops] language screen failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to load language settings.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."), show_alert: true });
     }
   });
 
@@ -571,47 +574,50 @@ export function registerAdminOps(bot) {
         [ctx.from.id, language]
       );
       if (!result.rowCount) {
-        return ctx.answerCallbackQuery({ text: "Admin account is not registered.", show_alert: true });
+        return ctx.answerCallbackQuery({ text: adminText(language, "Admin account is not registered.", "حساب مدیر ثبت نشده است."), show_alert: true });
       }
       await ctx.answerCallbackQuery({ text: language === "fa" ? "زبان فارسی ذخیره شد." : "English preference saved." });
       await showAdminLanguage(ctx, true);
     } catch (error) {
       console.error("[admin-ops] language preference update failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to save language preference.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to save language preference.", "ذخیره تنظیم زبان ممکن نشد."), show_alert: true });
     }
   });
 
   bot.command("admin", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
     await recordAdminActivity(ctx, "admin_dashboard_opened");
     try {
       await showDashboard(ctx);
     } catch (error) {
       console.error("[admin-ops] dashboard failed:", error);
-      await ctx.reply("Unable to load the admin dashboard. Please try again.");
+      await ctx.reply(adminText(language, "Unable to load the admin dashboard. Please try again.", "بارگذاری داشبورد مدیریت ممکن نشد. دوباره تلاش کنید."));
     }
   });
 
   bot.command("adminstats", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
     try { await showDashboard(ctx); }
     catch (error) {
       console.error("[admin-ops] stats failed:", error);
-      await ctx.reply("Unable to load admin statistics.");
+      await ctx.reply(adminText(language, "Unable to load admin statistics.", "بارگذاری آمار مدیریت ممکن نشد."));
     }
   });
 
   bot.command("user", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
     const telegramId = ctx.match?.trim();
     if (!/^\d{5,20}$/.test(telegramId || "")) {
-      return ctx.reply("Usage: /user <telegram_id>\nExample: /user 123456789");
+      return ctx.reply(adminText(language, "Usage: /user <telegram_id>\nExample: /user 123456789", "نحوه استفاده: /user <telegram_id>\nنمونه: /user 123456789"));
     }
     await recordAdminActivity(ctx, "admin_user_lookup", telegramId);
     try { await showUser(ctx, telegramId); }
     catch (error) {
       console.error("[admin-ops] user lookup failed:", error);
-      await ctx.reply("Unable to load this user.");
+      await ctx.reply(adminText(language, "Unable to load this user.", "بارگذاری اطلاعات این کاربر ممکن نشد."));
     }
   });
 
@@ -671,6 +677,7 @@ export function registerAdminOps(bot) {
 
   bot.command("adminschema", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
     try {
       const result = await pool.query(`
         SELECT c.column_name, c.data_type, c.is_nullable,
@@ -746,7 +753,7 @@ export function registerAdminOps(bot) {
         : "Super Admin Telegram account is not present in users table.";
 
       await ctx.reply(
-        "PROFINO — ADMIN AUDIT SCHEMA\n\n" +
+        adminText(language, "PROFINO — ADMIN AUDIT SCHEMA\n\n", "پروفینو — ساختار ممیزی مدیریت\n\n") +
         (lines.length ? lines.join("\n") : "admin_audit_logs table not found.") +
         "\n\nADMIN_USERS TABLE SCHEMA\n" +
         (adminLines.length ? adminLines.join("\n") : "admin_users table not found.") +
@@ -758,17 +765,18 @@ export function registerAdminOps(bot) {
       );
     } catch (error) {
       console.error("[admin-ops] schema diagnostic failed:", error);
-      await ctx.reply("Unable to inspect admin audit schema. Diagnostic: " +
+      await ctx.reply(adminText(language, "Unable to inspect admin audit schema. Diagnostic: ", "بررسی ساختار ممیزی مدیریت ممکن نشد. جزئیات: ") +
         String(error?.message || error).slice(0, 500));
     }
   });
 
   bot.command("adminlogs", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
     const auditWrite = await recordAdminActivity(ctx, "admin_activity_viewed");
     if (!auditWrite.ok) {
       await ctx.reply(
-        "AUDIT WRITE FAILED\nDiagnostic: " +
+        adminText(language, "AUDIT WRITE FAILED\nDiagnostic: ", "ثبت رویداد ممیزی ناموفق بود\nجزئیات: ") +
         String(auditWrite.error || "No audit row returned").slice(0, 500)
       );
     }
@@ -776,7 +784,7 @@ export function registerAdminOps(bot) {
     catch (error) {
       console.error("[admin-ops] audit log failed:", error);
       await ctx.reply(
-        "Unable to load admin activity.\nDiagnostic: " +
+        adminText(language, "Unable to load admin activity.\nDiagnostic: ", "بارگذاری فعالیت‌های مدیریت ممکن نشد\nجزئیات: ") +
         String(error?.message || error).slice(0, 700)
       );
     }
@@ -784,35 +792,38 @@ export function registerAdminOps(bot) {
 
   bot.callbackQuery(/^admin_(home|refresh)$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
       await showDashboard(ctx, true);
     } catch (error) {
       console.error("[admin-ops] dashboard refresh failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to refresh.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to refresh.", "به‌روزرسانی ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^admin_users:\d+$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     try {
       const page = Number(ctx.callbackQuery.data.split(":")[1]);
       await ctx.answerCallbackQuery();
       await showUsers(ctx, page, true);
     } catch (error) {
       console.error("[admin-ops] users list failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to load users.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load users.", "بارگذاری کاربران ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^admin_user:\d+$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
       await showUser(ctx, ctx.callbackQuery.data.split(":")[1], true);
     } catch (error) {
       console.error("[admin-ops] user details failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to load user.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load user.", "بارگذاری اطلاعات کاربر ممکن نشد."), show_alert: true });
     }
   });
 
@@ -846,25 +857,29 @@ export function registerAdminOps(bot) {
 
   bot.callbackQuery(/^admin_posts$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
       await showPosts(ctx, true);
     } catch (error) {
       console.error("[admin-ops] post overview failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to load post overview.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post overview.", "بارگذاری نمای کلی پست‌ها ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^admin_posthistory$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     await ctx.answerCallbackQuery();
-    return ctx.reply("Use /posthistory to open the complete post history.");
+    return ctx.reply(adminText(language, "Use /posthistory to open the complete post history.", "برای مشاهده تاریخچه کامل پست‌ها، دستور /posthistory را ارسال کنید."));
   });
 
   bot.callbackQuery(/^admin_logs$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) {
       return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     }
+
+    const language = await getAdminLanguage(ctx);
 
     // Acknowledge the button immediately so Telegram does not leave the
     // inline-button spinner running while the database query is in progress.
@@ -881,7 +896,7 @@ export function registerAdminOps(bot) {
       // fails (or the audit query fails), send a visible fallback message.
       try {
         await ctx.reply(
-          "Unable to load admin activity.\nDiagnostic: " +
+          adminText(language, "Unable to load admin activity.\nDiagnostic: ", "بارگذاری فعالیت‌های مدیریت ممکن نشد\nجزئیات: ") +
           String(error?.message || error).slice(0, 700)
         );
       } catch (replyError) {
@@ -892,12 +907,12 @@ export function registerAdminOps(bot) {
 
   bot.command("dbschema", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
     try {
       const snapshot = await inspectCoreSchema(pool);
       const sections = formatCoreSchema(snapshot);
       await ctx.reply(
-        "PROFINO — CORE DATABASE SCHEMA\n" +
-        "Read-only inspection. No records or schema were changed."
+        adminText(language, "PROFINO — CORE DATABASE SCHEMA\nRead-only inspection. No records or schema were changed.", "پروفینو — ساختار پایگاه داده اصلی\nاین بررسی فقط‌خواندنی است؛ هیچ داده یا ساختاری تغییر نکرد.")
       );
       for (const section of sections) {
         for (let offset = 0; offset < section.length; offset += 3500) {
@@ -907,7 +922,7 @@ export function registerAdminOps(bot) {
     } catch (error) {
       console.error("[admin-ops] core database schema inspection failed:", error);
       await ctx.reply(
-        "Unable to inspect the core database schema.\nDiagnostic: " +
+        adminText(language, "Unable to inspect the core database schema.\nDiagnostic: ", "بررسی ساختار پایگاه داده اصلی ممکن نشد.\nجزئیات: ") +
         String(error?.message || error).slice(0, 500)
       );
     }
