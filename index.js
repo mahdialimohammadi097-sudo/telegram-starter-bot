@@ -11,6 +11,7 @@ import { ensurePostHistorySchema } from "./src/post-history.js"
 import { ensureAdminOpsSchema } from "./src/admin-ops.js"
 import { inspectCoreSchema } from "./src/database-diagnostics.js"
 import { formatStartupHealthReport } from "./src/health-report.js"
+import { startHealthMonitor } from "./src/health-monitor.js"
 
 const ADMIN_ID = 8810232463
 const token = process.env.TELEGRAM_BOT_TOKEN
@@ -96,6 +97,10 @@ async function main() {
     // A notification failure must never prevent the trading/account bot from starting.
     console.error("[health] startup report could not be delivered:", error?.error_code || error?.message || "unknown")
   }
+
+  // Start read-only periodic service monitoring. It does not receive Telegram updates.
+  const healthMonitor = startHealthMonitor({ bot, pool })
+  console.log("[health] automated monitor initialized (60-second interval).")
 
   // Start the PROFINO scheduled-post system.
   startScheduler(bot)
