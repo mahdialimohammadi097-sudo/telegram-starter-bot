@@ -425,13 +425,29 @@ export function registerAdminOps(bot) {
   });
 
   bot.callbackQuery(/^admin_logs$/, async (ctx) => {
-    if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    if (!isSuperAdminPrivate(ctx)) {
+      return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    }
+
+    // Acknowledge the button immediately so Telegram does not leave the
+    // inline-button spinner running while the database query is in progress.
+    await ctx.answerCallbackQuery();
+
     try {
-      await ctx.answerCallbackQuery();
       await showAuditLog(ctx, true);
     } catch (error) {
       console.error("[admin-ops] activity view failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to load activity.", show_alert: true });
+
+      // Do not answer the same callback query twice. If editing the dashboard
+      // fails (or the audit query fails), send a visible fallback message.
+      try {
+        await ctx.reply(
+          "Unable to load admin activity. Please try /adminlogs.\n" +
+          "The error has been recorded in the server logs."
+        );
+      } catch (replyError) {
+        console.error("[admin-ops] activity fallback reply failed:", replyError);
+      }
     }
   });
 }
