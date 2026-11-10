@@ -352,6 +352,53 @@ export function registerAdminOps(bot) {
     }
   });
 
+  bot.command("usersearch", async (ctx) => {
+    if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const term = ctx.match?.trim();
+    if (!term || term.length > 80) {
+      return ctx.reply("Usage: /usersearch <Telegram ID, username, or name>");
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT telegram_id, username, first_name, last_name, status
+         FROM users
+         WHERE telegram_id::text = $1
+            OR COALESCE(username, '') ILIKE '%' || $1 || '%'
+            OR COALESCE(first_name, '') ILIKE '%' || $1 || '%'
+            OR COALESCE(last_name, '') ILIKE '%' || $1 || '%'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 10`,
+        [term.replace(/^@/, "")]
+      );
+
+      if (!result.rowCount) return ctx.reply("No matching users found.");
+
+      const keyboard = new InlineKeyboard();
+      const lines = result.rows.map(user => {
+        const name = [user.first_name, user.last_name].filter(Boolean).join(" ") ||
+          (user.username ? "@" + user.username : "No name");
+        keyboard.text(
+          (name + " — " + user.status.toUpperCase()).slice(0, 60),
+          "admin_user:" + user.telegram_id
+        ).row();
+        return "ID: " + user.telegram_id + " | " +
+          (user.username ? "@" + user.username : name) +
+          " | " + user.status.toUpperCase();
+      });
+
+      keyboard.text("Back / بازگشت", "admin_home");
+      return ctx.reply(
+        "PROFINO — USER SEARCH / جست‌وجوی کاربران\n\n" +
+        lines.join("\n") + "\n\nShowing up to 10 matches.",
+        { reply_markup: keyboard }
+      );
+    } catch (error) {
+      console.error("[admin-ops] user search failed:", error);
+      return ctx.reply("Unable to search users right now.");
+    }
+  });
+
   bot.command("adminlogs", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     try { await showAuditLog(ctx); }
