@@ -6,6 +6,7 @@ import http from "node:http"
 import { Bot, webhookCallback } from "grammy"
 import { registerCommands } from "./src/commands.js"
 import { testDatabaseConnection } from "./src/database.js"
+import { startScheduler } from "./src/scheduler.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 
@@ -57,6 +58,10 @@ async function main() {
   }
 
   console.log(`[bot] logged in as @${me.username} (${mode} mode)`)
+
+  // Start the PROFINO scheduled-post system.
+  startScheduler(bot)
+  console.log("[scheduler] scheduled-post system initialized.")
 
   if (mode === "webhook") {
     const url = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "")
@@ -166,4 +171,3 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 main()
-      
