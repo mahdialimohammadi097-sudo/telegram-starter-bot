@@ -5,6 +5,7 @@ import { pool } from "./database.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
 import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
 import { registerAdminOps } from "./admin-ops.js";
+import { createRateLimiter } from "./rate-limit.js";
 
 const ADMIN_ID = 8810232463;
 const CHANNEL_USERNAME = "@PROFINO1";
@@ -161,6 +162,7 @@ async function showScheduledPosts(ctx) {
 }
 
 export function registerCommands(bot) {
+  const rateLimiter = createRateLimiter();
   // Keep all bot interactions private. This prevents group-based access-control
   // bypasses and avoids exposing account or administrative information in groups.
   // The owner account remains exempt from user-status checks.
@@ -173,6 +175,24 @@ export function registerCommands(bot) {
           text: "Please use the bot in a private chat.",
           show_alert: true
         });
+      }
+      return;
+    }
+
+    const rate = rateLimiter.consume({
+      userId: ctx.from.id,
+      isAdmin: ctx.from.id === ADMIN_ID
+    });
+
+    if (!rate.allowed) {
+      if (ctx.callbackQuery) {
+        return ctx.answerCallbackQuery(rate.shouldNotify ? {
+          text: "Too many requests. Please wait " + rate.retryAfterSeconds + "s.",
+          show_alert: true
+        } : {});
+      }
+      if (rate.shouldNotify && ctx.message) {
+        return ctx.reply("You're sending requests too quickly. Please wait " + rate.retryAfterSeconds + " seconds.");
       }
       return;
     }
