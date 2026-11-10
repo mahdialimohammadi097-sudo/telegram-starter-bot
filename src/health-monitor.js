@@ -28,7 +28,8 @@ export function startHealthMonitor({
   intervalMs = 60_000,
   logger = console,
   now = () => new Date(),
-  onStatus = () => {}
+  onStatus = () => {},
+  telegramCheck = async () => { await bot.api.getMe(); return true; }
 }) {
   let previous = { telegram: true, database: true };
   let running = false;
@@ -38,11 +39,11 @@ export function startHealthMonitor({
     running = true;
     try {
       const [telegramResult, databaseResult] = await Promise.allSettled([
-        bot.api.getMe(),
+        telegramCheck(),
         pool.query("SELECT 1 AS health_check")
       ]);
       const current = {
-        telegram: telegramResult.status === "fulfilled",
+        telegram: telegramResult.status === "fulfilled" && telegramResult.value !== false,
         database: databaseResult.status === "fulfilled"
       };
       onStatus(current);

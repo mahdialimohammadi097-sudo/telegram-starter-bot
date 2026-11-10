@@ -36,12 +36,14 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const bot = new Bot(token);
 const runtimeHealth = createRuntimeHealthState();
 let healthServer = null;
+let webhookHandler = null;
+let botUsername = "PROFINO";
 let healthMonitor = null;
 let scheduler = null;
 let shuttingDown = false;
 let shutdownPromise = null;
 
-function startHealthHttpServer(botUsername, webhookHandler = null) {
+function startHealthHttpServer() {
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url || "/", "http://localhost").pathname;
 
@@ -111,6 +113,23 @@ function sleep(ms) {
     const timer = setTimeout(resolve, ms);
     timer.unref?.();
   });
+}
+
+async function retryUntilAvailable(operation, label) {
+  let delayMs = 2_000;
+  while (!shuttingDown) {
+    try {
+      return await operation();
+    } catch (error) {
+      const code = error?.error_code ?? error?.response?.error_code;
+      if (code === 401 || code === 404) throw error;
+      console.error(`[startup] ${label} unavailable:`, error?.message ?? error);
+      console.error(`[startup] retrying ${label} in ${Math.ceil(delayMs / 1000)} seconds`);
+      await sleep(delayMs);
+      delayMs = Math.min(delayMs * 2, 60_000);
+    }
+  }
+  throw new Error(`Startup cancelled while waiting for ${label}.`);
 }
 
 async function closeHttpServer() {
@@ -188,17 +207,13 @@ async function sendStartupReport(botUsername) {
 }
 
 async function startPolling() {
-  await bot.api.deleteWebhook({ drop_pending_updates: false }).catch((error) => {
-    console.error("[bot] could not clear previous webhook:", error?.message ?? error);
-    throw error;
-  });
-
   let backoffMs = 2_000;
 
   while (!shuttingDown) {
     const startedAt = Date.now();
 
     try {
+      await bot.api.deleteWebhook({ drop_pending_updates: false });
       console.log("[bot] starting Telegram long polling");
       await bot.start({
         onStart: () => {
@@ -235,7 +250,12 @@ async function startPolling() {
 }
 
 async function main() {
-  const dbResult = await testDatabaseConnection();
+  healthServer = await startHealthHttpServer();
+
+  const dbResult = await retryUntilAvailable(
+    testDatabaseConnection,
+    "PostgreSQL connection"
+  );
   runtimeHealth.setDatabaseReady(true);
   console.log("[database] PostgreSQL connected successfully.");
   console.log("[database] server time:", dbResult.server_time);
@@ -245,14 +265,22 @@ async function main() {
   await ensureAdminOpsSchema();
   console.log("[admin-ops] audit log schema ready.");
 
-  const me = await bot.api.getMe();
+  const me = await retryUntilAvailable(() => bot.api.getMe(), "Telegram API authentication");
+  botUsername = me.username;
   console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
 
   await sendStartupReport(me.username);
 
+  const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\\/$/, "");
   healthMonitor = startHealthMonitor({
     bot,
     pool,
+    telegramCheck: mode === "webhook"
+      ? async () => {
+          const info = await bot.api.getWebhookInfo();
+          return info.url === `${webhookUrl}/telegram`;
+        }
+      : async () => { await bot.api.getMe(); return true; },
     onStatus: (status) => {
       runtimeHealth.setTelegramApiConnected(status.telegram);
       runtimeHealth.setDatabaseReady(status.database);
@@ -268,8 +296,7 @@ async function main() {
     }
 
     const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined;
-    const handler = webhookCallback(bot, "http", { secretToken: secret });
-    healthServer = await startHealthHttpServer(me.username, handler);
+    webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
 
     await bot.api.setWebhook(`${webhookUrl}/telegram`, {
       secret_token: secret,
@@ -281,7 +308,6 @@ async function main() {
     return;
   }
 
-  healthServer = await startHealthHttpServer(me.username);
   await startPolling();
 }
 
