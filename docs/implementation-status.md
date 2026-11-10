@@ -1,5 +1,6 @@
 # PROFINO Implementation Status
-**Audit date:** 2026-11-10\n**Working branch:** `feature/phase2-financial-foundation`  
+**Audit date:** 2026-11-10  
+**Working branch:** `feature/phase2-financial-foundation`  
 **Audited source revision:** `d08731326624653347b148cc07d85c80c0c5ad61` (main at 2026-11-10)  
 **Scope:** Static review of the repository source. Production runtime and `/start` were verified; a read-only production schema report was reviewed. No live financial transaction was performed.
 
@@ -55,13 +56,14 @@ Percentages below describe implementation completeness in the audited source. A 
 7. Add integration tests with a disposable database and testnet-only payment flows; do not test with customer funds.
 
 ## Next safe implementation sequence
-- **Completed runtime foundation:** startup/readiness/reconnect/shutdown implementation and automated tests; live FadeHost smoke test remains pending.
+- **Completed runtime foundation:** startup/readiness/reconnect/shutdown implementation and automated tests; live health endpoints and the owner's `/start` smoke test are confirmed. Full financial end-to-end testing remains pending.
 - **Completed admin localization foundation:** persisted language preference and the principal admin workflows.
 - **Phase 1:** Production schema review and ledger invariant tests (read-only first); initial report and exact eight-decimal helper hardening are in draft PR #29.
 - **Phase 3:** Referral attribution without monetary rewards.
 - **Phase 4:** Testnet deposit watcher and reconciliation, behind a disabled-by-default feature flag.
 - **Phase 5:** Withdrawal workflow and risk controls, also disabled until independently reviewed.
-- **Product scope decision:** Arbitrage, exchange trading and automated order execution are explicitly out of scope.\n- **Next financial foundation:** Follow the five workstreams and acceptance criteria in `docs/financial-product-implementation-plan.md`. No production financial workflow is enabled by this plan.
+- **Product scope decision:** Arbitrage, exchange trading and automated order execution are explicitly out of scope.
+- **Next financial foundation:** Follow the five workstreams and acceptance criteria in `docs/financial-product-implementation-plan.md`. No production financial workflow is enabled by this plan.
 
 ## Files reviewed
 - `src/admin-language.js`
