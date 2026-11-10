@@ -1,6 +1,6 @@
 # PROFINO Implementation Status
-**Audit date:** 2026-11-10  
-**Audited source revision:** `d08731326624653347b148cc07d85c80c0c5ad61` (main at 2026-11-10)  
+**Audit date:** 2026-11-11  
+**Audited source revision:** `aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f` (main at 2026-11-11)  
 **Scope:** Static review of the repository source. Production runtime and `/start` were verified; a read-only production schema report was reviewed. No live financial transaction was performed.
 
 ## Progress snapshot
@@ -83,3 +83,17 @@ Percentages below describe implementation completeness in the audited source. A 
 - `.github/workflows/validate.yml`
 - `.github/workflows/external-uptime.yml`
 - `package.json`
+
+
+## 2026-11-11 follow-up evidence — branch-only work
+
+The following changes are present on open draft pull requests and are **not part of main or the deployed service**:
+
+- **PR #35 — isolated ledger-posting foundation:** adds a transaction-scoped posting service with exact eight-decimal USDT arithmetic, balanced-entry validation, account row locks, idempotency comparison, rollback handling, and a non-negative projected-balance check for `AVAILABLE` accounts. A follow-up guard now requires exactly one row to transition from `pending` to `posted`; otherwise the transaction rolls back. CI runs #245 and #247 passed for the corresponding code heads.
+- **PR #36 — PostgreSQL 17 integration tests:** uses a uniquely named temporary schema and tests concurrent identical idempotency keys, competing `AVAILABLE` debits, and full rollback when an injected trigger rejects an entry. GitHub Actions run #248 passed for head `43fc9c8570ba236554572c6f746b28c4b268a67a`, including PostgreSQL service initialization, dependency installation, syntax checks, and `npm test`.
+- **PR #37 — ledger audit evidence:** documentation-only update; CI run #244 passed.
+- **PR #38 — database connection security review:** documentation-only review; records that `src/database.js` sets `ssl: false`. Whether this is exploitable depends on FadeHost's actual network topology and TLS support, neither of which has been verified. CI run #249 passed.
+
+These branch tests use a minimal disposable schema. They do not reproduce the full production schema, deferred constraints, trigger/function bodies, or FadeHost runtime. Therefore, they are useful engineering evidence but do not satisfy the production-schema acceptance gate and do not authorize enabling any financial workflow.
+
+**Production boundary unchanged:** no PR above has been merged or deployed; no production database, schema, secrets, customer balance, deposit, withdrawal, or financial transaction has been changed.
