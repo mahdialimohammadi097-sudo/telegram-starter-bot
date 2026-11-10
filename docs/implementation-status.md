@@ -1,5 +1,5 @@
 # PROFINO Implementation Status
-**Audit date:** 2026-11-10  
+**Audit date:** 2026-11-10\n**Working branch:** `feature/phase2-financial-foundation`  
 **Audited source revision:** `d08731326624653347b148cc07d85c80c0c5ad61` (main at 2026-11-10)  
 **Scope:** Static review of the repository source. Production runtime and `/start` were verified; a read-only production schema report was reviewed. No live financial transaction was performed.
 
@@ -23,7 +23,7 @@ Percentages below describe implementation completeness in the audited source. A 
 | Internal and external monitoring | 95% | Internal Telegram/database checks and independent HTTP uptime workflow exist; alert delivery, recovery, and live health endpoints were verified. |
 | Security and financial risk controls | 50% | Private-chat checks, rate limiting and admin guards exist; custody, withdrawal approval, reconciliation, AML/KYC and financial risk controls are not complete. |
 | Admin language selector (English/Persian) | 70% | Persistent preference, language selector, dashboard, user operations, publishing previews, scheduler feedback, post history, and core admin diagnostic/error feedback are bilingual; a final sweep and production verification remain. |
-| Automated arbitrage engine | 0% | No exchange connectivity, executable strategy engine, order lifecycle, or reconciliation process was found in the reviewed source. |
+| Automated arbitrage engine | Out of scope | Deliberately excluded from the PROFINO product; no exchange trading, order execution or arbitrage engine is to be built. |
 
 **No single overall completion percentage is published.** A simple average would give equal weight to monitoring and custody/financial execution, which would materially misrepresent readiness.
 
@@ -61,7 +61,7 @@ Percentages below describe implementation completeness in the audited source. A 
 - **Phase 3:** Referral attribution without monetary rewards.
 - **Phase 4:** Testnet deposit watcher and reconciliation, behind a disabled-by-default feature flag.
 - **Phase 5:** Withdrawal workflow and risk controls, also disabled until independently reviewed.
-- **Phase 6:** Strategy simulation/paper trading before any live arbitrage integration.
+- **Product scope decision:** Arbitrage, exchange trading and automated order execution are explicitly out of scope.\n- **Next financial foundation:** Follow the five workstreams and acceptance criteria in `docs/financial-product-implementation-plan.md`. No production financial workflow is enabled by this plan.
 
 ## Files reviewed
 - `src/admin-language.js`
