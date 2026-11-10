@@ -275,7 +275,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
 
   const action = newStatus === "active" ? "activate" : "suspend";
   const keyboard = new InlineKeyboard()
-    .text("Confirm / تأیید", "admin_user_confirm:" + telegramId + ":" + newStatus)
+    .text("Confirm / تأیید", "admin_user_confirm:" + telegramId + ":" + newStatus + ":" + current.status)
     .text("Cancel / انصراف", "admin_user:" + telegramId);
 
   await ctx.answerCallbackQuery();
@@ -290,7 +290,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
   );
 }
 
-async function applyUserStatus(ctx, telegramId, newStatus) {
+async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
   if (Number(telegramId) === SUPER_ADMIN_ID) {
     return ctx.answerCallbackQuery({ text: "The Super Admin cannot be changed.", show_alert: true });
   }
@@ -303,9 +303,13 @@ async function applyUserStatus(ctx, telegramId, newStatus) {
       [telegramId]
     );
 
-    if (!locked.rowCount || locked.rows[0].status === newStatus) {
+    if (!locked.rowCount || locked.rows[0].status !== expectedStatus ||
+        locked.rows[0].status === newStatus) {
       await client.query("ROLLBACK");
-      await ctx.answerCallbackQuery({ text: "User not found or status unchanged.", show_alert: true });
+      await ctx.answerCallbackQuery({
+        text: "This confirmation is outdated. Reopen the user details and try again.",
+        show_alert: true
+      });
       return;
     }
 
@@ -323,8 +327,8 @@ async function applyUserStatus(ctx, telegramId, newStatus) {
 
     const oldStatus = locked.rows[0].status;
     const updated = await client.query(
-      "UPDATE users SET status = $1 WHERE telegram_id = $2 RETURNING id, telegram_id, status",
-      [newStatus, telegramId]
+      "UPDATE users SET status = $1 WHERE telegram_id = $2 AND status = $3 RETURNING id, telegram_id, status",
+      [newStatus, telegramId, expectedStatus]
     );
     const auditDetails = JSON.stringify({ old_status: oldStatus, new_status: newStatus });
 
@@ -629,10 +633,10 @@ export function registerAdminOps(bot) {
     }
   });
 
-  bot.callbackQuery(/^admin_user_confirm:\d+:(active|suspended)$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user_confirm:\d+:(active|suspended):(active|suspended)$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const [, telegramId, status] = ctx.callbackQuery.data.split(":");
-    try { await applyUserStatus(ctx, telegramId, status); }
+    const [, telegramId, status, expectedStatus] = ctx.callbackQuery.data.split(":");
+    try { await applyUserStatus(ctx, telegramId, status, expectedStatus); }
     catch (error) {
       console.error("[admin-ops] status update failed:", error);
       await ctx.answerCallbackQuery({ text: "Unable to update user status.", show_alert: true });
