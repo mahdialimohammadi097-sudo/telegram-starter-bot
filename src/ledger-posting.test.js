@@ -140,3 +140,95 @@ test("rolls back when an AVAILABLE account would become negative", async () => {
   assert.equal(calls.at(-1).sql, "RELEASE");
   assert.equal(calls.some(call => call.sql.startsWith("INSERT INTO ledger_transactions")), false);
 });
+
+
+function makeExistingPostingPool({ transaction = {}, priorEntries = [] } = {}) {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      const normalized = sql.replace(/\\s+/g, " ").trim();
+      calls.push({ sql: normalized, params });
+      if (["BEGIN", "COMMIT", "ROLLBACK"].includes(normalized)) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (normalized.includes("pg_advisory_xact_lock")) {
+        return { rowCount: 1, rows: [] };
+      }
+      if (normalized.includes("FROM ledger_transactions") &&
+          normalized.includes("idempotency_key = $1")) {
+        return { rowCount: 1, rows: [{
+          id: "77",
+          transaction_type: "internal_transfer",
+          reference_id: "123",
+          description: "test only",
+          status: "posted",
+          ...transaction
+        }] };
+      }
+      if (normalized.includes("FROM ledger_entries") &&
+          normalized.includes("WHERE transaction_id = $1")) {
+        return { rowCount: priorEntries.length, rows: priorEntries };
+      }
+      throw new Error("Unexpected SQL in idempotency test: " + normalized);
+    },
+    release() {
+      calls.push({ sql: "RELEASE", params: [] });
+    }
+  };
+  return { calls, pool: { async connect() { return client; } } };
+}
+
+test("returns an idempotent success for an identical posted request", async () => {
+  const priorEntries = [
+    { account_id: "1", entry_type: "debit", amount: "2.00000000", currency: "USDT" },
+    { account_id: "2", entry_type: "credit", amount: "2.00000000", currency: "USDT" }
+  ];
+  const { pool, calls } = makeExistingPostingPool({ priorEntries });
+  const { postLedgerTransaction } = await import("./ledger-posting.js");
+
+  const result = await postLedgerTransaction({
+    pool,
+    transactionType: "internal_transfer",
+    referenceId: 123,
+    idempotencyKey: "test-transfer-existing",
+    description: "test only",
+    entries: [...priorEntries].reverse()
+  });
+
+  assert.deepEqual(result, {
+    transactionId: "77",
+    posted: true,
+    idempotent: true
+  });
+  assert.equal(calls.some(call => call.sql.startsWith("INSERT INTO")), false);
+  assert.equal(calls.at(-2).sql, "COMMIT");
+  assert.equal(calls.at(-1).sql, "RELEASE");
+});
+
+test("rejects idempotency-key reuse when request metadata differs", async () => {
+  const priorEntries = [
+    { account_id: "1", entry_type: "debit", amount: "2.00000000", currency: "USDT" },
+    { account_id: "2", entry_type: "credit", amount: "2.00000000", currency: "USDT" }
+  ];
+  const { pool, calls } = makeExistingPostingPool({
+    priorEntries,
+    transaction: { description: "a different request" }
+  });
+  const { postLedgerTransaction } = await import("./ledger-posting.js");
+
+  await assert.rejects(
+    postLedgerTransaction({
+      pool,
+      transactionType: "internal_transfer",
+      referenceId: 123,
+      idempotencyKey: "test-transfer-reused-key",
+      description: "test only",
+      entries: priorEntries
+    }),
+    /Idempotency key was already used for a different request/
+  );
+
+  assert.equal(calls.at(-2).sql, "ROLLBACK");
+  assert.equal(calls.at(-1).sql, "RELEASE");
+  assert.equal(calls.some(call => call.sql.startsWith("INSERT INTO")), false);
+});
