@@ -30,7 +30,7 @@ test("clearly reports expected tables missing from the live schema", () => {
     columns: [],
     constraints: []
   });
-  assert.ok(messages.some(message => message === "TABLE: ledger_entries\\nNOT FOUND"));
+  assert.ok(messages.some(message => message === "TABLE: ledger_entries\nNOT FOUND"));
 });
 
 test("includes the full table inventory and user-defined trigger definitions", () => {
