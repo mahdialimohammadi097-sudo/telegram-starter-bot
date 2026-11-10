@@ -28,17 +28,39 @@ function dashboardKeyboard() {
     .text("Refresh / بروزرسانی", "admin_refresh");
 }
 
-async function recordAdminActivity(ctx, action, targetUserId = null, details = {}) {
+async function recordAdminActivity(ctx, action, targetUserIdInput = null, details = {}) {
   if (!isSuperAdminPrivate(ctx)) {
     return { ok: false, error: "Super Admin private-chat check did not pass." };
   }
   try {
+    const admin = await pool.query(
+      `SELECT au.user_id
+       FROM admin_users au
+       JOIN users u ON u.id = au.user_id
+       WHERE u.telegram_id = $1 AND au.status = 'active'
+       LIMIT 1`,
+      [ctx.from.id]
+    );
+    if (!admin.rowCount) {
+      return { ok: false, error: "No active admin_users record is linked to this Telegram account." };
+    }
+
+    let targetUserId = null;
+    if (targetUserIdInput !== null && targetUserIdInput !== undefined) {
+      const target = await pool.query(
+        "SELECT id FROM users WHERE telegram_id = $1 LIMIT 1",
+        [targetUserIdInput]
+      );
+      targetUserId = target.rows[0]?.id ?? null;
+    }
+
     const result = await pool.query(
       `INSERT INTO admin_audit_logs
-        (admin_user_id, actor_telegram_id, action, target_user_id, details)
-       VALUES ($1, $1, $2, $3, $4::jsonb)
+        (admin_user_id, actor_telegram_id, action, target_user_id,
+         currency, metadata, details)
+       VALUES ($1, $2, $3, $4, 'N/A', $5::jsonb, $5::jsonb)
        RETURNING id, created_at`,
-      [ctx.from.id, action, targetUserId, JSON.stringify(details)]
+      [admin.rows[0].user_id, ctx.from.id, action, targetUserId, JSON.stringify(details)]
     );
     return { ok: result.rowCount === 1, id: result.rows[0]?.id };
   } catch (error) {
@@ -213,15 +235,17 @@ async function showPosts(ctx, edit = false) {
 
 async function showAuditLog(ctx, edit = false) {
   const result = await pool.query(
-    `SELECT action, target_user_id, details, created_at
-     FROM admin_audit_logs
-     ORDER BY id DESC
+    `SELECT a.action, a.target_user_id, u.telegram_id AS target_telegram_id,
+            a.details, a.created_at
+     FROM admin_audit_logs a
+     LEFT JOIN users u ON u.id = a.target_user_id
+     ORDER BY a.id DESC
      LIMIT 10`
   );
   const lines = result.rows.map(row =>
     formatDate(row.created_at) + "\n" +
     row.action.toUpperCase() +
-    (row.target_user_id ? " | User: " + row.target_user_id : "") +
+    (row.target_telegram_id ? " | Telegram: " + row.target_telegram_id : "") +
     (row.details?.new_status ? " | " + row.details.new_status.toUpperCase() : "")
   );
   const message = [
@@ -275,7 +299,7 @@ async function applyUserStatus(ctx, telegramId, newStatus) {
   try {
     await client.query("BEGIN");
     const locked = await client.query(
-      "SELECT status FROM users WHERE telegram_id = $1 FOR UPDATE",
+      "SELECT id, status FROM users WHERE telegram_id = $1 FOR UPDATE",
       [telegramId]
     );
 
@@ -285,21 +309,36 @@ async function applyUserStatus(ctx, telegramId, newStatus) {
       return;
     }
 
+    const admin = await client.query(
+      `SELECT au.user_id
+       FROM admin_users au
+       JOIN users u ON u.id = au.user_id
+       WHERE u.telegram_id = $1 AND au.status = 'active'
+       LIMIT 1`,
+      [SUPER_ADMIN_ID]
+    );
+    if (!admin.rowCount) {
+      throw new Error("No active admin_users record is linked to the Super Admin.");
+    }
+
     const oldStatus = locked.rows[0].status;
     const updated = await client.query(
-      "UPDATE users SET status = $1 WHERE telegram_id = $2 RETURNING telegram_id, status",
+      "UPDATE users SET status = $1 WHERE telegram_id = $2 RETURNING id, telegram_id, status",
       [newStatus, telegramId]
     );
+    const auditDetails = JSON.stringify({ old_status: oldStatus, new_status: newStatus });
 
     await client.query(
       `INSERT INTO admin_audit_logs
-        (actor_telegram_id, action, target_user_id, details)
-       VALUES ($1, $2, $3, $4::jsonb)`,
+        (admin_user_id, actor_telegram_id, action, target_user_id,
+         currency, metadata, details)
+       VALUES ($1, $2, $3, $4, 'N/A', $5::jsonb, $5::jsonb)`,
       [
+        admin.rows[0].user_id,
         SUPER_ADMIN_ID,
         newStatus === "active" ? "user_activated" : "user_suspended",
-        telegramId,
-        JSON.stringify({ old_status: oldStatus, new_status: newStatus })
+        updated.rows[0].id,
+        auditDetails
       ]
     );
     await client.query("COMMIT");
