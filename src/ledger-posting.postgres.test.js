@@ -78,7 +78,7 @@ async function seedAvailableBalance(accountId, amount) {
 test("PostgreSQL 17 integration tests are enabled only with DATABASE_URL", {
   skip: !enabled
 }, async () => {
-  const debit = await createAccount("AVAILABLE");
+  const debit = await createAccount("CLEARING");
   const credit = await createAccount("CLEARING");
   const entries = [
     { account_id: debit, entry_type: "debit", amount: "1.25", currency: "USDT" },
