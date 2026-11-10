@@ -206,8 +206,8 @@ async function showAuditLog(ctx, edit = false) {
     (row.details?.new_status ? " | " + row.details.new_status.toUpperCase() : "")
   );
   const message = [
-    "PROFINO — ADMIN ACTIVITY",
-    "گزارش فعالیت مدیر",
+    "PROFINO — USER STATUS AUDIT",
+    "گزارش تغییر وضعیت کاربران",
     "",
     lines.length ? lines.join("\n\n") : "No admin activity recorded yet."
   ].join("\n");
@@ -255,18 +255,22 @@ async function applyUserStatus(ctx, telegramId, newStatus) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const updated = await client.query(
-      `UPDATE users SET status = $1
-       WHERE telegram_id = $2 AND status <> $1
-       RETURNING telegram_id, status`,
-      [newStatus, telegramId]
+    const locked = await client.query(
+      "SELECT status FROM users WHERE telegram_id = $1 FOR UPDATE",
+      [telegramId]
     );
 
-    if (!updated.rowCount) {
+    if (!locked.rowCount || locked.rows[0].status === newStatus) {
       await client.query("ROLLBACK");
       await ctx.answerCallbackQuery({ text: "User not found or status unchanged.", show_alert: true });
       return;
     }
+
+    const oldStatus = locked.rows[0].status;
+    const updated = await client.query(
+      "UPDATE users SET status = $1 WHERE telegram_id = $2 RETURNING telegram_id, status",
+      [newStatus, telegramId]
+    );
 
     await client.query(
       `INSERT INTO admin_audit_logs
@@ -276,7 +280,7 @@ async function applyUserStatus(ctx, telegramId, newStatus) {
         SUPER_ADMIN_ID,
         newStatus === "active" ? "user_activated" : "user_suspended",
         telegramId,
-        JSON.stringify({ old_status: "changed", new_status: newStatus })
+        JSON.stringify({ old_status: oldStatus, new_status: newStatus })
       ]
     );
     await client.query("COMMIT");
