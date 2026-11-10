@@ -93,6 +93,10 @@ The following changes are present on open draft pull requests and are **not part
 - **PR #36 — PostgreSQL 17 integration tests:** uses a uniquely named temporary schema and tests concurrent identical idempotency keys, competing `AVAILABLE` debits, and full rollback when an injected trigger rejects an entry. GitHub Actions run #248 passed for head `43fc9c8570ba236554572c6f746b28c4b268a67a`, including PostgreSQL service initialization, dependency installation, syntax checks, and `npm test`.
 - **PR #37 — ledger audit evidence:** documentation-only update; CI run #244 passed.
 - **PR #38 — database connection security review:** documentation-only review; records that `src/database.js` sets `ssl: false`. Whether this is exploitable depends on FadeHost's actual network topology and TLS support, neither of which has been verified. CI run #249 passed.
+- **PR #39 — startup diagnostic sanitization:** restricts the startup report to a validated five-character SQLSTATE or the fixed `UNAVAILABLE` label, preventing arbitrary PostgreSQL driver error text from leaking into the admin report. CI run #251 passed.
+- **PR #31 — financial product plan:** CI passed for its current head, but the branch is one commit behind current main and has diverged; rebase/update and rerun CI are still required.
+- **PR #32 — referral invite-link display:** CI passed for its current head, but the branch is one commit behind current main and has diverged; rebase/update and rerun CI are still required. Referral attribution and rewards remain disabled.
+- **PR #34 — Node.js CI matrix:** CI passed and the branch is based on current main.
 
 These branch tests use a minimal disposable schema. They do not reproduce the full production schema, deferred constraints, trigger/function bodies, or FadeHost runtime. Therefore, they are useful engineering evidence but do not satisfy the production-schema acceptance gate and do not authorize enabling any financial workflow.
 
