@@ -55,12 +55,12 @@ export function startHealthHttpServer({
     };
     const onListening = () => {
       server.off("error", onError);
-      console.log(`[health] HTTP endpoints listening on port ${server.address().port}`);
+      console.log(`[health] HTTP endpoints listening on 0.0.0.0:${server.address().port}`);
       resolve(server);
     };
 
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(port);
+    server.listen(port, "0.0.0.0");
   });
 }
