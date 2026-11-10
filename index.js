@@ -8,6 +8,7 @@ import { registerCommands } from "./src/commands.js"
 import { testDatabaseConnection } from "./src/database.js"
 import { startScheduler } from "./src/scheduler.js"
 import { ensurePostHistorySchema } from "./src/post-history.js"
+import { ensureAdminOpsSchema } from "./src/admin-ops.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 
@@ -45,6 +46,8 @@ async function main() {
     console.log("[database] server time:", result.server_time)
     await ensurePostHistorySchema()
     console.log("[post-history] schema and audit trigger ready.")
+    await ensureAdminOpsSchema()
+    console.log("[admin-ops] audit log schema ready.")
   } catch (err) {
     console.error("[database] connection test failed:", err?.message ?? err)
     console.error("[database] startup aborted. Telegram bot will not start.")
