@@ -1,6 +1,6 @@
 # PROFINO Implementation Status
 **Audit date:** 2026-11-10  
-**Audited source revision:** `8d1cc48981d59bd865ebc0a80c42cbe1dbf1cf88`  
+**Audited source revision:** `588c550d01e32a2c8453ddc13bd9253b0a8a7148`  
 **Scope:** Static review of the repository source. Production database schema, live Telegram flows, and live financial transactions were not exercised during this audit.
 
 ## Progress snapshot
@@ -18,11 +18,11 @@ Percentages below are implementation-maturity estimates based on code present in
 | Withdrawals | 0% | Withdrawal service is explicitly disabled. |
 | Profit calculation and posting | 5% | Profit records are referenced by diagnostics, but no verified accrual/distribution workflow was found in the reviewed user flows. |
 | Referral program | 5% | Referral code is generated at registration; referral details and reward processing remain placeholders. |
-| Admin operations | 70% | Owner-only dashboard, user lookup/status operations and audit logging exist; full admin product and bilingual selector are incomplete. |
-| Scheduled channel publishing | 90% | Drafting, preview, approval, scheduling, history and interrupted-operation recovery exist; production end-to-end testing remains necessary. |
+| Admin operations | 75% | Owner-only dashboard, user lookup/status operations, audit logging, persisted language preference and bilingual publishing/history workflows exist; some diagnostic/error screens still need localization and production verification. |
+| Scheduled channel publishing | 90% | Drafting, preview, approval, scheduling, history and interrupted-operation recovery exist; admin-facing preview, approval, scheduling and history messages now support English/Persian. Production end-to-end testing remains necessary. |
 | Internal and external monitoring | 95% | Internal Telegram/database checks and independent HTTP uptime workflow exist; alert delivery and recovery were verified in a prior workflow run. |
 | Security and financial risk controls | 50% | Private-chat checks, rate limiting and admin guards exist; custody, withdrawal approval, reconciliation, AML/KYC and financial risk controls are not complete. |
-| Admin language selector (English/Persian) | 10% | Some admin labels are bilingual, but a persistent language preference and complete localized panel were not found. |
+| Admin language selector (English/Persian) | 70% | Persistent preference, language selector, dashboard, user operations, publishing previews, scheduler feedback and post history are bilingual; remaining diagnostics and edge-case messages need review. |
 | Automated arbitrage engine | 0% | No exchange connectivity, executable strategy engine, order lifecycle, or reconciliation process was found in the reviewed source. |
 
 **No single overall completion percentage is published.** A simple average would give equal weight to monitoring and custody/financial execution, which would materially misrepresent readiness.
@@ -30,6 +30,7 @@ Percentages below are implementation-maturity estimates based on code present in
 ## Confirmed safeguards
 - The customer-facing bot strings inspected in `src/commands.js` are English.
 - Wallet balances are read from ledger transactions with `posted` status only.
+- Wallet USDT formatting now preserves decimal precision without converting database numeric values to JavaScript floating-point numbers.
 - Deposit and withdrawal screens warn that the services are not enabled.
 - Admin operations are restricted to the configured owner in a private chat.
 - Scheduled posts require an explicit admin approval step before publication.
@@ -53,6 +54,10 @@ Percentages below are implementation-maturity estimates based on code present in
 - **Phase 6:** Strategy simulation/paper trading before any live arbitrage integration.
 
 ## Files reviewed
+- `src/admin-language.js`
+- `src/ledger-safety.js`
+- `src/ledger-safety.test.js`
+- `src/post-history.js`
 - `index.js`
 - `src/commands.js`
 - `src/database.js`

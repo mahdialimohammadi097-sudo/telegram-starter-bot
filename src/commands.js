@@ -2,6 +2,7 @@
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
+import { formatUsdt } from "./ledger-safety.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
 import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
 import { registerAdminOps } from "./admin-ops.js";
@@ -546,7 +547,7 @@ export function registerCommands(bot) {
           userResult.rows[0].id
         );
 
-        const format = value => Number(value).toFixed(8);
+        const format = formatUsdt;
 
         return ctx.reply(
           "MY WALLET\n\n" +
