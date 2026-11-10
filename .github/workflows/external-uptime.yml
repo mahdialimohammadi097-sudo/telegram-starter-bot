@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
   uptime:
@@ -18,13 +17,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Restore previous monitor state
+        uses: actions/cache/restore@v4
+        with:
+          path: .profinostate
+          key: profino-uptime-${{ github.run_id }}
+          restore-keys: |
+            profino-uptime-
+
       - name: Read previous monitor state
         id: previous
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          PREVIOUS="$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/PROFINO_UPTIME_STATE" --jq '.value' 2>/dev/null || echo unknown)"
+          if [ -f .profinostate/status ]; then
+            PREVIOUS="$(cat .profinostate/status)"
+          else
+            PREVIOUS="unknown"
+          fi
           echo "status=$PREVIOUS" >> "$GITHUB_OUTPUT"
           echo "Previous monitor state: $PREVIOUS"
 
@@ -76,25 +85,23 @@ jobs:
             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --output /dev/null
 
-      - name: Save current monitor state
-        if: steps.notify.outcome == 'success' || steps.notify.outcome == 'skipped'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CURRENT_STATUS: ${{ steps.check.outputs.status }}
+      - name: Prepare monitor state
+        if: steps.notify.outcome == 'success'
         shell: bash
         run: |
-          if gh api --method PATCH "repos/$GITHUB_REPOSITORY/actions/variables/PROFINO_UPTIME_STATE" -f value="$CURRENT_STATUS" >/dev/null 2>&1; then
-            echo "Monitor state updated."
-          else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/variables" \
-              -f name="PROFINO_UPTIME_STATE" \
-              -f value="$CURRENT_STATUS" >/dev/null
-            echo "Monitor state initialized."
-          fi
+          mkdir -p .profinostate
+          printf "%s" "${{ steps.check.outputs.status }}" > .profinostate/status
+
+      - name: Save monitor state
+        if: steps.notify.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: .profinostate
+          key: profino-uptime-${{ github.run_id }}
 
       - name: Mark unavailable application check as failed
         if: steps.check.outputs.status == 'down'
         shell: bash
         run: |
-          echo "::error::PROFINO is unavailable. A Telegram alert was sent on the state change."
+          echo "::error::PROFINO is unavailable. A Telegram alert is sent only when status changes."
           exit 1
