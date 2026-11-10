@@ -2,7 +2,7 @@
 
 **Audit date:** 2026-11-10  
 **Audited revision:** `d08731326624653347b148cc07d85c80c0c5ad61`  
-**Working branch:** `feature/phase1-production-audit`
+**Merged revision:** `f48e6c330bf2319095e3f7630ebb3a9c3df5a1c1` (PR #29)
 
 ## Scope and evidence
 
@@ -35,7 +35,7 @@ Verified evidence available for this review:
 6. The schema output confirms many useful indexes, including ledger transaction lookup, user investment lookup, pending profit lookup, due scheduled posts, and unique active wallet assignment per user/type.
 
 ### Important limitations / open verification
-1. The supplied production output listed all tables but only included full column/constraint detail for selected tables. The branch now expands the read-only diagnostic to cover all 25 known tables; those new diagnostic results are not yet available from production because the branch has not been deployed.
+1. The supplied production output listed all tables but only included full column/constraint detail for selected tables. The branch now expands the read-only diagnostic to cover all 25 known tables; those diagnostic results can now be collected after the FadeHost deployment completes.
 2. The output identifies deferred ledger triggers but does not include their function bodies or full trigger definitions. We must inspect those definitions to confirm exactly when and how balance is enforced.
 3. The `admin_audit_logs.admin_user_id` foreign key references `admin_users(user_id)`. Confirm that the actual Super Admin is present and active in `admin_users`; otherwise audit writes can fail even though the Telegram ID is recognized elsewhere.
 4. Schema presence does not prove application-level workflows are complete or safe. The current wallet screen is a read-only balance view; no complete deposit, withdrawal, investment, or profit lifecycle is implemented.
@@ -53,7 +53,7 @@ Verified evidence available for this review:
 
 ## Next actions
 
-1. The read-only `/dbschema` diagnostic has now been expanded on this branch to report columns and constraints for all 25 known production tables, in addition to indexes and trigger/function definitions. After this branch is reviewed and explicitly deployed, rerun `/dbschema` and provide the remaining financial-table sections and complete `DATABASE TRIGGERS` output.
+1. The read-only `/dbschema` diagnostic was expanded and merged in PR #29 to report columns and constraints for all 25 known production tables, in addition to indexes and trigger/function definitions. After the PR #29 deployment is confirmed, rerun `/dbschema` and provide the remaining financial-table sections and complete `DATABASE TRIGGERS` output.
 2. Verify the Super Admin has an active `admin_users` row so audit writes satisfy the production foreign key.
 3. Trace every ledger read and write path; confirm transaction atomicity, immutable posting, idempotency, and reversal controls.
 4. Decide whether USDT values with more than eight decimal places should be rejected; add explicit tests either way.
@@ -62,4 +62,4 @@ Verified evidence available for this review:
 
 ## Release boundary
 
-This branch is for audit and safe development only. It must not be merged or deployed without a separate explicit approval. No production secrets are requested or stored in this document.
+PR #29 has been merged with owner approval. This document does not authorize any financial workflow or further deployment. No production secrets are requested or stored in this document.
