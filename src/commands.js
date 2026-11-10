@@ -289,12 +289,12 @@ export function registerCommands(bot) {
     }
 
     const existed = adminDrafts.delete(ADMIN_ID);
-    clearPostManagementSession(ADMIN_ID);
+    const managementExisted = clearPostManagementSession(ADMIN_ID);
 
     return ctx.reply(
-      existed
-        ? "Post creation cancelled."
-        : "There is no active post draft."
+      existed || managementExisted
+        ? "Current post operation cancelled."
+        : "There is no active post draft or edit session."
     );
   });
 
