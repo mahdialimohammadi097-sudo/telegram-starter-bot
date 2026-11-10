@@ -1,43 +1,59 @@
 const CORE_TABLES = [
-  "users",
+  "admin_audit_logs",
+  "admin_preferences",
   "admin_users",
+  "audit_logs",
+  "deposit_requests",
+  "investment_plan_versions",
+  "investment_plans",
+  "investments",
   "ledger_accounts",
-  "ledger_transactions",
   "ledger_entries",
+  "ledger_transactions",
+  "owner_reserve_exceptions",
   "profit_records",
-  "scheduled_posts",
+  "referrals",
+  "reserve_balance_snapshots",
+  "reserve_wallets",
   "scheduled_post_history",
-  "admin_audit_logs"
+  "scheduled_posts",
+  "user_wallet_assignments",
+  "users",
+  "wallet_purposes",
+  "wallet_transfer_approvals",
+  "wallet_transfers",
+  "wallets",
+  "withdrawal_requests"
 ];
 
 export async function inspectCoreSchema(pool) {
   const [inventoryResult, tablesResult, columnsResult, constraintsResult, indexesResult, triggersResult] = await Promise.all([
     pool.query(
-      `SELECT table_name
+      \`SELECT table_name
        FROM information_schema.tables
        WHERE table_schema = current_schema()
          AND table_type = 'BASE TABLE'
-       ORDER BY table_name`
+       ORDER BY table_name\`
     ),
     pool.query(
-      `SELECT table_name
+      \`SELECT table_name
        FROM information_schema.tables
        WHERE table_schema = current_schema()
          AND table_type = 'BASE TABLE'
          AND table_name = ANY($1::text[])
-       ORDER BY table_name`,
+       ORDER BY table_name\`,
       [CORE_TABLES]
     ),
     pool.query(
-      `SELECT table_name, column_name, data_type, is_nullable, column_default
+      \`SELECT table_name, column_name, data_type, is_nullable, column_default
        FROM information_schema.columns
        WHERE table_schema = current_schema()
          AND table_name = ANY($1::text[])
-       ORDER BY table_name, ordinal_position`,
+       ORDER BY table_name, ordinal_position\`,
       [CORE_TABLES]
     ),
     pool.query(
-      `SELECT c.relname AS table_name, con.conname AS constraint_name,
+      \`SELECT c.relname AS table_name, con.conname AS constraint_name,
               con.contype AS constraint_type,
               pg_get_constraintdef(con.oid) AS definition
        FROM pg_constraint con
@@ -45,17 +61,17 @@ export async function inspectCoreSchema(pool) {
        JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = current_schema()
          AND c.relname = ANY($1::text[])
-       ORDER BY c.relname, con.conname`,
+       ORDER BY c.relname, con.conname\`,
       [CORE_TABLES]
     ),
     pool.query(
-      `SELECT tablename AS table_name, indexname, indexdef
+      \`SELECT tablename AS table_name, indexname, indexdef
        FROM pg_indexes
        WHERE schemaname = current_schema()
-       ORDER BY tablename, indexname`
+       ORDER BY tablename, indexname\`
     ),
     pool.query(
-      `SELECT c.relname AS table_name,
+      \`SELECT c.relname AS table_name,
               t.tgname AS trigger_name,
               pg_get_triggerdef(t.oid, true) AS trigger_definition,
               p.proname AS function_name,
@@ -66,7 +82,7 @@ export async function inspectCoreSchema(pool) {
        JOIN pg_proc p ON p.oid = t.tgfoid
        WHERE n.nspname = current_schema()
          AND NOT t.tgisinternal
-       ORDER BY c.relname, t.tgname`
+       ORDER BY c.relname, t.tgname\`
     )
   ]);
 
