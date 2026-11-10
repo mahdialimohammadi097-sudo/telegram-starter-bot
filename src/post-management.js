@@ -98,7 +98,7 @@ export function registerPostManagement(bot) {
     try {
       const post = await getCurrentPreview(ctx, postId);
       if (!post) {
-        await ctx.answerCallbackQuery({ text: "This preview is no longer valid.", show_alert: true });
+        await ctx.answerCallbackQuery({ text: adminText(language, "This preview is no longer valid.", "این پیش‌نمایش دیگر معتبر نیست."), show_alert: true });
         return;
       }
       const keyboard = new InlineKeyboard()
@@ -113,7 +113,7 @@ export function registerPostManagement(bot) {
       );
     } catch (error) {
       console.error("[post-management] edit menu failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to open edit options.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to open edit options.", "باز کردن گزینه‌های ویرایش ممکن نشد."), show_alert: true });
     }
   });
 
@@ -125,6 +125,7 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_edit_back:\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     sessions.delete(ADMIN_ID);
     try {
@@ -137,11 +138,12 @@ export function registerPostManagement(bot) {
       await ctx.editMessageText(previewText(post, language), { reply_markup: previewKeyboard(postId, language) });
     } catch (error) {
       console.error("[post-management] could not restore preview:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to restore preview.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to restore preview.", "بازیابی پیش‌نمایش ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^post_time:\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
       const post = await getCurrentPreview(ctx, postId);
@@ -158,18 +160,16 @@ export function registerPostManagement(bot) {
       });
       await ctx.answerCallbackQuery();
       await ctx.reply(
-        "RESCHEDULE POST #" + postId + "\n\n" +
-        "Send the new date and time in UTC using this exact format:\n" +
-        "YYYY-MM-DD HH:mm\n\nExample: 2026-11-12 15:30\n\n" +
-        "The time must be at least one minute in the future. Send /cancelpost to stop."
+        adminText(language, "RESCHEDULE POST #" + postId + "\n\nSend the new date and time in UTC using this exact format:\nYYYY-MM-DD HH:mm\n\nExample: 2026-11-12 15:30\n\nThe time must be at least one minute in the future. Send /cancelpost to stop.", "تغییر زمان پست شماره " + postId + "\n\nتاریخ و زمان جدید را با ساعت UTC و دقیقاً در این قالب بفرستید:\nYYYY-MM-DD HH:mm\n\nنمونه: 2026-11-12 15:30\n\nزمان باید حداقل یک دقیقه در آینده باشد. برای لغو /cancelpost را بفرستید.")
       );
     } catch (error) {
       console.error("[post-management] reschedule session failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to start rescheduling.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to start rescheduling.", "شروع تغییر زمان ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^post_cancel:\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
       const post = await getCurrentPreview(ctx, postId);
@@ -187,11 +187,12 @@ export function registerPostManagement(bot) {
       );
     } catch (error) {
       console.error("[post-management] cancel confirmation failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to open cancellation confirmation.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to open cancellation confirmation.", "باز کردن تأیید لغو ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^post_cancel_back:\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
       const post = await getCurrentPreview(ctx, postId);
@@ -199,7 +200,7 @@ export function registerPostManagement(bot) {
         await ctx.answerCallbackQuery({ text: "This preview is no longer valid.", show_alert: true });
         return;
       }
-      await ctx.answerCallbackQuery({ text: "Post kept." });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Post kept.", "پست حفظ شد.") });
       await ctx.editMessageText(previewText(post, language), { reply_markup: previewKeyboard(postId, language) });
     } catch (error) {
       console.error("[post-management] could not restore preview after cancellation abort:", error);
@@ -208,6 +209,7 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_cancel_confirm:\d+$/, async (ctx) => {
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
       const post = await getCurrentPreview(ctx, postId);
@@ -225,19 +227,19 @@ export function registerPostManagement(bot) {
         [postId, post.preview_message_id, post.preview_chat_id, post.edit_version]
       );
       if (!result.rowCount) {
-        await ctx.answerCallbackQuery({ text: "Post changed or is no longer available.", show_alert: true });
+        await ctx.answerCallbackQuery({ text: adminText(language, "Post changed or is no longer available.", "پست تغییر کرده یا دیگر در دسترس نیست."), show_alert: true });
         return;
       }
-      await ctx.answerCallbackQuery({ text: "Post cancelled." });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Post cancelled.", "پست لغو شد.") });
       await invalidateOldPreview(
         ctx,
         post.preview_chat_id,
         post.preview_message_id,
-        "PROFINO — Post #" + postId + " was cancelled by the administrator."
+        adminText(language, "PROFINO — Post #" + postId + " was cancelled by the administrator.", "پروفینو — پست شماره " + postId + " توسط مدیر لغو شد.")
       );
     } catch (error) {
       console.error("[post-management] cancellation failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to cancel this post.", show_alert: true });
+      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to cancel this post.", "لغو این پست ممکن نشد."), show_alert: true });
     }
   });
 
