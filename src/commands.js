@@ -264,6 +264,7 @@ export function registerCommands(bot) {
       "/user <telegram_id> - Inspect a user\n" +
       "/adminlogs - View admin activity\n" +
       "/dbschema - Inspect core database tables (read-only)\n" +
+      "/adminschema - Inspect admin membership and audit schema (read-only)\n" +
       "/newpost - Create a scheduled post\n" +
       "/scheduledposts - View pending posts\n" +
       "/cancelpost - Cancel the current draft\n" +
