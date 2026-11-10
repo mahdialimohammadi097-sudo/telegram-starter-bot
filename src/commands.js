@@ -2,10 +2,11 @@
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
+import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
 
 const ADMIN_ID = 8810232463;
 const CHANNEL_USERNAME = "@PROFINO1";
-const ADMIN_TIME_ZONE = "Asia/Tehran";
+const ADMIN_TIME_ZONE = "UTC";
 
 const adminDrafts = new Map();
 
@@ -100,63 +101,19 @@ function isPrivateChat(ctx) {
   return ctx.chat?.type === "private";
 }
 
-function parseTehranDateTime(value) {
-  const match = value.match(
-    /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/
-  );
-
+function parseUtcDateTime(value) {
+  const match = /^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})$/.exec(value);
   if (!match) return null;
-
-  const [, year, month, day, hour, minute] = match;
-
-  const y = Number(year);
-  const mo = Number(month);
-  const d = Number(day);
-  const h = Number(hour);
-  const mi = Number(minute);
-
-  if (
-    mo < 1 || mo > 12 ||
-    d < 1 || d > 31 ||
-    h < 0 || h > 23 ||
-    mi < 0 || mi > 59
-  ) {
-    return null;
-  }
-
-  const iso = `${year}-${month}-${day}T${hour}:${minute}:00+03:30`;
-  const date = new Date(iso);
-
-  if (Number.isNaN(date.getTime())) return null;
-
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: ADMIN_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(date);
-
-  const values = Object.fromEntries(
-    parts.map(part => [part.type, part.value])
-  );
-
-  if (
-    values.year !== year ||
-    values.month !== month ||
-    values.day !== day ||
-    values.hour !== hour ||
-    values.minute !== minute
-  ) {
-    return null;
-  }
-
-  if (date.getTime() <= Date.now() + 60_000) {
-    return null;
-  }
-
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  if (year < 2000 || month < 1 || month > 12 || hour > 23 || minute > 59) return null;
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day || date.getUTCHours() !== hour ||
+      date.getUTCMinutes() !== minute || date.getTime() <= Date.now() + 60000) return null;
   return date;
 }
 
@@ -202,6 +159,7 @@ async function showScheduledPosts(ctx) {
 }
 
 export function registerCommands(bot) {
+  registerPostManagement(bot);
   bot.command("start", async (ctx) => {
     try {
       const user = await getOrCreateUser(ctx);
@@ -331,6 +289,7 @@ export function registerCommands(bot) {
     }
 
     const existed = adminDrafts.delete(ADMIN_ID);
+    clearPostManagementSession(ADMIN_ID);
 
     return ctx.reply(
       existed
@@ -401,7 +360,7 @@ export function registerCommands(bot) {
 
         return ctx.reply(
           "Step 3 of 3\n\n" +
-          "Send the scheduled date and time in Tehran time.\n\n" +
+          "Send the scheduled date and time in UTC.\n\n" +
           "Required format:\n" +
           "YYYY-MM-DD HH:mm\n\n" +
           "Example:\n" +
@@ -410,12 +369,12 @@ export function registerCommands(bot) {
       }
 
       if (draft.step === "scheduled_at") {
-        const scheduledAt = parseTehranDateTime(choice.trim());
+        const scheduledAt = parseUtcDateTime(choice.trim());
 
         if (!scheduledAt) {
           return ctx.reply(
             "Invalid date or time.\n\n" +
-            "Use YYYY-MM-DD HH:mm in Tehran time.\n" +
+            "Use YYYY-MM-DD HH:mm in UTC.\n" +
             "The scheduled time must be at least one minute in the future."
           );
         }
@@ -449,7 +408,7 @@ export function registerCommands(bot) {
             "PROFINO — POST SCHEDULED\n\n" +
             `Post ID: ${post.id}\n` +
             `Title: ${post.title}\n` +
-            `Scheduled time: ${formattedTime} (Tehran)\n` +
+            `Scheduled time: ${formattedTime} UTC\n` +
             "Status: SCHEDULED\n\n" +
             "The bot will send you a private preview at the scheduled time.\n\n" +
             "Nothing will be published until you approve it."
