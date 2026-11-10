@@ -5,11 +5,14 @@
 import http from "node:http"
 import { Bot, webhookCallback } from "grammy"
 import { registerCommands } from "./src/commands.js"
-import { testDatabaseConnection } from "./src/database.js"
+import { pool, testDatabaseConnection } from "./src/database.js"
 import { startScheduler } from "./src/scheduler.js"
 import { ensurePostHistorySchema } from "./src/post-history.js"
 import { ensureAdminOpsSchema } from "./src/admin-ops.js"
+import { inspectCoreSchema } from "./src/database-diagnostics.js"
+import { formatStartupHealthReport } from "./src/health-report.js"
 
+const ADMIN_ID = 8810232463
 const token = process.env.TELEGRAM_BOT_TOKEN
 
 if (!token) {
@@ -64,6 +67,35 @@ async function main() {
   }
 
   console.log(`[bot] logged in as @${me.username} (${mode} mode)`)
+
+  // Send a read-only startup health summary to the already-started Super Admin chat.
+  // This never includes user records, balances, transaction data, or raw schema definitions.
+  try {
+    let schemaSnapshot = null
+    let schemaError = null
+
+    try {
+      schemaSnapshot = await inspectCoreSchema(pool)
+    } catch (error) {
+      schemaError = error?.code || "inspection_failed"
+      console.error("[health] database schema inspection failed:", schemaError)
+    }
+
+    const report = formatStartupHealthReport({
+      botUsername: me.username,
+      mode,
+      nodeVersion: process.version,
+      databaseConnected: true,
+      schemaSnapshot,
+      schemaError
+    })
+
+    await bot.api.sendMessage(ADMIN_ID, report)
+    console.log("[health] startup report delivered to Super Admin.")
+  } catch (error) {
+    // A notification failure must never prevent the trading/account bot from starting.
+    console.error("[health] startup report could not be delivered:", error?.error_code || error?.message || "unknown")
+  }
 
   // Start the PROFINO scheduled-post system.
   startScheduler(bot)
