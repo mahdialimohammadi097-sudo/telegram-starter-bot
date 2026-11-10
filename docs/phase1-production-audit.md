@@ -47,7 +47,6 @@ Verified evidence available for this review:
 11. Post-edit and restore conversations use in-memory Maps. Sessions are lost on restart and are not shared across replicas; persistent admin workflow sessions would be needed for robust multi-instance operation.
 2. The current wallet screen is a read-only balance view; no complete deposit, withdrawal, investment, or profit lifecycle is implemented.
 3. Referral code generation exists, but referral attribution and rewards remain placeholders.
-4. The repository has no implemented exchange-connected arbitrage engine or order lifecycle.
 5. No real-funds workflow should be enabled until database invariants, atomic posting, idempotency, reconciliation, authorization, operational controls, and applicable legal requirements have been reviewed.
 
 ## Next actions
