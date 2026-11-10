@@ -35,8 +35,8 @@ async function recordAdminActivity(ctx, action, targetUserId = null, details = {
   try {
     const result = await pool.query(
       `INSERT INTO admin_audit_logs
-        (actor_telegram_id, action, target_user_id, details)
-       VALUES ($1, $2, $3, $4::jsonb)
+        (admin_user_id, actor_telegram_id, action, target_user_id, details)
+       VALUES ($1, $1, $2, $3, $4::jsonb)
        RETURNING id, created_at`,
       [ctx.from.id, action, targetUserId, JSON.stringify(details)]
     );
@@ -327,6 +327,13 @@ export async function ensureAdminOpsSchema() {
 
   // Upgrade legacy audit tables without deleting or rewriting existing rows.
   // Historical rows may not have an identifiable actor, so this column stays nullable.
+  // Older installations may require admin_user_id; keep it populated for
+  // compatibility while actor_telegram_id is the current canonical field.
+  await pool.query(`
+    ALTER TABLE admin_audit_logs
+    ADD COLUMN IF NOT EXISTS admin_user_id BIGINT
+  `);
+
   await pool.query(`
     ALTER TABLE admin_audit_logs
     ADD COLUMN IF NOT EXISTS actor_telegram_id BIGINT
