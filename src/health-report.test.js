@@ -57,3 +57,30 @@ test("reports a schema inspection failure safely", () => {
   assert.match(report, /Diagnostic code: 42P01/);
   assert.doesNotMatch(report, /DATABASE_URL|password|postgres:\/\//i);
 });
+
+test("does not leak arbitrary database driver error text in startup reports", () => {
+  const report = formatStartupHealthReport({
+    botUsername: "PROFINO1bot",
+    mode: "polling",
+    nodeVersion: "v26.0.0",
+    databaseConnected: true,
+    schemaError: "connection failed: postgres://admin:super-secret@db.internal/prod"
+  });
+
+  assert.match(report, /Diagnostic code: UNAVAILABLE/);
+  assert.doesNotMatch(report, /super-secret|db\.internal|postgres:\/\//i);
+});
+
+test("accepts only a five-character PostgreSQL SQLSTATE diagnostic code", () => {
+  const valid = formatStartupHealthReport({
+    databaseConnected: true,
+    schemaError: "42P01"
+  });
+  const invalid = formatStartupHealthReport({
+    databaseConnected: true,
+    schemaError: "42P01 leaked-detail"
+  });
+
+  assert.match(valid, /Diagnostic code: 42P01/);
+  assert.match(invalid, /Diagnostic code: UNAVAILABLE/);
+});
