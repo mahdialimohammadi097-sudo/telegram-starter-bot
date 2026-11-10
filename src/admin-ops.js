@@ -1,5 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
+import { isConfirmationCurrent } from "./admin-status-guard.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -303,8 +304,8 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
       [telegramId]
     );
 
-    if (!locked.rowCount || locked.rows[0].status !== expectedStatus ||
-        locked.rows[0].status === newStatus) {
+    if (!locked.rowCount ||
+        !isConfirmationCurrent(locked.rows[0].status, expectedStatus, newStatus)) {
       await client.query("ROLLBACK");
       await ctx.answerCallbackQuery({
         text: "This confirmation is outdated. Reopen the user details and try again.",
