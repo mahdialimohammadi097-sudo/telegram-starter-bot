@@ -1,0 +1,41 @@
+name: PROFINO External Uptime Monitor
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  uptime:
+    name: Check FadeHost application availability
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check public health endpoint
+        id: check
+        shell: bash
+        run: |
+          if curl --fail --silent --show-error --max-time 15 \
+            "https://telegram-bot-d23e.fadehost.app/healthz" \
+            --output /dev/null; then
+            echo "Application health endpoint is reachable."
+          else
+            echo "::error::PROFINO health endpoint is unavailable."
+            exit 1
+          fi
+
+      - name: Notify Super Admin through Telegram
+        if: failure() && steps.check.outcome == 'failure' && secrets.PROFINO_MONITOR_BOT_TOKEN != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.PROFINO_MONITOR_BOT_TOKEN }}
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --max-time 15 \
+            --request POST \
+            --data-urlencode "chat_id=8810232463" \
+            --data-urlencode "text=PROFINO ALERT: FadeHost application health endpoint is unavailable. Check the hosting service." \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --output /dev/null
