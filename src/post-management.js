@@ -72,7 +72,7 @@ function utcLabel(date) {
 }
 
 export function clearPostManagementSession(userId) {
-  sessions.delete(userId);
+  return sessions.delete(userId);
 }
 
 export function registerPostManagement(bot) {
@@ -90,7 +90,7 @@ export function registerPostManagement(bot) {
         .row()
         .text("Back", "post_edit_back:" + postId);
       await ctx.answerCallbackQuery();
-      await ctx.reply(
+      await ctx.editMessageText(
         "EDIT POST #" + postId + "\n\nChoose which field you want to change. " +
         "The existing preview will become invalid after you save the edit.",
         { reply_markup: keyboard }
@@ -162,7 +162,7 @@ export function registerPostManagement(bot) {
         .text("Confirm Cancellation", "post_cancel_confirm:" + postId)
         .text("Keep Post", "post_cancel_back:" + postId);
       await ctx.answerCallbackQuery();
-      await ctx.reply(
+      await ctx.editMessageText(
         "CANCEL POST #" + postId + "\n\nAre you sure? " +
         "This action cannot be undone from the bot.",
         { reply_markup: keyboard }
@@ -174,7 +174,17 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_cancel_back:\d+$/, async (ctx) => {
+    const postId = ctx.callbackQuery.data.split(":")[1];
     await ctx.answerCallbackQuery({ text: "Post kept." });
+    try {
+      await ctx.api.editMessageReplyMarkup(
+        ctx.callbackQuery.message.chat.id,
+        ctx.callbackQuery.message.message_id,
+        { reply_markup: previewKeyboard(postId) }
+      );
+    } catch (error) {
+      console.error("[post-management] could not restore preview after cancellation abort:", error);
+    }
   });
 
   bot.callbackQuery(/^post_cancel_confirm:\d+$/, async (ctx) => {
