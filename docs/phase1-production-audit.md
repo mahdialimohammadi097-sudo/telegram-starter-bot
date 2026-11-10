@@ -42,6 +42,10 @@ Verified evidence available for this review:
 5. Referral code generation exists, but referral attribution and rewards remain placeholders.
 6. No exchange-connected arbitrage engine or order lifecycle is implemented.
 7. The original shared amount parser rounded inputs beyond eight decimal places. A branch-only fix now separates display rounding from exact financial validation: `formatUsdt()` may round for display, while ledger invariant and available-balance helpers reject inputs exceeding eight decimal places. New unit tests cover this boundary. This remains a helper-level safeguard, not a production posting service.
+8. User registration currently creates new accounts with status `active`; there is no pending/manual approval step in the `/start` path. Existing blocked/pending accounts are not automatically reactivated by the upsert, but the onboarding policy should be explicitly decided.
+9. Rate limiting is process-local and stored in memory. It is not shared across multiple bot replicas and resets on restart; it is a useful basic throttle, not a distributed abuse-control system.
+10. Scheduled-post processing uses database row claims with `FOR UPDATE SKIP LOCKED`, which is a useful concurrency safeguard. However, startup recovery changes every `preview_sending` and `publishing` row to an unknown state; in a multi-instance deployment this could incorrectly mark another live instance's in-flight operation as uncertain. Deployment should remain single-instance until recovery is made lease/heartbeat-aware.
+11. Post-edit and restore conversations use in-memory Maps. Sessions are lost on restart and are not shared across replicas; persistent admin workflow sessions would be needed for robust multi-instance operation.
 2. The current wallet screen is a read-only balance view; no complete deposit, withdrawal, investment, or profit lifecycle is implemented.
 3. Referral code generation exists, but referral attribution and rewards remain placeholders.
 4. The repository has no implemented exchange-connected arbitrage engine or order lifecycle.
