@@ -609,9 +609,12 @@ export function registerAdminOps(bot) {
 
   bot.command("usersearch", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
     const term = ctx.match?.trim();
     if (!term || term.length > 80) {
-      return ctx.reply("Usage: /usersearch <Telegram ID, username, or name>");
+      return ctx.reply(language === "fa"
+        ? "روش استفاده: /usersearch <شناسه تلگرام، نام کاربری یا نام>"
+        : "Usage: /usersearch <Telegram ID, username, or name>");
     }
 
     await recordAdminActivity(ctx, "admin_user_search", null, { query: term });
@@ -628,30 +631,33 @@ export function registerAdminOps(bot) {
         [term.replace(/^@/, "")]
       );
 
-      if (!result.rowCount) return ctx.reply("No matching users found.");
+      if (!result.rowCount) {
+        return ctx.reply(language === "fa" ? "کاربر منطبقی پیدا نشد." : "No matching users found.");
+      }
 
       const keyboard = new InlineKeyboard();
       const lines = result.rows.map(user => {
         const name = [user.first_name, user.last_name].filter(Boolean).join(" ") ||
-          (user.username ? "@" + user.username : "No name");
+          (user.username ? "@" + user.username : (language === "fa" ? "بدون نام" : "No name"));
         keyboard.text(
           (name + " — " + user.status.toUpperCase()).slice(0, 60),
           "admin_user:" + user.telegram_id
         ).row();
-        return "ID: " + user.telegram_id + " | " +
+        return (language === "fa" ? "شناسه: " : "ID: ") + user.telegram_id + " | " +
           (user.username ? "@" + user.username : name) +
           " | " + user.status.toUpperCase();
       });
 
-      keyboard.text("Back / بازگشت", "admin_home");
-      return ctx.reply(
-        "PROFINO — USER SEARCH / جست‌وجوی کاربران\n\n" +
-        lines.join("\n") + "\n\nShowing up to 10 matches.",
-        { reply_markup: keyboard }
-      );
+      keyboard.text(language === "fa" ? "بازگشت" : "Back", "admin_home");
+      const message = language === "fa"
+        ? "پروفینو — جست‌وجوی کاربران\n\n" + lines.join("\n") + "\n\nحداکثر ۱۰ نتیجه نمایش داده می‌شود."
+        : "PROFINO — USER SEARCH\n\n" + lines.join("\n") + "\n\nShowing up to 10 matches.";
+      return ctx.reply(message, { reply_markup: keyboard });
     } catch (error) {
       console.error("[admin-ops] user search failed:", error);
-      return ctx.reply("Unable to search users right now.");
+      return ctx.reply(language === "fa"
+        ? "در حال حاضر جست‌وجوی کاربران ممکن نیست."
+        : "Unable to search users right now.");
     }
   });
 
