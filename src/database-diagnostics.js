@@ -85,7 +85,7 @@ export function formatCoreSchema(snapshot) {
   const existing = new Set(snapshot.existingTables);
   const sections = snapshot.expectedTables.map(tableName => {
     if (!existing.has(tableName)) {
-      return "TABLE: " + tableName + "\\nNOT FOUND";
+      return "TABLE: " + tableName + "\nNOT FOUND";
     }
 
     const columns = snapshot.columns.filter(row => row.table_name === tableName);
@@ -102,37 +102,37 @@ export function formatCoreSchema(snapshot) {
     return [
       "TABLE: " + tableName,
       "COLUMNS",
-      columnLines.length ? columnLines.join("\\n") : "No columns returned",
+      columnLines.length ? columnLines.join("\n") : "No columns returned",
       "CONSTRAINTS",
-      constraintLines.length ? constraintLines.join("\\n") : "No constraints found"
-    ].join("\\n");
+      constraintLines.length ? constraintLines.join("\n") : "No constraints found"
+    ].join("\n");
   });
 
   sections.unshift(
-    "DATABASE TABLE INVENTORY\\n" +
+    "DATABASE TABLE INVENTORY\n" +
     (snapshot.tableInventory.length ? snapshot.tableInventory.join(", ") : "No tables found")
   );
 
   if (snapshot.indexes.length) {
     sections.push(
-      "DATABASE INDEXES\\n" +
-      snapshot.indexes.map(row => row.table_name + " | " + row.indexname + " | " + row.indexdef).join("\\n")
+      "DATABASE INDEXES\n" +
+      snapshot.indexes.map(row => row.table_name + " | " + row.indexname + " | " + row.indexdef).join("\n")
     );
   }
 
   if (snapshot.triggers.length) {
     sections.push(
-      "DATABASE TRIGGERS\\n" +
+      "DATABASE TRIGGERS\n" +
       snapshot.triggers.map(row =>
         "TABLE: " + row.table_name +
-        "\\nTRIGGER: " + row.trigger_name +
-        "\\nDEFINITION: " + row.trigger_definition +
-        "\\nFUNCTION: " + row.function_name +
-        "\\n" + row.function_definition
-      ).join("\\n\\n--------------------\\n\\n")
+        "\nTRIGGER: " + row.trigger_name +
+        "\nDEFINITION: " + row.trigger_definition +
+        "\nFUNCTION: " + row.function_name +
+        "\n" + row.function_definition
+      ).join("\n\n--------------------\n\n")
     );
   } else {
-    sections.push("DATABASE TRIGGERS\\nNo user-defined triggers found");
+    sections.push("DATABASE TRIGGERS\nNo user-defined triggers found");
   }
 
   return sections;
