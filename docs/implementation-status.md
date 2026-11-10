@@ -1,15 +1,15 @@
 # PROFINO Implementation Status
 **Audit date:** 2026-11-10  
-**Audited source revision:** `516730193d3c60ec91736a9d1e1ca37167abf283`  
+**Audited source revision:** `8fc32bc5a6a8ee1d7131e3026f3a449b8628159e`  
 **Scope:** Static review of the repository source. Production database schema, live Telegram flows, and live financial transactions were not exercised during this audit.
 
 ## Progress snapshot
 
-Percentages below are implementation-maturity estimates based on code present in the audited revision. They are not a claim that the feature is production-ready or financially verified.
+Percentages below describe implementation completeness in the audited source. A 100% code-completion score does not replace live production smoke tests, provider verification, or operational sign-off.
 
 | Area | Estimate | Evidence / limitation |
 |---|---:|---|
-| Bot runtime and Telegram connection | 90% | grammY polling/webhook startup, startup connection check, reconnect loop and health endpoints exist. |
+| Bot runtime and Telegram connection | 100% (code) | Polling and webhook startup, transient dependency retries, strict readiness/liveness endpoints, Telegram receiver-aware health state, reconnect backoff, and graceful shutdown are implemented. Syntax and unit tests pass. FadeHost production smoke test and live Telegram message round-trip remain pending, so operational verification is not yet 100%. |
 | PostgreSQL connectivity and diagnostics | 75% | Connection test and read-only schema diagnostics exist; production schema completeness still needs live verification. |
 | User registration and access control | 70% | Registration, private-chat enforcement, account status checks and rate limiting exist. |
 | Wallet balance display | 35% | Reads posted ledger entries for AVAILABLE, INVESTED and PROFIT; no complete financial transaction lifecycle is exposed. |
@@ -27,6 +27,15 @@ Percentages below are implementation-maturity estimates based on code present in
 
 **No single overall completion percentage is published.** A simple average would give equal weight to monitoring and custody/financial execution, which would materially misrepresent readiness.
 
+## Confirmed runtime safeguards
+- `/healthz` returns HTTP 200 only when PostgreSQL, Telegram API, and the update receiver are ready; it returns HTTP 503 otherwise.
+- `/livez` reports process liveness independently of dependency readiness.
+- Startup binds the HTTP server before waiting on external dependencies, allowing the host to observe a starting-but-not-ready process.
+- Transient PostgreSQL and Telegram API startup failures retry with capped exponential backoff; invalid Telegram credentials fail fast.
+- Polling reconnects with capped backoff; webhook readiness verifies the registered webhook URL.
+- SIGINT/SIGTERM stop the scheduler and health monitor, stop Telegram polling, close the HTTP server, and close the PostgreSQL pool.
+- The external uptime workflow now judges availability from `/healthz` only, not from the always-live root page.
+
 ## Confirmed safeguards
 - The customer-facing bot strings inspected in `src/commands.js` are English.
 - Wallet balances are read from ledger transactions with `posted` status only.
@@ -42,12 +51,13 @@ Percentages below are implementation-maturity estimates based on code present in
 3. Implement withdrawal requests with multi-step authorization, limits, sanctions/AML checks where legally required, and reconciliation.
 4. Implement immutable double-entry ledger posting with atomic transactions, unique idempotency keys, balance invariants and reversal procedures.
 5. Implement investment plans, profit accounting and referral rewards only after funding sources, liquidity, risk limits and legal review are documented.
-6. Build the English/Persian admin language selector and complete localization.
+6. Finish the remaining admin diagnostic localization and production verification.
 7. Add integration tests with a disposable database and testnet-only payment flows; do not test with customer funds.
 
 ## Next safe implementation sequence
+- **Completed runtime foundation:** startup/readiness/reconnect/shutdown implementation and automated tests; live FadeHost smoke test remains pending.
+- **Completed admin localization foundation:** persisted language preference and the principal admin workflows.
 - **Phase 1:** Database schema audit and ledger invariant tests (read-only first).
-- **Phase 2:** Admin language preference and localized admin screens.
 - **Phase 3:** Referral attribution without monetary rewards.
 - **Phase 4:** Testnet deposit watcher and reconciliation, behind a disabled-by-default feature flag.
 - **Phase 5:** Withdrawal workflow and risk controls, also disabled until independently reviewed.
@@ -65,6 +75,10 @@ Percentages below are implementation-maturity estimates based on code present in
 - `src/admin-ops.js`
 - `src/scheduler.js`
 - `src/post-management.js`
+- `src/health-http.js`
+- `src/health-http.test.js`
+- `src/runtime-health.js`
+- `src/runtime-health.test.js`
 - `src/health-monitor.js`
 - `.github/workflows/validate.yml`
 - `.github/workflows/external-uptime.yml`
