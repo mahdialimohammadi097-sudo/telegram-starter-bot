@@ -394,8 +394,12 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
 }
 
 async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
+  const language = await getAdminLanguage(ctx);
   if (Number(telegramId) === SUPER_ADMIN_ID) {
-    return ctx.answerCallbackQuery({ text: "The Super Admin cannot be changed.", show_alert: true });
+    return ctx.answerCallbackQuery({
+      text: language === "fa" ? "وضعیت مدیر ارشد قابل تغییر نیست." : "The Super Admin cannot be changed.",
+      show_alert: true
+    });
   }
 
   const client = await pool.connect();
@@ -410,7 +414,9 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
         !isConfirmationCurrent(locked.rows[0].status, expectedStatus, newStatus)) {
       await client.query("ROLLBACK");
       await ctx.answerCallbackQuery({
-        text: "This confirmation is outdated. Reopen the user details and try again.",
+        text: language === "fa"
+          ? "این تأیید منقضی شده است. جزئیات کاربر را دوباره باز کنید و تلاش کنید."
+          : "This confirmation is outdated. Reopen the user details and try again.",
         show_alert: true
       });
       return;
@@ -449,7 +455,9 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
       ]
     );
     await client.query("COMMIT");
-    await ctx.answerCallbackQuery({ text: "User status updated." });
+    await ctx.answerCallbackQuery({
+      text: language === "fa" ? "وضعیت کاربر به‌روزرسانی شد." : "User status updated."
+    });
     await showUser(ctx, telegramId, true);
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -814,7 +822,11 @@ export function registerAdminOps(bot) {
     try { await confirmUserStatus(ctx, telegramId, status); }
     catch (error) {
       console.error("[admin-ops] status confirmation failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to prepare status change.", show_alert: true });
+      const language = await getAdminLanguage(ctx);
+      await ctx.answerCallbackQuery({
+        text: language === "fa" ? "آماده‌سازی تغییر وضعیت ممکن نشد." : "Unable to prepare status change.",
+        show_alert: true
+      });
     }
   });
 
@@ -824,7 +836,11 @@ export function registerAdminOps(bot) {
     try { await applyUserStatus(ctx, telegramId, status, expectedStatus); }
     catch (error) {
       console.error("[admin-ops] status update failed:", error);
-      await ctx.answerCallbackQuery({ text: "Unable to update user status.", show_alert: true });
+      const language = await getAdminLanguage(ctx);
+      await ctx.answerCallbackQuery({
+        text: language === "fa" ? "به‌روزرسانی وضعیت کاربر ممکن نشد." : "Unable to update user status.",
+        show_alert: true
+      });
     }
   });
 
