@@ -24,6 +24,33 @@ if (!token) {
 const mode = (process.env.TELEGRAM_MODE || "polling").trim().toLowerCase()
 const bot = new Bot(token)
 
+function startHealthHttpServer(port, botUsername, webhookHandler = null) {
+  const server = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/healthz") {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" })
+      return res.end("ok")
+    }
+
+    if (webhookHandler && req.method === "POST" && req.url === "/telegram") {
+      return webhookHandler(req, res)
+    }
+
+    if (req.method === "GET" && req.url === "/") {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" })
+      return res.end(`@${botUsername} is running`)
+    }
+
+    res.writeHead(404)
+    res.end()
+  })
+
+  server.listen(port, () => {
+    console.log(`[health] HTTP health endpoint listening on port ${port}`)
+  })
+
+  return server
+}
+
 registerCommands(bot)
 
 bot.catch((err) => {
@@ -117,24 +144,7 @@ async function main() {
     const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined
     const port = Number(process.env.PORT || 3000)
     const handle = webhookCallback(bot, "http", { secretToken: secret })
-
-    http
-      .createServer((req, res) => {
-        if (req.method === "POST" && req.url === "/telegram") {
-          return handle(req, res)
-        }
-
-        if (req.method === "GET" && req.url === "/") {
-          res.writeHead(200, { "content-type": "text/plain" })
-          return res.end(`@${me.username} is running`)
-        }
-
-        res.writeHead(404)
-        res.end()
-      })
-      .listen(port, () => {
-        console.log(`[bot] webhook server listening on port ${port}`)
-      })
+    startHealthHttpServer(port, me.username, handle)
 
     await bot.api.setWebhook(`${url}/telegram`, {
       secret_token: secret,
@@ -144,7 +154,9 @@ async function main() {
     return
   }
 
-  // Polling mode.
+  // Polling mode. Keep an HTTP liveness endpoint for an independent external monitor.
+  const healthPort = Number(process.env.PORT || 3000)
+  startHealthHttpServer(healthPort, me.username)
   await bot.api.deleteWebhook().catch(() => {})
 
   let wait = 20
