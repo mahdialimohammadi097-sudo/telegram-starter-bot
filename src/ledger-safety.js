@@ -17,7 +17,7 @@ export function toUsdtUnits(value) {
 // Keep toUsdtUnits() for display formatting, where rounding to eight places is intentional.
 export function toUsdtUnitsExact(value) {
   const raw = String(value ?? "").trim();
-  const match = /^([+-]?)(\\d+)(?:\\.(\\d+))?$/.exec(raw);
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(raw);
   if (!match) throw new TypeError("Invalid USDT amount");
   const fraction = match[3] || "";
   if (fraction.length > 8) {
