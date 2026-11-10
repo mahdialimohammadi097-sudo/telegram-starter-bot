@@ -143,3 +143,55 @@ test("row locks prevent concurrent AVAILABLE overdrafts", {
   );
   assert.equal(balance.rows[0].balance, "3.00000000");
 });
+
+
+test("PostgreSQL rolls back the whole journal when an entry insert fails", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const credit = await createAccount("CLEARING");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_reject_credit()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF NEW.entry_type = 'credit' AND NEW.amount = 9.99 THEN
+        RAISE EXCEPTION 'forced integration-test entry failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER profino_test_reject_credit
+    BEFORE INSERT ON ledger_entries
+    FOR EACH ROW EXECUTE FUNCTION profino_test_reject_credit();
+  `);
+
+  await assert.rejects(
+    postLedgerTransaction({
+      pool,
+      transactionType: "integration-rollback-test",
+      idempotencyKey: "postgres-forced-entry-failure",
+      entries: [
+        { account_id: debit, entry_type: "debit", amount: "9.99", currency: "USDT" },
+        { account_id: credit, entry_type: "credit", amount: "9.99", currency: "USDT" }
+      ]
+    }),
+    /forced integration-test entry failure/
+  );
+
+  const transactions = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE idempotency_key = $1",
+    ["postgres-forced-entry-failure"]
+  );
+  const entries = await pool.query(
+    `SELECT COUNT(*)::int AS count
+       FROM ledger_entries le
+       JOIN ledger_transactions lt ON lt.id = le.transaction_id
+      WHERE lt.idempotency_key = $1`,
+    ["postgres-forced-entry-failure"]
+  );
+  assert.equal(transactions.rows[0].count, 0);
+  assert.equal(entries.rows[0].count, 0);
+});
