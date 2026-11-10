@@ -7,6 +7,7 @@ import { clearPostManagementSession, registerPostManagement } from "./post-manag
 import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
 import { registerAdminOps } from "./admin-ops.js";
 import { createRateLimiter } from "./rate-limit.js";
+import { buildReferralInviteLink } from "./referral-link.js";
 
 const ADMIN_ID = 8810232463;
 const CHANNEL_USERNAME = "@PROFINO1";
@@ -530,6 +531,38 @@ export function registerCommands(bot) {
       }
     }
 
+    if (choice === "Referral Program") {
+      try {
+        const result = await pool.query(
+          "SELECT referral_code FROM users WHERE telegram_id = $1 LIMIT 1",
+          [userId]
+        );
+
+        if (!result.rowCount) {
+          return ctx.reply("Please send /start to register first.", {
+            reply_markup: backMenu
+          });
+        }
+
+        const referralCode = result.rows[0].referral_code;
+        const inviteLink = buildReferralInviteLink(referralCode);
+
+        return ctx.reply(
+          "REFERRAL PROGRAM\n\n" +
+          `Your referral code: ${referralCode}\n` +
+          `Your invite link: ${inviteLink}\n\n` +
+          "Referral tracking and rewards are not enabled yet. Sharing this link does not create a reward or financial transaction.",
+          { reply_markup: backMenu }
+        );
+      } catch (error) {
+        console.error("[referral] Failed to build invite link:", error.message);
+        return ctx.reply(
+          "Unable to load your referral link right now. Please try again later.",
+          { reply_markup: backMenu }
+        );
+      }
+    }
+
     if (choice === "My Wallet") {
       try {
         const userResult = await pool.query(
@@ -583,8 +616,6 @@ export function registerCommands(bot) {
       "Daily Profits":
         "DAILY PROFITS\n\nVerified profit records will appear here when available.",
 
-      "Referral Program":
-        "REFERRAL PROGRAM\n\nYour referral details will appear here.",
 
       "Transaction History":
         "TRANSACTION HISTORY\n\nYour transaction records will appear here.",
