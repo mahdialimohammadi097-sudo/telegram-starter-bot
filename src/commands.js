@@ -3,7 +3,7 @@ import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
-import { registerPostHistory } from "./post-history.js";
+import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
 
 const ADMIN_ID = 8810232463;
 const CHANNEL_USERNAME = "@PROFINO1";
@@ -220,7 +220,9 @@ export function registerCommands(bot) {
       "/newpost\n" +
       "/scheduledposts\n" +
       "/cancelpost\n" +
-      "/channelcheck"
+      "/channelcheck\n" +
+      "/posthistory\n" +
+      "/postdetails <id>"
     );
   });
 
@@ -295,9 +297,10 @@ export function registerCommands(bot) {
 
     const existed = adminDrafts.delete(ADMIN_ID);
     const managementExisted = clearPostManagementSession(ADMIN_ID);
+    const historyExisted = clearPostHistorySession(ADMIN_ID);
 
     return ctx.reply(
-      existed || managementExisted
+      existed || managementExisted || historyExisted
         ? "Current post operation cancelled."
         : "There is no active post draft or edit session."
     );
