@@ -1,13 +1,29 @@
 const CORE_TABLES = [
-  "users",
+  "admin_audit_logs",
+  "admin_preferences",
   "admin_users",
+  "audit_logs",
+  "deposit_requests",
+  "investment_plan_versions",
+  "investment_plans",
+  "investments",
   "ledger_accounts",
-  "ledger_transactions",
   "ledger_entries",
+  "ledger_transactions",
+  "owner_reserve_exceptions",
   "profit_records",
-  "scheduled_posts",
+  "referrals",
+  "reserve_balance_snapshots",
+  "reserve_wallets",
   "scheduled_post_history",
-  "admin_audit_logs"
+  "scheduled_posts",
+  "user_wallet_assignments",
+  "users",
+  "wallet_purposes",
+  "wallet_transfer_approvals",
+  "wallet_transfers",
+  "wallets",
+  "withdrawal_requests"
 ];
 
 export async function inspectCoreSchema(pool) {
