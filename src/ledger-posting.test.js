@@ -47,7 +47,7 @@ function makePostingPool({ balance = "10.00000000" } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
-      const normalized = sql.replace(/\\s+/g, " ").trim();
+      const normalized = sql.replace(/\s+/g, " ").trim();
       calls.push({ sql: normalized, params });
       if (normalized === "BEGIN" || normalized === "COMMIT" || normalized === "ROLLBACK") {
         return { rowCount: 0, rows: [] };
@@ -146,7 +146,7 @@ function makeExistingPostingPool({ transaction = {}, priorEntries = [] } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
-      const normalized = sql.replace(/\\s+/g, " ").trim();
+      const normalized = sql.replace(/\s+/g, " ").trim();
       calls.push({ sql: normalized, params });
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(normalized)) {
         return { rowCount: 0, rows: [] };
