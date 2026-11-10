@@ -46,7 +46,7 @@ jobs:
           echo "Health endpoint HTTP status: $HEALTH_STATUS"
           echo "Root endpoint HTTP status: $ROOT_STATUS"
 
-          if [ "$HEALTH_STATUS" = "200" ] || [ "$ROOT_STATUS" = "200" ]; then
+          if [ "$HEALTH_STATUS" = "200" ]; then
             echo "status=up" >> "$GITHUB_OUTPUT"
           else
             echo "status=down" >> "$GITHUB_OUTPUT"

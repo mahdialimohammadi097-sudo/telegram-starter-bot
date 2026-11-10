@@ -1,228 +1,301 @@
+// PROFINO Telegram Bot runtime
+// Polling is the default; webhook mode is optional.
 
-// PROFINO Telegram Bot
-// Telegram updates are received through polling by default.
+import http from "node:http";
+import { Bot, webhookCallback } from "grammy";
+import { registerCommands } from "./src/commands.js";
+import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
+import { startScheduler } from "./src/scheduler.js";
+import { ensurePostHistorySchema } from "./src/post-history.js";
+import { ensureAdminOpsSchema } from "./src/admin-ops.js";
+import { inspectCoreSchema } from "./src/database-diagnostics.js";
+import { formatStartupHealthReport } from "./src/health-report.js";
+import { startHealthMonitor } from "./src/health-monitor.js";
+import { createRuntimeHealthState } from "./src/runtime-health.js";
 
-import http from "node:http"
-import { Bot, webhookCallback } from "grammy"
-import { registerCommands } from "./src/commands.js"
-import { pool, testDatabaseConnection } from "./src/database.js"
-import { startScheduler } from "./src/scheduler.js"
-import { ensurePostHistorySchema } from "./src/post-history.js"
-import { ensureAdminOpsSchema } from "./src/admin-ops.js"
-import { inspectCoreSchema } from "./src/database-diagnostics.js"
-import { formatStartupHealthReport } from "./src/health-report.js"
-import { startHealthMonitor } from "./src/health-monitor.js"
-
-const ADMIN_ID = 8810232463
-const token = process.env.TELEGRAM_BOT_TOKEN
+const ADMIN_ID = 8810232463;
+const token = process.env.TELEGRAM_BOT_TOKEN;
+const mode = (process.env.TELEGRAM_MODE || "polling").trim().toLowerCase();
+const port = Number(process.env.PORT || 3000);
 
 if (!token) {
-  console.error("TELEGRAM_BOT_TOKEN is missing.")
-  process.exit(1)
+  console.error("[startup] TELEGRAM_BOT_TOKEN is missing.");
+  process.exit(1);
 }
 
-const mode = (process.env.TELEGRAM_MODE || "polling").trim().toLowerCase()
-const bot = new Bot(token)
+if (!["polling", "webhook"].includes(mode)) {
+  console.error("[startup] TELEGRAM_MODE must be polling or webhook.");
+  process.exit(1);
+}
 
-function startHealthHttpServer(port, botUsername, webhookHandler = null) {
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error("[startup] PORT must be an integer between 1 and 65535.");
+  process.exit(1);
+}
+
+const bot = new Bot(token);
+const runtimeHealth = createRuntimeHealthState();
+let healthServer = null;
+let healthMonitor = null;
+let scheduler = null;
+let shuttingDown = false;
+let shutdownPromise = null;
+
+function startHealthHttpServer(botUsername, webhookHandler = null) {
   const server = http.createServer((req, res) => {
-    if (req.method === "GET" && req.url === "/healthz") {
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" })
-      return res.end("ok")
+    const pathname = new URL(req.url || "/", "http://localhost").pathname;
+
+    if (req.method === "GET" && pathname === "/healthz") {
+      const state = runtimeHealth.snapshot();
+      const status = state.ready ? 200 : 503;
+      res.writeHead(status, {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store"
+      });
+      return res.end(JSON.stringify(state));
     }
 
-    if (webhookHandler && req.method === "POST" && req.url === "/telegram") {
-      return webhookHandler(req, res)
+    if (req.method === "GET" && pathname === "/livez") {
+      res.writeHead(200, {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "no-store"
+      });
+      return res.end("alive");
     }
 
-    if (req.method === "GET" && req.url === "/") {
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" })
-      return res.end(`@${botUsername} is running`)
+    if (webhookHandler && req.method === "POST" && pathname === "/telegram") {
+      return webhookHandler(req, res);
     }
 
-    res.writeHead(404)
-    res.end()
-  })
+    if (req.method === "GET" && pathname === "/") {
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      return res.end(`@${botUsername} is running`);
+    }
 
-  server.listen(port, () => {
-    console.log(`[health] HTTP health endpoint listening on port ${port}`)
-  })
+    res.writeHead(404);
+    res.end();
+  });
 
-  return server
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      console.log(`[health] HTTP endpoints listening on port ${port}`);
+      resolve(server);
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port);
+  });
 }
 
-registerCommands(bot)
-
-bot.catch((err) => {
-  console.error("[bot] error while handling an update:", err.error ?? err)
-})
-
-function explain(err) {
-  const code = err?.error_code ?? err?.response?.error_code
-
+function explainTelegramError(error) {
+  const code = error?.error_code ?? error?.response?.error_code;
   if (code === 401) {
-    console.error("[bot] Telegram rejected the token (401 Unauthorized).")
+    console.error("[bot] Telegram rejected the token (401 Unauthorized).");
   } else if (code === 404) {
-    console.error("[bot] Telegram answered 404. Check the bot token.")
+    console.error("[bot] Telegram answered 404. Check the bot token.");
+  } else if (code === 409) {
+    console.error("[bot] Telegram polling conflict: another process may be using this token.");
   } else {
-    console.error("[bot] could not reach Telegram:", err?.message ?? err)
+    console.error("[bot] Telegram API error:", error?.message ?? error);
   }
 }
 
-async function main() {
-  // Test PostgreSQL connection.
-  try {
-    const result = await testDatabaseConnection()
-    console.log("[database] PostgreSQL connected successfully.")
-    console.log("[database] server time:", result.server_time)
-    await ensurePostHistorySchema()
-    console.log("[post-history] schema and audit trigger ready.")
-    await ensureAdminOpsSchema()
-    console.log("[admin-ops] audit log schema ready.")
-  } catch (err) {
-    console.error("[database] connection test failed:", err?.message ?? err)
-    console.error("[database] startup aborted. Telegram bot will not start.")
-    process.exit(1)
-  }
+function sleep(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
 
-  let me
+async function closeHttpServer() {
+  if (!healthServer?.listening) return;
+  await new Promise((resolve) => {
+    healthServer.close(() => resolve());
+    healthServer.closeIdleConnections?.();
+  });
+}
 
-  try {
-    me = await bot.api.getMe()
-  } catch (err) {
-    explain(err)
-    process.exit(1)
-  }
+async function shutdown(signal = "shutdown") {
+  if (shutdownPromise) return shutdownPromise;
+  shuttingDown = true;
+  runtimeHealth.setShuttingDown(true);
+  console.log(`[shutdown] ${signal}: stopping PROFINO services`);
 
-  console.log(`[bot] logged in as @${me.username} (${mode} mode)`)
-
-  // Send a read-only startup health summary to the already-started Super Admin chat.
-  // This never includes user records, balances, transaction data, or raw schema definitions.
-  try {
-    let schemaSnapshot = null
-    let schemaError = null
+  shutdownPromise = (async () => {
+    scheduler?.stop();
+    healthMonitor?.stop();
 
     try {
-      schemaSnapshot = await inspectCoreSchema(pool)
+      bot.stop();
     } catch (error) {
-      schemaError = error?.code || "inspection_failed"
-      console.error("[health] database schema inspection failed:", schemaError)
+      console.error("[shutdown] Telegram bot stop warning:", error?.message ?? error);
+    }
+
+    await closeHttpServer();
+
+    try {
+      await closeDatabase();
+      console.log("[shutdown] PostgreSQL pool closed.");
+    } catch (error) {
+      console.error("[shutdown] PostgreSQL pool close failed:", error?.message ?? error);
+    }
+  })();
+
+  return shutdownPromise;
+}
+
+registerCommands(bot);
+
+bot.catch((error) => {
+  console.error("[bot] update handler error:", error.error ?? error);
+});
+
+async function sendStartupReport(botUsername) {
+  try {
+    let schemaSnapshot = null;
+    let schemaError = null;
+
+    try {
+      schemaSnapshot = await inspectCoreSchema(pool);
+    } catch (error) {
+      schemaError = error?.code || "inspection_failed";
+      console.error("[health] database schema inspection failed:", schemaError);
     }
 
     const report = formatStartupHealthReport({
-      botUsername: me.username,
+      botUsername,
       mode,
       nodeVersion: process.version,
       databaseConnected: true,
       schemaSnapshot,
       schemaError
-    })
+    });
 
-    await bot.api.sendMessage(ADMIN_ID, report)
-    console.log("[health] startup report delivered to Super Admin.")
+    await bot.api.sendMessage(ADMIN_ID, report);
+    console.log("[health] startup report delivered to Super Admin.");
   } catch (error) {
-    // A notification failure must never prevent the trading/account bot from starting.
-    console.error("[health] startup report could not be delivered:", error?.error_code || error?.message || "unknown")
+    console.error(
+      "[health] startup report could not be delivered:",
+      error?.error_code || error?.message || "unknown"
+    );
   }
+}
 
-  // Start read-only periodic service monitoring. It does not receive Telegram updates.
-  startHealthMonitor({ bot, pool })
-  console.log("[health] automated monitor initialized (60-second interval).")
+async function startPolling() {
+  await bot.api.deleteWebhook({ drop_pending_updates: false }).catch((error) => {
+    console.error("[bot] could not clear previous webhook:", error?.message ?? error);
+    throw error;
+  });
 
-  // Start the PROFINO scheduled-post system.
-  startScheduler(bot)
-  console.log("[scheduler] scheduled-post system initialized.")
+  let backoffMs = 2_000;
 
-  if (mode === "webhook") {
-    const url = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "")
-
-    if (!url.startsWith("https://")) {
-      console.error("[bot] WEBHOOK_URL is missing or invalid.")
-      process.exit(1)
-    }
-
-    const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined
-    const port = Number(process.env.PORT || 3000)
-    const handle = webhookCallback(bot, "http", { secretToken: secret })
-    startHealthHttpServer(port, me.username, handle)
-
-    await bot.api.setWebhook(`${url}/telegram`, {
-      secret_token: secret,
-    })
-
-    console.log(`[bot] webhook set to ${url}/telegram`)
-    return
-  }
-
-  // Polling mode. Keep an HTTP liveness endpoint for an independent external monitor.
-  const healthPort = Number(process.env.PORT || 3000)
-  startHealthHttpServer(healthPort, me.username)
-  await bot.api.deleteWebhook().catch(() => {})
-
-  let wait = 20
-  let waitingForOther = false
-
-  for (;;) {
-    const began = Date.now()
-    let settled
+  while (!shuttingDown) {
+    const startedAt = Date.now();
 
     try {
+      console.log("[bot] starting Telegram long polling");
       await bot.start({
         onStart: () => {
-          if (!waitingForOther) {
-            console.log("[bot] polling for updates")
-            return
-          }
+          runtimeHealth.setTelegramReady(true);
+          console.log("[bot] Telegram polling is active; updates can be received.");
+        }
+      });
 
-          settled = setTimeout(() => {
-            waitingForOther = false
-            wait = 20
-            console.log("[bot] this bot is now receiving updates")
-          }, 45_000)
-        },
-      })
+      runtimeHealth.setTelegramReady(false);
+      if (!shuttingDown) {
+        throw new Error("Telegram polling stopped unexpectedly.");
+      }
+    } catch (error) {
+      runtimeHealth.setTelegramReady(false);
+      if (shuttingDown) break;
 
-      return
-    } catch (err) {
-      clearTimeout(settled)
-
-      const code = err?.error_code ?? err?.response?.error_code
+      const code = error?.error_code ?? error?.response?.error_code;
+      explainTelegramError(error);
 
       if (code === 401 || code === 404) {
-        explain(err)
-        process.exit(1)
+        throw new Error("Telegram authentication/configuration failed.", { cause: error });
       }
 
-      if (Date.now() - began > 120_000) {
-        wait = 20
-        waitingForOther = false
+      if (Date.now() - startedAt >= 60_000) {
+        backoffMs = 2_000;
       }
 
-      if (code === 409) {
-        if (!waitingForOther) {
-          console.error(
-            "[bot] another copy is running with the same token."
-          )
-          waitingForOther = true
-        }
-      } else {
-        console.error("[bot] polling stopped:", err?.message ?? err)
-      }
-
-      console.error(`[bot] trying again in ${wait} seconds`)
-
-      await new Promise((resolve) => setTimeout(resolve, wait * 1000))
-
-      wait = Math.min(wait * 2, 300)
+      const delay = Math.min(backoffMs, 120_000);
+      console.error(`[bot] polling will retry in ${Math.ceil(delay / 1000)} seconds`);
+      await sleep(delay);
+      backoffMs = Math.min(backoffMs * 2, 120_000);
     }
   }
+}
+
+async function main() {
+  const dbResult = await testDatabaseConnection();
+  runtimeHealth.setDatabaseReady(true);
+  console.log("[database] PostgreSQL connected successfully.");
+  console.log("[database] server time:", dbResult.server_time);
+
+  await ensurePostHistorySchema();
+  console.log("[post-history] schema and audit trigger ready.");
+  await ensureAdminOpsSchema();
+  console.log("[admin-ops] audit log schema ready.");
+
+  const me = await bot.api.getMe();
+  console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
+
+  await sendStartupReport(me.username);
+
+  healthMonitor = startHealthMonitor({
+    bot,
+    pool,
+    onStatus: (status) => {
+      runtimeHealth.setTelegramReady(status.telegram);
+      runtimeHealth.setDatabaseReady(status.database);
+    }
+  });
+
+  scheduler = startScheduler(bot);
+
+  if (mode === "webhook") {
+    const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
+    if (!webhookUrl.startsWith("https://")) {
+      throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
+    }
+
+    const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined;
+    const handler = webhookCallback(bot, "http", { secretToken: secret });
+    healthServer = await startHealthHttpServer(me.username, handler);
+
+    await bot.api.setWebhook(`${webhookUrl}/telegram`, {
+      secret_token: secret,
+      drop_pending_updates: false
+    });
+
+    runtimeHealth.setTelegramReady(true);
+    console.log(`[bot] webhook registered at ${webhookUrl}/telegram`);
+    return;
+  }
+
+  healthServer = await startHealthHttpServer(me.username);
+  await startPolling();
 }
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
-    console.log(`[bot] ${signal}, stopping`)
-    bot.stop().finally(() => process.exit(0))
-  })
+    void shutdown(signal).catch((error) => {
+      console.error("[shutdown] failed:", error?.message ?? error);
+      process.exitCode = 1;
+    });
+  });
 }
 
-main()
+main().catch(async (error) => {
+  console.error("[startup] PROFINO could not start:", error?.message ?? error);
+  process.exitCode = 1;
+  await shutdown("startup failure");
+});

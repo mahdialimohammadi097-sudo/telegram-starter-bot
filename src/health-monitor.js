@@ -27,7 +27,8 @@ export function startHealthMonitor({
   pool,
   intervalMs = 60_000,
   logger = console,
-  now = () => new Date()
+  now = () => new Date(),
+  onStatus = () => {}
 }) {
   let previous = { telegram: true, database: true };
   let running = false;
@@ -44,6 +45,7 @@ export function startHealthMonitor({
         telegram: telegramResult.status === "fulfilled",
         database: databaseResult.status === "fulfilled"
       };
+      onStatus(current);
       const changes = getHealthChanges(previous, current);
 
       for (const change of changes) {

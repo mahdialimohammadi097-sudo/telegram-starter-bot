@@ -10,6 +10,8 @@ const BATCH_SIZE = 5;
 
 let isRunning = false;
 let isStarted = false;
+let schedulerStopped = false;
+let schedulerTimer = null;
 
 async function recoverInterruptedOperations() {
   const previewResult = await pool.query(`
@@ -157,7 +159,7 @@ async function sendPreview(bot, post) {
 }
 
 async function processScheduledPosts(bot) {
-  if (isRunning) return;
+  if (isRunning || schedulerStopped) return;
 
   isRunning = true;
 
@@ -358,31 +360,47 @@ async function handlePostAction(ctx) {
 }
 
 export function startScheduler(bot) {
-  if (isStarted) return;
+  if (isStarted) {
+    return { ready: Promise.resolve(false), stop() {} };
+  }
 
   isStarted = true;
+  schedulerStopped = false;
 
   bot.callbackQuery(
     /^post_(approve|reject):\d+$/,
     handlePostAction
   );
 
-  recoverInterruptedOperations()
+  const ready = recoverInterruptedOperations()
     .then(() => {
+      if (schedulerStopped) return false;
       console.log("[scheduler] recovery completed.");
 
       processScheduledPosts(bot);
 
-      setInterval(() => {
+      schedulerTimer = setInterval(() => {
         processScheduledPosts(bot);
       }, CHECK_INTERVAL_MS);
+      schedulerTimer.unref?.();
 
       console.log("[scheduler] scheduled-post system started.");
+      return true;
     })
     .catch((error) => {
       console.error(
         "[scheduler] startup recovery failed. Scheduler remains disabled:",
         error
       );
+      return false;
     });
-        }
+
+  return {
+    ready,
+    stop() {
+      schedulerStopped = true;
+      if (schedulerTimer) clearInterval(schedulerTimer);
+      schedulerTimer = null;
+    }
+  };
+}
