@@ -202,17 +202,17 @@ async function startPolling() {
       console.log("[bot] starting Telegram long polling");
       await bot.start({
         onStart: () => {
-          runtimeHealth.setTelegramReady(true);
+          runtimeHealth.setTelegramReceiverActive(true);
           console.log("[bot] Telegram polling is active; updates can be received.");
         }
       });
 
-      runtimeHealth.setTelegramReady(false);
+      runtimeHealth.setTelegramReceiverActive(false);
       if (!shuttingDown) {
         throw new Error("Telegram polling stopped unexpectedly.");
       }
     } catch (error) {
-      runtimeHealth.setTelegramReady(false);
+      runtimeHealth.setTelegramReceiverActive(false);
       if (shuttingDown) break;
 
       const code = error?.error_code ?? error?.response?.error_code;
@@ -254,7 +254,7 @@ async function main() {
     bot,
     pool,
     onStatus: (status) => {
-      runtimeHealth.setTelegramReady(status.telegram);
+      runtimeHealth.setTelegramApiConnected(status.telegram);
       runtimeHealth.setDatabaseReady(status.database);
     }
   });
@@ -276,7 +276,7 @@ async function main() {
       drop_pending_updates: false
     });
 
-    runtimeHealth.setTelegramReady(true);
+    runtimeHealth.setTelegramReceiverActive(true);
     console.log(`[bot] webhook registered at ${webhookUrl}/telegram`);
     return;
   }
