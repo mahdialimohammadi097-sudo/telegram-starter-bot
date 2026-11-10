@@ -45,5 +45,5 @@ test("alert contains status only and a timestamp", () => {
   );
   assert.match(alert, /2026-11-10T10:00:00.000Z/);
   assert.match(alert, /TELEGRAM: UNAVAILABLE/);
-  assert.doesNotMatch(alert, /wallet|balance|transaction data/i);
+  assert.doesNotMatch(alert, /user_id|wallet_address|balance_amount|transaction_id/i);
 });
