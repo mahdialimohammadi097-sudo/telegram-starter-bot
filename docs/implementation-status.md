@@ -1,6 +1,6 @@
 # PROFINO Implementation Status
 **Audit date:** 2026-11-10  
-**Audited source revision:** `588c550d01e32a2c8453ddc13bd9253b0a8a7148`  
+**Audited source revision:** `4b0941276263fb12b512820a33754997b4e9e909`  
 **Scope:** Static review of the repository source. Production database schema, live Telegram flows, and live financial transactions were not exercised during this audit.
 
 ## Progress snapshot

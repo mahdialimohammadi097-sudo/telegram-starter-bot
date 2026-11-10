@@ -1,7 +1,7 @@
 # PROFINO Ledger Safety Audit
 
 **Date:** 2026-11-10  
-**Revision:** `588c550d01e32a2c8453ddc13bd9253b0a8a7148`  
+**Revision reviewed:** `4b0941276263fb12b512820a33754997b4e9e909`  
 **Method:** Static repository inspection only. No production database connection, schema mutation, deposit, withdrawal, or transfer was performed.
 
 ## What the current code proves
