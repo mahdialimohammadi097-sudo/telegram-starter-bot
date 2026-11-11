@@ -1,7 +1,7 @@
 # PROFINO Ledger Safety Audit
 
 **Date:** 2026-11-11  
-**Revision reviewed:** `516730193d3c60ec91736a9d1e1ca37167abf283`  
+**Revision reviewed:** `aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f`  
 **Method:** Static repository inspection only. No production database connection, schema mutation, deposit, withdrawal, or transfer was performed.
 
 ## What the current code proves
@@ -24,7 +24,7 @@
 ## New verification since the initial audit
 
 - Added a PostgreSQL 17 GitHub Actions service and isolated integration tests for concurrent identical idempotency-key requests and concurrent `AVAILABLE` debits.
-- CI run #239 passed: 43 tests, 43 passed, 0 failed, 0 skipped. The integration tests ran against a uniquely named temporary schema created for the test run.
+- CI run #42975463597 passed on PostgreSQL 17.11: 46 tests, 46 passed, 0 failed, 0 skipped. The integration tests ran against a uniquely named temporary schema created for the test run. A separate unit run #42975311041 passed 43/43 posting tests, including discarding the client when rollback itself fails.
 - This is meaningful database-backed verification, but it does not establish that FadeHost's production schema, triggers, or functions match the test schema.
 
 ## Safe code improvements in this revision
