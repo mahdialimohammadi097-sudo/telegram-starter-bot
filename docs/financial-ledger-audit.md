@@ -1,7 +1,7 @@
 # PROFINO Ledger Safety Audit
 
-**Date:** 2026-11-10  
-**Revision reviewed:** `516730193d3c60ec91736a9d1e1ca37167abf283`  
+**Date:** 2026-11-11  
+**Revision reviewed:** `aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f`  
 **Method:** Static repository inspection plus review of previously supplied read-only aggregate inventory output. No production schema mutation, deposit, withdrawal, or transfer was performed. This audit did not retrieve or inspect a complete production DDL/schema snapshot.
 
 ## What the current code proves
