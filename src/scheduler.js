@@ -1,3 +1,4 @@
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
@@ -170,7 +171,7 @@ async function processScheduledPosts(bot) {
       await sendPreview(bot, post);
     }
   } catch (error) {
-    console.error("[scheduler] processing error:", error);
+    console.error("[scheduler] processing error:", safeDiagnosticCode(error));
   } finally {
     isRunning = false;
   }
@@ -180,7 +181,7 @@ async function updateAdminMessage(ctx, text) {
   try {
     await ctx.editMessageText(text, { reply_markup: { inline_keyboard: [] } });
   } catch (error) {
-    console.error("[scheduler] could not update admin message:", error);
+    console.error("[scheduler] could not update admin message:", safeDiagnosticCode(error));
   }
 }
 
@@ -241,7 +242,7 @@ async function handlePostAction(ctx) {
         adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
       );
     } catch (error) {
-      console.error("[scheduler] rejection error:", error);
+      console.error("[scheduler] rejection error:", safeDiagnosticCode(error));
 
       await ctx.answerCallbackQuery({
         text: adminText(language, "Database error. Please try again.", "خطای پایگاه داده. دوباره تلاش کنید."),
@@ -277,7 +278,7 @@ async function handlePostAction(ctx) {
 
     post = result.rows[0];
   } catch (error) {
-    console.error("[scheduler] approval database error:", error);
+    console.error("[scheduler] approval database error:", safeDiagnosticCode(error));
 
     await ctx.answerCallbackQuery({
       text: adminText(language, "Database error. Nothing was published.", "خطای پایگاه داده؛ هیچ چیزی منتشر نشد."),
@@ -315,8 +316,8 @@ async function handlePostAction(ctx) {
     } catch (databaseError) {
       console.error(
         "[scheduler] could not record publication uncertainty:",
-        databaseError
-      );
+      safeDiagnosticCode(databaseError)
+    );
     }
 
     await updateAdminMessage(
@@ -390,8 +391,8 @@ export function startScheduler(bot) {
     .catch((error) => {
       console.error(
         "[scheduler] startup recovery failed. Scheduler remains disabled:",
-        error
-      );
+      safeDiagnosticCode(error)
+    );
       return false;
     });
 
