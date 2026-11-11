@@ -90,8 +90,12 @@ export async function postLedgerTransaction({
   const key = String(idempotencyKey ?? "").trim();
   const normalizedReferenceId = referenceId == null ? null : String(referenceId);
   const normalizedDescription = description == null ? null : String(description);
-  if (!type || type.length > 100) throw new TypeError("Invalid transaction type");
-  if (!key || key.length > 200) throw new TypeError("Invalid idempotency key");
+  if (!type || Array.from(type).length > 30) throw new TypeError("Invalid transaction type");
+  if (!key || Array.from(key).length > 150) throw new TypeError("Invalid idempotency key");
+
+  if (normalizedReferenceId !== null && Array.from(normalizedReferenceId).length > 100) {
+    throw new TypeError("Invalid reference id");
+  }
 
   const normalizedEntries = normalizeEntries(entries);
   const accountIds = [...new Set(normalizedEntries.map((entry) => entry.account_id))]
@@ -123,7 +127,7 @@ export async function postLedgerTransaction({
     if (existing.rowCount) {
       const transaction = existing.rows[0];
       const priorEntries = await client.query(
-        `SELECT account_id, entry_type, amount::text AS amount, currency
+        `SELECT account_id, entry_type, trim_scale(amount)::text AS amount, currency
          FROM ledger_entries
          WHERE transaction_id = $1
          ORDER BY account_id, entry_type, amount, currency`,
@@ -183,11 +187,11 @@ export async function postLedgerTransaction({
       if (String(account.account_type).toUpperCase() !== "AVAILABLE") continue;
 
       const balanceResult = await client.query(
-        `SELECT COALESCE(
+        `SELECT trim_scale(COALESCE(
                   SUM(CASE WHEN le.entry_type = 'credit'
                            THEN le.amount ELSE -le.amount END),
                   0
-                )::text AS balance
+                ))::text AS balance
          FROM ledger_entries le
          JOIN ledger_transactions lt ON lt.id = le.transaction_id
          WHERE le.account_id = $1
