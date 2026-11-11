@@ -45,7 +45,9 @@ export async function inspectCoreSchema(pool) {
       [CORE_TABLES]
     ),
     pool.query(
-      `SELECT table_name, column_name, data_type, is_nullable, column_default
+      `SELECT table_name, column_name, data_type, udt_name,
+              is_nullable, column_default, numeric_precision, numeric_scale,
+              is_identity, identity_generation, is_generated, generation_expression
        FROM information_schema.columns
        WHERE table_schema = current_schema()
          AND table_name = ANY($1::text[])
@@ -55,6 +57,10 @@ export async function inspectCoreSchema(pool) {
     pool.query(
       `SELECT c.relname AS table_name, con.conname AS constraint_name,
               con.contype AS constraint_type,
+              con.condeferrable AS is_deferrable,
+              con.condeferred AS initially_deferred,
+              con.convalidated AS is_validated,
+              con.connoinherit AS no_inherit,
               pg_get_constraintdef(con.oid) AS definition
        FROM pg_constraint con
        JOIN pg_class c ON c.oid = con.conrelid
@@ -73,6 +79,9 @@ export async function inspectCoreSchema(pool) {
     pool.query(
       `SELECT c.relname AS table_name,
               t.tgname AS trigger_name,
+              t.tgenabled AS enabled_state,
+              t.tgdeferrable AS is_deferrable,
+              t.tginitdeferred AS initially_deferred,
               pg_get_triggerdef(t.oid, true) AS trigger_definition,
               p.proname AS function_name,
               pg_get_functiondef(p.oid) AS function_definition
@@ -106,13 +115,31 @@ export function formatCoreSchema(snapshot) {
 
     const columns = snapshot.columns.filter(row => row.table_name === tableName);
     const constraints = snapshot.constraints.filter(row => row.table_name === tableName);
-    const columnLines = columns.map(row =>
-      row.column_name + " | " + row.data_type +
-      " | nullable: " + row.is_nullable +
-      (row.column_default !== null ? " | default: " + row.column_default : "")
-    );
+    const columnLines = columns.map(row => {
+      const typeDetails = row.data_type === "USER-DEFINED" && row.udt_name
+        ? " (" + row.udt_name + ")"
+        : "";
+      const numericDetails = row.numeric_precision !== null && row.numeric_precision !== undefined
+        ? " | precision: " + row.numeric_precision + " | scale: " + row.numeric_scale
+        : "";
+      const identityDetails = row.is_identity === "YES"
+        ? " | identity: " + (row.identity_generation || "YES")
+        : "";
+      const generatedDetails = row.is_generated && row.is_generated !== "NEVER"
+        ? " | generated: " + row.is_generated +
+          (row.generation_expression ? " (" + row.generation_expression + ")" : "")
+        : "";
+      return row.column_name + " | " + row.data_type + typeDetails +
+        " | nullable: " + row.is_nullable +
+        numericDetails + identityDetails + generatedDetails +
+        (row.column_default !== null ? " | default: " + row.column_default : "");
+    });
     const constraintLines = constraints.map(row =>
-      row.constraint_name + " | " + row.constraint_type + " | " + row.definition
+      row.constraint_name + " | " + row.constraint_type + " | " + row.definition +
+      " | deferrable: " + (row.is_deferrable ? "YES" : "NO") +
+      " | initially deferred: " + (row.initially_deferred ? "YES" : "NO") +
+      " | validated: " + (row.is_validated === false ? "NO" : "YES") +
+      " | no inherit: " + (row.no_inherit ? "YES" : "NO")
     );
 
     return [
@@ -142,6 +169,9 @@ export function formatCoreSchema(snapshot) {
       snapshot.triggers.map(row =>
         "TABLE: " + row.table_name +
         "\nTRIGGER: " + row.trigger_name +
+        " | enabled state: " + (row.enabled_state || "unknown") +
+        " | deferrable: " + (row.is_deferrable ? "YES" : "NO") +
+        " | initially deferred: " + (row.initially_deferred ? "YES" : "NO") +
         "\nDEFINITION: " + row.trigger_definition +
         "\nFUNCTION: " + row.function_name +
         "\n" + row.function_definition
