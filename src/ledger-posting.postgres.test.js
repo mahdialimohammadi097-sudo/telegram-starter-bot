@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { readFile } from "node:fs/promises";
-import { postLedgerTransaction } from "./ledger-posting.js";
+import { formatUsdt } from "./ledger-safety.js";
+import { getWalletBalances } from "./wallet-balances.js";
+import { postLedgerTransaction, postJournalInTransaction, withLedgerTransaction } from "./ledger-posting.js";
 
 const enabled = Boolean(process.env.DATABASE_URL);
 let adminPool;
@@ -399,4 +401,77 @@ test("a stored sub-unit balance cannot be silently rounded during posting", {
     "SELECT id FROM ledger_transactions WHERE idempotency_key = 'sub-unit-balance'"
   );
   assert.equal(result.rowCount, 0);
+});
+
+test("two approvals of one simulated deposit credit the customer's wallet once", {
+  skip: !enabled
+}, async () => {
+  const { rows: [user] } = await pool.query("INSERT INTO users (id) VALUES (501) RETURNING id");
+  const clearing = await createAccount("CLEARING");
+  await pool.query(
+    `INSERT INTO ledger_accounts (user_id, account_code, account_type)
+     SELECT $1, 'simulation:' || kind, kind
+     FROM unnest(ARRAY['AVAILABLE', 'INVESTED', 'PROFIT']) AS kind`,
+    [user.id]
+  );
+  // Only the columns involved in the simulated review are needed here.
+  await pool.query(`
+    CREATE TABLE deposit_requests (
+      id bigserial PRIMARY KEY,
+      user_id bigint NOT NULL REFERENCES users(id),
+      amount numeric NOT NULL CHECK (amount > 0),
+      status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      reviewed_at timestamptz
+    )
+  `);
+  const { rows: [request] } = await pool.query(
+    "INSERT INTO deposit_requests (user_id, amount) VALUES ($1, 25) RETURNING id", [user.id]
+  );
+
+  function simulateApproval() {
+    return withLedgerTransaction(pool, async client => {
+      const { rows: [deposit] } = await client.query(
+        `SELECT d.status, trim_scale(d.amount)::text AS amount, a.id AS account_id
+         FROM deposit_requests d JOIN ledger_accounts a ON a.user_id = d.user_id
+         WHERE d.id = $1 AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
+         FOR UPDATE OF d`, [request.id]
+      );
+      if (deposit.status === "rejected") throw new Error("Request already rejected");
+      const journal = await postJournalInTransaction(client, {
+        transactionType: "simulated-deposit", referenceId: request.id,
+        idempotencyKey: `simulated-deposit:${request.id}`,
+        entries: [
+          { account_id: clearing, entry_type: "debit", amount: deposit.amount, currency: "USDT" },
+          { account_id: deposit.account_id, entry_type: "credit", amount: deposit.amount, currency: "USDT" }
+        ]
+      });
+      if (deposit.status === "pending") {
+        await client.query(
+          "UPDATE deposit_requests SET status = 'approved', reviewed_at = now() WHERE id = $1",
+          [request.id]
+        );
+      }
+      return journal;
+    });
+  }
+
+  async function displayedBalances() {
+    const balances = await getWalletBalances(pool, user.id);
+    return Object.values(balances).map(formatUsdt);
+  }
+
+  assert.deepEqual(await displayedBalances(), Array(3).fill("0.00000000"));
+  // Force review failure after journal insertion. The credit must also roll back.
+  await pool.query("ALTER TABLE deposit_requests ADD CONSTRAINT force_failure CHECK (status <> 'approved')");
+  await assert.rejects(simulateApproval(), { code: "23514" });
+  assert.deepEqual(await displayedBalances(), Array(3).fill("0.00000000"));
+  await pool.query("ALTER TABLE deposit_requests DROP CONSTRAINT force_failure");
+  const [first, second] = await Promise.all([simulateApproval(), simulateApproval()]);
+  assert.equal(first.transactionId, second.transactionId);
+  assert.notEqual(first.idempotent, second.idempotent);
+  assert.equal((await simulateApproval()).idempotent, true);
+  assert.deepEqual(await displayedBalances(), ["25.00000000", "0.00000000", "0.00000000"]);
+  const review = await pool.query("SELECT status, reviewed_at FROM deposit_requests WHERE id = $1", [request.id]);
+  assert.equal(review.rows[0].status, "approved");
+  assert.ok(review.rows[0].reviewed_at);
 });

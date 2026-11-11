@@ -2,6 +2,7 @@
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
+import { getWalletBalances } from "./wallet-balances.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
 import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
@@ -48,53 +49,6 @@ async function getOrCreateUser(ctx) {
   );
 
   return result.rows[0];
-}
-
-async function getWalletBalances(userId) {
-  const result = await pool.query(
-    `SELECT
-       la.account_type,
-       COALESCE(
-         SUM(
-           CASE
-             WHEN le.entry_type = 'credit' THEN le.amount
-             WHEN le.entry_type = 'debit' THEN -le.amount
-             ELSE 0
-           END
-         ), 0
-       ) AS balance
-     FROM ledger_accounts la
-     LEFT JOIN ledger_entries le
-       ON le.account_id = la.id
-      AND le.transaction_id IN (
-        SELECT id
-        FROM ledger_transactions
-        WHERE status = 'posted'
-      )
-     WHERE la.user_id = $1
-       AND la.currency = 'USDT'
-     GROUP BY la.account_type
-     ORDER BY la.account_type`,
-    [userId]
-  );
-
-  const balances = {
-    AVAILABLE: null,
-    INVESTED: null,
-    PROFIT: null
-  };
-
-  for (const row of result.rows) {
-    if (Object.hasOwn(balances, row.account_type)) {
-      balances[row.account_type] = row.balance;
-    }
-  }
-
-  if (Object.values(balances).some(value => value === null)) {
-    throw new Error("Wallet accounts are incomplete");
-  }
-
-  return balances;
 }
 
 function isAdmin(ctx) {
@@ -543,9 +497,7 @@ export function registerCommands(bot) {
           );
         }
 
-        const balances = await getWalletBalances(
-          userResult.rows[0].id
-        );
+        const balances = await getWalletBalances(pool, userResult.rows[0].id);
 
         const format = formatUsdt;
 
