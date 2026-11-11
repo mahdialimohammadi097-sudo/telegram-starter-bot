@@ -15,7 +15,7 @@ export function formatStartupHealthReport({
     "PostgreSQL: " + (databaseConnected ? "CONNECTED" : "NOT VERIFIED")
   ];
 
-  if (schemaSnapshot) {
+  if (databaseConnected && schemaSnapshot) {
     const expected = schemaSnapshot.expectedTables || [];
     const existing = new Set(schemaSnapshot.existingTables || []);
     const missing = expected.filter(name => !existing.has(name));
