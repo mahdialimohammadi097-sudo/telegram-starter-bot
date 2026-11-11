@@ -43,7 +43,7 @@ test("canonical request comparison is independent of entry order", () => {
 });
 
 
-function makePostingPool({ balance = "10.00000000" } = {}) {
+function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1 } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
@@ -79,7 +79,7 @@ function makePostingPool({ balance = "10.00000000" } = {}) {
         return { rowCount: 1, rows: [] };
       }
       if (normalized.startsWith("UPDATE ledger_transactions")) {
-        return { rowCount: 1, rows: [] };
+        return { rowCount: statusUpdateRowCount, rows: [] };
       }
       throw new Error("Unexpected SQL in test: " + normalized);
     },
@@ -231,4 +231,30 @@ test("rejects idempotency-key reuse when request metadata differs", async () => 
   assert.equal(calls.at(-2).sql, "ROLLBACK");
   assert.equal(calls.at(-1).sql, "RELEASE");
   assert.equal(calls.some(call => call.sql.startsWith("INSERT INTO")), false);
+});
+
+
+test("rolls back if the pending transaction cannot transition to posted", async () => {
+  const { pool, calls } = makePostingPool({
+    balance: "5.00000000",
+    statusUpdateRowCount: 0
+  });
+  const { postLedgerTransaction } = await import("./ledger-posting.js");
+
+  await assert.rejects(
+    postLedgerTransaction({
+      pool,
+      transactionType: "internal_transfer",
+      idempotencyKey: "test-transfer-missing-status-transition",
+      entries: [
+        { account_id: "1", entry_type: "debit", amount: "2", currency: "USDT" },
+        { account_id: "2", entry_type: "credit", amount: "2", currency: "USDT" }
+      ]
+    }),
+    /could not transition from pending to posted/
+  );
+
+  assert.equal(calls.at(-2).sql, "ROLLBACK");
+  assert.equal(calls.at(-1).sql, "RELEASE");
+  assert.equal(calls.some(call => call.sql === "COMMIT"), false);
 });
