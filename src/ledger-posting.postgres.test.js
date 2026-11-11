@@ -342,3 +342,117 @@ test("concurrent reuse of one idempotency key with different payloads cannot dou
   );
   assert.equal(count.rows[0].count, 1);
 });
+
+
+test("database refuses to mark an unbalanced journal as posted", {
+  skip: !enabled
+}, async () => {
+  const account = await createAccount("CLEARING");
+  const transaction = await pool.query(
+    `INSERT INTO ledger_transactions
+       (transaction_type, idempotency_key, status)
+     VALUES ('unbalanced-posting-test', 'unbalanced-posting-blocked', 'pending')
+     RETURNING id`
+  );
+  await pool.query(
+    `INSERT INTO ledger_entries
+       (transaction_id, account_id, entry_type, amount, currency)
+     VALUES ($1, $2, 'debit', 1, 'USDT')`,
+    [transaction.rows[0].id, account]
+  );
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_reject_unbalanced_posting()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      debit_total NUMERIC(30, 8);
+      credit_total NUMERIC(30, 8);
+      entry_count BIGINT;
+    BEGIN
+      IF NEW.status = 'posted' AND OLD.status IS DISTINCT FROM 'posted' THEN
+        SELECT COUNT(*),
+               COALESCE(SUM(amount) FILTER (WHERE entry_type = 'debit'), 0),
+               COALESCE(SUM(amount) FILTER (WHERE entry_type = 'credit'), 0)
+          INTO entry_count, debit_total, credit_total
+          FROM ledger_entries
+         WHERE transaction_id = NEW.id;
+        IF entry_count < 2 OR debit_total <> credit_total THEN
+          RAISE EXCEPTION 'unbalanced journal cannot be posted';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER profino_test_reject_unbalanced_posting
+    BEFORE UPDATE OF status ON ledger_transactions
+    FOR EACH ROW EXECUTE FUNCTION profino_test_reject_unbalanced_posting();
+  `);
+
+  await assert.rejects(
+    pool.query(
+      "UPDATE ledger_transactions SET status = 'posted' WHERE id = $1",
+      [transaction.rows[0].id]
+    ),
+    /unbalanced journal cannot be posted/
+  );
+  const state = await pool.query(
+    "SELECT status FROM ledger_transactions WHERE id = $1",
+    [transaction.rows[0].id]
+  );
+  assert.equal(state.rows[0].status, "pending");
+});
+
+test("database rejects new entries attached to an already posted journal", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const credit = await createAccount("CLEARING");
+  const posted = await postLedgerTransaction({
+    pool,
+    transactionType: "posted-entry-insert-guard",
+    idempotencyKey: "posted-entry-insert-guard",
+    entries: [
+      { account_id: debit, entry_type: "debit", amount: "3", currency: "USDT" },
+      { account_id: credit, entry_type: "credit", amount: "3", currency: "USDT" }
+    ]
+  });
+  const extra = await createAccount("CLEARING");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_reject_insert_into_posted_journal()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE parent_status TEXT;
+    BEGIN
+      SELECT status INTO parent_status
+        FROM ledger_transactions
+       WHERE id = NEW.transaction_id;
+      IF parent_status = 'posted' THEN
+        RAISE EXCEPTION 'cannot append entries to a posted journal';
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER profino_test_reject_insert_into_posted_journal
+    BEFORE INSERT ON ledger_entries
+    FOR EACH ROW EXECUTE FUNCTION profino_test_reject_insert_into_posted_journal();
+  `);
+
+  await assert.rejects(
+    pool.query(
+      `INSERT INTO ledger_entries
+         (transaction_id, account_id, entry_type, amount, currency)
+       VALUES ($1, $2, 'debit', 1, 'USDT')`,
+      [posted.transactionId, extra]
+    ),
+    /cannot append entries to a posted journal/
+  );
+  const count = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_entries WHERE transaction_id = $1",
+    [posted.transactionId]
+  );
+  assert.equal(count.rows[0].count, 2);
+});
