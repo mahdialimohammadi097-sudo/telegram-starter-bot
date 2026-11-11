@@ -139,7 +139,7 @@ async function sendPreview(bot, post) {
   } catch (error) {
     console.error(
       `[scheduler] preview result uncertain for post ${post.id}:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     try {
@@ -153,7 +153,7 @@ async function sendPreview(bot, post) {
     } catch (databaseError) {
       console.error(
         `[scheduler] could not record preview uncertainty for post ${post.id}:`,
-        databaseError
+        safeDiagnosticCode(databaseError)
       );
     }
   }
@@ -302,7 +302,7 @@ async function handlePostAction(ctx) {
   } catch (error) {
     console.error(
       `[scheduler] publication result uncertain for post ${postId}:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     try {
@@ -349,7 +349,7 @@ async function handlePostAction(ctx) {
   } catch (error) {
     console.error(
       `[scheduler] post ${postId} was sent, but database confirmation failed:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     await updateAdminMessage(
