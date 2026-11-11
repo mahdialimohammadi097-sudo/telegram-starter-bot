@@ -43,12 +43,15 @@ test("canonical request comparison is independent of entry order", () => {
 });
 
 
-function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1 } = {}) {
+function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1, rollbackError = null } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
       const normalized = sql.replace(/\s+/g, " ").trim();
       calls.push({ sql: normalized, params });
+      if (normalized === "ROLLBACK" && rollbackError) {
+        throw rollbackError;
+      }
       if (normalized === "BEGIN" || normalized === "COMMIT" || normalized === "ROLLBACK") {
         return { rowCount: 0, rows: [] };
       }
@@ -83,8 +86,8 @@ function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1 } =
       }
       throw new Error("Unexpected SQL in test: " + normalized);
     },
-    release() {
-      calls.push({ sql: "RELEASE", params: [] });
+    release(error) {
+      calls.push({ sql: "RELEASE", params: [], releaseError: error?.message ?? null });
     }
   };
   return {
@@ -257,4 +260,35 @@ test("rolls back if the pending transaction cannot transition to posted", async 
   assert.equal(calls.at(-2).sql, "ROLLBACK");
   assert.equal(calls.at(-1).sql, "RELEASE");
   assert.equal(calls.some(call => call.sql === "COMMIT"), false);
+});
+
+
+test("discards the client when rollback fails and preserves the original posting error", async () => {
+  const rollbackFailure = new Error("rollback connection failure");
+  const { pool, calls } = makePostingPool({
+    balance: "1.00000000",
+    rollbackError: rollbackFailure
+  });
+  const { postLedgerTransaction } = await import("./ledger-posting.js");
+
+  await assert.rejects(
+    postLedgerTransaction({
+      pool,
+      transactionType: "internal_transfer",
+      idempotencyKey: "test-rollback-client-discard",
+      entries: [
+        { account_id: "1", entry_type: "debit", amount: "2", currency: "USDT" },
+        { account_id: "2", entry_type: "credit", amount: "2", currency: "USDT" }
+      ]
+    }),
+    error => {
+      assert.match(error.message, /Insufficient available balance/);
+      assert.equal(error.rollbackError, rollbackFailure);
+      return true;
+    }
+  );
+
+  assert.equal(calls.at(-2).sql, "ROLLBACK");
+  assert.equal(calls.at(-1).sql, "RELEASE");
+  assert.equal(calls.at(-1).releaseError, "rollback connection failure");
 });
