@@ -269,7 +269,7 @@ async function main() {
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
     void shutdown(signal).catch((error) => {
-      console.error("[shutdown] failed:", error?.message ?? error);
+      console.error("[shutdown] failed:", safeDiagnosticCode(error));
       process.exitCode = 1;
     });
   });
