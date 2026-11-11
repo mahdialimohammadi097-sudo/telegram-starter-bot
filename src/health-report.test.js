@@ -84,3 +84,27 @@ test("accepts only a five-character PostgreSQL SQLSTATE diagnostic code", () => 
   assert.match(valid, /Diagnostic code: 42P01/);
   assert.match(invalid, /Diagnostic code: UNAVAILABLE/);
 });
+
+test("does not claim schema health when PostgreSQL is disconnected", () => {
+  const report = formatStartupHealthReport({
+    databaseConnected: false,
+    schemaSnapshot: {
+      expectedTables: ["users"],
+      existingTables: ["users"],
+      tableInventory: ["users"],
+      indexes: [],
+      triggers: []
+    }
+  });
+  assert.match(report, /PostgreSQL: NOT VERIFIED/);
+  assert.match(report, /Database schema inspection: FAILED/);
+  assert.doesNotMatch(report, /CORE TABLES PRESENT/);
+});
+
+test("does not accept malformed or missing diagnostic codes", () => {
+  for (const schemaError of [null, undefined, "42p01", "42P01 extra", "postgres://secret@host/db", 12345]) {
+    const report = formatStartupHealthReport({ databaseConnected: false, schemaError });
+    assert.match(report, /Diagnostic code: UNAVAILABLE/);
+    assert.doesNotMatch(report, /postgres:\/\/|secret@host/);
+  }
+});
