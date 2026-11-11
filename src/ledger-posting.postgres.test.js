@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { readFile } from "node:fs/promises";
+import { readTestnetTransfer } from "../test-support/bsc-testnet-receipt.js";
+import { findSimulationDiscrepancies } from "../test-support/reconcile-simulated-deposits.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { getWalletBalances } from "./wallet-balances.js";
 import { postLedgerTransaction, postJournalInTransaction, withLedgerTransaction } from "./ledger-posting.js";
@@ -11,6 +13,7 @@ const enabled = Boolean(process.env.DATABASE_URL);
 let adminPool;
 let pool;
 let schema;
+let simulationClearing;
 
 before(async () => {
   if (!enabled) return;
@@ -24,6 +27,7 @@ before(async () => {
 
   const fixture = new URL("../test/fixtures/ledger-contract.sql", import.meta.url);
   await pool.query(await readFile(fixture, "utf8"));
+  simulationClearing = await createAccount("CLEARING");
   // Only the columns involved in the simulated review are needed here.
   await pool.query(`
     CREATE TABLE deposit_requests (
@@ -430,7 +434,7 @@ async function displayedBalances(userId) {
   return Object.values(balances).map(formatUsdt);
 }
 
-function approveSimulatedClaim(requestId, clearing, observedTransfers) {
+function approveSimulatedClaim(requestId, observedTransfers) {
   return withLedgerTransaction(pool, async client => {
     const { rows: [deposit] } = await client.query(
       `SELECT d.user_id, d.status, d.transfer_event, trim_scale(d.amount)::text AS amount, a.id AS account_id
@@ -447,7 +451,7 @@ function approveSimulatedClaim(requestId, clearing, observedTransfers) {
       transactionType: "simulated-deposit", referenceId: requestId,
       idempotencyKey: `simulated-deposit:${deposit.transfer_event}`,
       entries: [
-        { account_id: clearing, entry_type: "debit", amount: deposit.amount, currency: "USDT" },
+        { account_id: simulationClearing, entry_type: "debit", amount: deposit.amount, currency: "USDT" },
         { account_id: deposit.account_id, entry_type: "credit", amount: deposit.amount, currency: "USDT" }
       ]
     });
@@ -465,7 +469,6 @@ test("two approvals of one simulated deposit credit the customer's wallet once",
   skip: !enabled
 }, async () => {
   const userId = await createSimulationWallet(501);
-  const clearing = await createAccount("CLEARING");
   const observed = new Map([
     ["test-chain:sample-tx:0", { userId, amount: "25" }],
     ["test-chain:sample-tx:1", { userId, amount: "25" }]
@@ -474,7 +477,7 @@ test("two approvals of one simulated deposit credit the customer's wallet once",
     "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, 'test-chain:sample-tx:0') RETURNING id", [userId]
   );
 
-  const simulateApproval = (id = request.id) => approveSimulatedClaim(id, clearing, observed);
+  const simulateApproval = (id = request.id) => approveSimulatedClaim(id, observed);
 
   assert.deepEqual(await displayedBalances(userId), Array(3).fill("0.00000000"));
   // Force review failure after journal insertion. The credit must also roll back.
@@ -514,7 +517,6 @@ test("two approvals of one simulated deposit credit the customer's wallet once",
 test("an early claim cannot divert another wallet's simulated deposit", { skip: !enabled }, async () => {
   const owner = await createSimulationWallet(502);
   const other = await createSimulationWallet(503);
-  const clearing = await createAccount("CLEARING");
   // Trusted test input, prepared independently of the submitted claims.
   const event = "test-chain:ownership-tx:0";
   const observed = new Map([[event, { userId: owner, amount: "25" }]]);
@@ -523,7 +525,7 @@ test("an early claim cannot divert another wallet's simulated deposit", { skip: 
       "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, $2, $3) RETURNING id",
       [userId, amount, eventId]
     );
-    return approveSimulatedClaim(result.rows[0].id, clearing, observed);
+    return approveSimulatedClaim(result.rows[0].id, observed);
   }
   await assert.rejects(claim(other, "25", event), /does not match/);
   await assert.rejects(claim(owner, "25.00000001", event), /does not match/);
@@ -534,4 +536,64 @@ test("an early claim cannot divert another wallet's simulated deposit", { skip: 
   assert.equal(journal.idempotent, false);
   assert.deepEqual(await displayedBalances(owner), ["25.00000000", "0.00000000", "0.00000000"]);
   assert.deepEqual(await displayedBalances(other), Array(3).fill("0.00000000"));
+});
+
+test("a captured finalized testnet receipt credits the simulated wallet once", { skip: !enabled }, async () => {
+  const sample = JSON.parse(await readFile(
+    new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url), "utf8"
+  ));
+  const owner = await createSimulationWallet(504);
+  const { rows: [request] } = await pool.query(
+    "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, $2, $3) RETURNING id",
+    [owner, sample.result.amount, sample.result.event]
+  );
+  // This test assigns the public sample recipient to a synthetic user.
+  async function approveFromReceipt(observation, walletConfig) {
+    const transfer = readTestnetTransfer(observation, walletConfig);
+    const observed = new Map([[transfer.event, { userId: owner, amount: transfer.amount }]]);
+    return approveSimulatedClaim(request.id, observed);
+  }
+  const otherAddress = "0x" + "11".repeat(20);
+  for (const field of ["contract", "recipient"]) {
+    await assert.rejects(approveFromReceipt(sample.observation, { ...sample.expected, [field]: otherAddress }));
+  }
+  assert.deepEqual(await displayedBalances(owner), Array(3).fill("0.00000000"));
+  const [a, b] = await Promise.all([
+    approveFromReceipt(sample.observation, sample.expected),
+    approveFromReceipt(sample.observation, sample.expected)
+  ]);
+  assert.equal(a.transactionId, b.transactionId);
+  assert.notEqual(a.idempotent, b.idempotent);
+  assert.deepEqual(await displayedBalances(owner), ["1.00000000", "0.00000000", "0.00000000"]);
+});
+
+test("independent reconciliation detects a missing credit, an orphan journal and a wrong amount", {
+  skip: !enabled
+}, async () => {
+  const owner = await createSimulationWallet(505);
+  const event = "test-chain:reconcile:0";
+  const { rows: [request] } = await pool.query(
+    "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, $2) RETURNING id",
+    [owner, event]
+  );
+  const journal = await approveSimulatedClaim(request.id, new Map([[event, { userId: owner, amount: "25" }]]));
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const discrepancies = () => findSimulationDiscrepancies(client, simulationClearing);
+    assert.deepEqual(await discrepancies(), []);
+    await client.query("UPDATE deposit_requests SET amount = 30 WHERE id = $1", [request.id]);
+    assert.deepEqual(await discrepancies(), [{ request_id: request.id, journal_id: journal.transactionId }]);
+    await client.query("UPDATE deposit_requests SET status = 'pending' WHERE id = $1", [request.id]);
+    assert.deepEqual(await discrepancies(), [{ request_id: null, journal_id: journal.transactionId }]);
+    await client.query("UPDATE deposit_requests SET status = 'approved', amount = 25 WHERE id = $1", [request.id]);
+    const { rows: [missing] } = await client.query(
+      `INSERT INTO deposit_requests (user_id, amount, transfer_event, status)
+       VALUES ($1, 10, 'test-chain:missing:0', 'approved') RETURNING id`, [owner]
+    );
+    assert.deepEqual(await discrepancies(), [{ request_id: missing.id, journal_id: null }]);
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
 });
