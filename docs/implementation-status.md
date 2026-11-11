@@ -1,4 +1,44 @@
-# PROFINO Implementation Status
+# PROFINO implementation status
+
+## Central review, 2026-11-11
+
+Production baseline: `main` at `aeefcc9`. The public readiness endpoint returned ready. The open work below is on review branches. Customer text is English and the private admin panel supports English and Persian. Scope excludes exchange integration and automated trading.
+
+Coverage in this table counts explicitly named checkpoints, with equal weight **within each row**. These ratios describe engineering evidence, not estimates of time, effort, or permission to release. A checkpoint can be covered by a tested draft. The workstreams have different denominators and overlap, so their scores must not be averaged.
+
+| Workstream | Covered checkpoints | Remaining checkpoints | Coverage |
+| --- | --- | --- | --- |
+| Central coordination | PR inventory, dependency map, reproducible conflict checks | Combined candidate with the conflicts resolved | 3/4 |
+| Infrastructure and database | Live readiness, ledger schema review, synthetic five-table restore | Validated recovery from a production-equivalent backup | 3/4 |
+| Telegram customer experience | Registration and private-chat flow, wallet reader, tested referral-link creation | Referral attribution, end-to-end Telegram acceptance of all customer screens | 3/5 |
+| Private administration and security | Owner access controls, bilingual core operations, diagnostic redaction in drafts | Full localization audit, authorized financial review with an audit trail | 3/5 |
+| Wallet and ledger | Exact USDT, balanced posting, concurrent replay protection, insufficient-balance protection | Reversal flow, independent reconciliation | 4/6 |
+| Deposits and withdrawals | Synthetic deposit approval through the wallet reader | Deposit verification, transaction-to-request deduplication across requests, withdrawal authorization, payout reconciliation | 1/5 |
+| Investment and settlement | None of the listed executable acceptance cases has been established | Versioned plan opening, maturity, fee calculation, manual reinvestment, settlement accounting | 0/5 |
+| QA and release | Baseline tests, PostgreSQL integration, channel permission check, restore drill | Combined release candidate, owner-approved release | 4/6 |
+
+### Review queue
+
+| Base or sequence | Open PRs | Work |
+| --- | --- | --- |
+| main, then stacked | #31 → #45 → #46 | Financial diagnostics, command redaction, runtime redaction |
+| main, then stacked | #35 → #36 → #42 → #49 → #50 | Posting, concurrency, integrity, audited trigger contract, simulated deposit |
+| main | #32, #34, #37, #38 | Invite link, CI matrix, evidence, connection audit |
+| main | #39, #43, #47, #48 | Startup report, configuration example, channel permissions, restore drill |
+
+All 16 were open at review. Only #34 was marked ready for review. All heads had a successful Actions run. The original #48 check ran the general tests alone. The [dedicated restore run](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/43088370789) now executes the actual drill offline against disposable PostgreSQL 17. It verifies five synthetic operational tables. The [#50 validation](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/43070424753) covers two concurrent approvals of one simulated request, replay, rollback and the wallet read path. It does not verify a transfer on a network.
+
+### Integration order
+
+1. Combine the PostgreSQL service in #31/#36 with the Node matrix in #34 on a review branch. Pairwise merge checks reproduce a conflict between #34 and both financial lines in `.github/workflows/validate.yml`. Retain clean dependency installation and check for skipped integration tests.
+2. Validate both financial chains together, including #39 and the wallet changes in #50. Keep approval, ledger posting and wallet read verification together. Add a test for distinct synthetic requests referring to the same transfer before connecting a payment event source.
+3. Reconcile overlapping audit history in #37 with #31 and #35. Pairwise conflicts occur in `docs/financial-ledger-audit.md` and, for #31/#37, also in this file. Test the resulting candidate before requesting owner approval.
+4. Treat release, production writes and handling real funds as separate owner decisions. Funding evidence, security and legal review remain prerequisites for real financial operation.
+
+## Earlier baseline audit
+
+The following observations describe the earlier audit of main. Subsequent draft evidence, including the extracted ledger trigger definitions and numeric-scale tests in #49, is tracked above.
+
 **Audit date:** 2026-11-11  
 **Audited source revision:** `aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f` (main at 2026-11-11)  
 **Scope:** Static review of the repository source. Production runtime and `/start` were verified. Only read-only aggregate database inventory output was reviewed; no full production DDL/schema snapshot or trigger-function definitions were captured. No live financial transaction was performed.
@@ -23,7 +63,6 @@ Percentages below describe implementation completeness in the audited source. A 
 | Internal and external monitoring | 95% | Internal Telegram/database checks and independent HTTP uptime workflow exist; alert delivery, recovery, and live health endpoints were verified. |
 | Security and financial risk controls | 50% | Private-chat checks, rate limiting and admin guards exist; custody, withdrawal approval, reconciliation, AML/KYC and financial risk controls are not complete. |
 | Admin language selector (English/Persian) | 70% | Persistent preference, language selector, dashboard, user operations, publishing previews, scheduler feedback, post history, and core admin diagnostic/error feedback are bilingual; a final sweep and production verification remain. |
-| Automated arbitrage engine | 0% | No exchange connectivity, executable strategy engine, order lifecycle, or reconciliation process was found in the reviewed source. |
 
 **No single overall completion percentage is published.** A simple average would give equal weight to monitoring and custody/financial execution, which would materially misrepresent readiness.
 
@@ -65,7 +104,6 @@ Percentages below describe implementation completeness in the audited source. A 
 - **Phase 3:** Referral attribution without monetary rewards.
 - **Phase 4:** Testnet deposit watcher and reconciliation, behind a disabled-by-default feature flag.
 - **Phase 5:** Withdrawal workflow and risk controls, also disabled until independently reviewed.
-- **Phase 6:** Strategy simulation/paper trading before any live arbitrage integration.
 
 ## Files reviewed
 - `src/admin-language.js`
