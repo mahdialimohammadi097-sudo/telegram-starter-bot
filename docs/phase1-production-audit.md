@@ -26,13 +26,13 @@ Verified evidence available for this review:
 6. Core schema diagnostics are read-only and restricted to the Super Admin's private chat.
 7. Ledger helper tests cover eight-decimal precision, per-currency balancing, invalid amounts, and overdraft rejection.
 
-### Live schema review (owner-provided `/dbschema` output)
-1. The production database contains the expected core domains: users/admin, ledger accounts/entries/transactions, investments/plans, profit records, deposits/withdrawals, referrals, reserve wallets/snapshots, wallet assignments/transfers/approvals, and scheduled-post history.
-2. `users.telegram_id` and `users.referral_code` are unique; user status is constrained to `active`, `blocked`, or `pending`; referral self-reference is protected by a foreign key.
-3. Ledger transactions have constrained statuses (`pending`, `posted`, `reversed`), unique idempotency keys, and a deferred balance trigger. Ledger entries enforce positive amounts, `debit`/`credit` types, foreign keys, and a deferred balance trigger.
-4. Profit records enforce positive USDT amounts, valid statuses, approval-field consistency, and one record per investment per date.
-5. `admin_audit_logs` retains a legacy-compatible `admin_user_id` column and newer actor/details fields. The current source writes both `admin_user_id` and `actor_telegram_id`, so the observed `admin_user_id NOT NULL` constraint is compatible with the current insert path, provided the acting Telegram account has an active `admin_users` row.
-6. The schema output confirms many useful indexes, including ledger transaction lookup, user investment lookup, pending profit lookup, due scheduled posts, and unique active wallet assignment per user/type.
+### Production schema output — not independently verified
+
+A previous draft of this audit described detailed table and constraint findings as if the owner-provided `/dbschema` output were available. The raw output is not present in the current audit materials, so those detailed assertions cannot be independently substantiated and must not be treated as verified production facts.
+
+Prior conversation notes report read-only aggregate checks of 9/9 expected core tables, 24 total tables, 68 indexes and 16 user-defined triggers; a separate manual listing counted 25 tables. The raw output is unavailable and the count discrepancy is unresolved. These historical aggregate notes do not establish exact table definitions or financial behavior.
+
+The repository's `src/database-diagnostics.js` contains read-only queries intended to report the 25 expected core table names, columns, constraints, indexes, trigger definitions and trigger-function bodies. This demonstrates diagnostic capability in source code only; it does not prove that the command completed successfully against the current production database or that all expected objects exist.
 
 ### Important limitations / open verification
 1. The supplied production output listed all tables but only included full column/constraint detail for selected tables. The branch now expands the read-only diagnostic to cover all 25 known tables; those diagnostic results can now be collected after the FadeHost deployment completes.
@@ -48,8 +48,8 @@ Verified evidence available for this review:
 
 ## Next actions
 
-1. The read-only `/dbschema` diagnostic was expanded and merged in PR #29 to report columns and constraints for all 25 known production tables, in addition to indexes and trigger/function definitions. After the PR #29 deployment is confirmed, rerun `/dbschema` and provide the remaining financial-table sections and complete `DATABASE TRIGGERS` output.
-2. Verify the Super Admin has an active `admin_users` row so audit writes satisfy the production foreign key.
+1. Run the read-only `/dbschema` command against the current FadeHost database and preserve the complete output, including all `TABLE`, `COLUMNS`, `CONSTRAINTS`, `DATABASE INDEXES`, and `DATABASE TRIGGERS` sections. The source diagnostic is designed to report 25 expected core table names, but actual production results have not been captured in this audit.
+2. From the returned schema and a separate read-only membership check, verify the Super Admin has an active `admin_users` row so audit writes satisfy the production foreign key.
 3. Trace every ledger read and write path; confirm transaction atomicity, immutable posting, idempotency, and reversal controls.
 4. Decide whether USDT values with more than eight decimal places should be rejected; add explicit tests either way.
 5. Add disposable-PostgreSQL integration tests for schema migrations and ledger invariants. The current branch adds unit coverage for strict eight-decimal financial validation; PostgreSQL concurrency and trigger behavior remain untested.
