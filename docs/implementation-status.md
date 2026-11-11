@@ -1,7 +1,7 @@
 # PROFINO Implementation Status
 **Audit date:** 2026-11-11  
 **Audited source revision:** `aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f` (main at 2026-11-11)  
-**Scope:** Static review of the repository source. Production runtime and `/start` were verified; a read-only production schema report was reviewed. No live financial transaction was performed.
+**Scope:** Static review of the repository source. Production runtime and `/start` were verified. Only read-only aggregate database inventory output was reviewed; no full production DDL/schema snapshot or trigger-function definitions were captured. No live financial transaction was performed.
 
 ## Progress snapshot
 
@@ -10,7 +10,7 @@ Percentages below describe implementation completeness in the audited source. A 
 | Area | Estimate | Evidence / limitation |
 |---|---:|---|
 | Bot runtime and Telegram connection | 100% (code) | Polling and webhook startup, transient dependency retries, strict readiness/liveness endpoints, Telegram receiver-aware health state, reconnect backoff, and graceful shutdown are implemented. Syntax and unit tests pass. FadeHost deployment logs, HTTP 200 health checks, and the owner's successful `/start` interaction are confirmed. Operational monitoring is not a substitute for full end-to-end financial testing. |
-| PostgreSQL connectivity and diagnostics | 85% | Production connection and read-only schema inspection are confirmed; the supplied report verifies core ledger/profit/admin tables and constraints. Full financial-table definitions and trigger function bodies still need review. |
+| PostgreSQL connectivity and diagnostics | 85% (connectivity/diagnostics code) | Production connection and read-only aggregate inventory were confirmed. One diagnostic reported 9/9 expected core tables, 24 total tables, 68 indexes and 16 user-defined triggers; an earlier manual listing counted 25 tables, so the inventory count itself needs reconciliation. This is not a schema audit: exact financial-table columns, types, constraints, indexes, trigger definitions and trigger-function bodies remain unverified. |
 | User registration and access control | 70% | Registration, private-chat enforcement, account status checks and per-process rate limiting exist. New users are currently created as active; pending/manual approval is not part of registration. |
 | Wallet balance display | 35% | Reads posted ledger entries for AVAILABLE, INVESTED and PROFIT; no complete financial transaction lifecycle is exposed. |
 | Investment plans and active investments | 5% | User-facing sections are placeholders. |
@@ -46,7 +46,7 @@ Percentages below describe implementation completeness in the audited source. A 
 - Health diagnostics are read-only.
 
 ## Blocking work before handling real customer funds
-1. Complete the production PostgreSQL schema review for all financial tables and inspect deferred ledger trigger function bodies.
+1. Obtain and reconcile a read-only production schema snapshot for all financial tables; inspect exact columns, numeric precision, foreign keys, unique constraints, indexes, deferred constraints, trigger definitions and trigger-function bodies. Aggregate table/index/trigger counts do not satisfy this gate.
 2. Design and test idempotent deposit detection and confirmation; never display a deposit address until network, token contract, confirmations and ownership controls are verified.
 3. Implement withdrawal requests with multi-step authorization, limits, sanctions/AML checks where legally required, and reconciliation.
 4. Implement immutable double-entry ledger posting with atomic transactions, unique idempotency keys, balance invariants and reversal procedures.
@@ -90,7 +90,7 @@ Percentages below describe implementation completeness in the audited source. A 
 The following changes are present on open draft pull requests and are **not part of main or the deployed service**:
 
 - **PR #35 — isolated ledger-posting foundation:** adds a transaction-scoped posting service with exact eight-decimal USDT arithmetic, balanced-entry validation, account row locks, idempotency comparison, rollback handling, and a non-negative projected-balance check for `AVAILABLE` accounts. A follow-up guard now requires exactly one row to transition from `pending` to `posted`; otherwise the transaction rolls back. CI runs #245 and #247 passed for the corresponding code heads.
-- **PR #36 — PostgreSQL 17 integration tests:** uses a uniquely named temporary schema and tests concurrent identical idempotency keys, competing `AVAILABLE` debits, and full rollback when an injected trigger rejects an entry. GitHub Actions run #248 passed for head `43fc9c8570ba236554572c6f746b28c4b268a67a`, including PostgreSQL service initialization, dependency installation, syntax checks, and `npm test`.
+- **PR #36 — PostgreSQL 17 integration tests:** uses a uniquely named temporary schema and tests concurrent identical idempotency keys, competing `AVAILABLE` debits, and full rollback when an injected trigger rejects an entry. The branch was realigned with the current PR #35 head using a non-force-forward merge commit `f5942ce669c53f015a8c7a80db04cfb56ef61e44`; it is now 6 commits ahead and 0 behind its base. Earlier run #248 passed for the prior head `43fc9c8570ba236554572c6f746b28c4b268a67a`; CI for the new merged head is pending (run #42974659507).
 - **PR #37 — ledger audit evidence:** documentation-only update; CI run #244 passed.
 - **PR #38 — database connection security review:** documentation-only review; records that `src/database.js` sets `ssl: false`. Whether this is exploitable depends on FadeHost's actual network topology and TLS support, neither of which has been verified. CI run #249 passed.
 - **PR #39 — startup diagnostic sanitization:** restricts the startup report to a validated five-character SQLSTATE or the fixed `UNAVAILABLE` label, preventing arbitrary PostgreSQL driver error text from leaking into the admin report. CI run #251 passed.
