@@ -1,11 +1,6 @@
 name: PostgreSQL 17 restore drill
 
 on:
-  push:
-    branches: [infra/postgres17-restore-drill]
-    paths:
-      - .github/workflows/postgres-restore.yml
-      - scripts/test-postgres-restore.sh
   pull_request:
     paths:
       - .github/workflows/postgres-restore.yml
@@ -32,12 +27,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Prepare PostgreSQL 17 binaries
+      - name: Run synthetic dump and restore on PostgreSQL 17
         run: |
-          if [[ ! -x /usr/lib/postgresql/17/bin/postgres ]]; then
-            sudo apt-get update -q
-            sudo apt-get install -y postgresql-17 postgresql-client-17
-          fi
-          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
-      - name: Run synthetic dump and restore
-        run: bash scripts/test-postgres-restore.sh
+          docker run --rm --network none --user postgres \
+            --volume "$GITHUB_WORKSPACE:/work:ro" \
+            --volume "$(realpath "$(command -v node)"):/usr/local/bin/node:ro" \
+            --workdir /work postgres:17-bookworm bash scripts/test-postgres-restore.sh
