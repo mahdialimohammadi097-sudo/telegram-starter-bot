@@ -1,7 +1,7 @@
 # PROFINO Ledger Safety Audit
 
-**Date:** 2026-11-10  
-**Revision reviewed:** `516730193d3c60ec91736a9d1e1ca37167abf283`  
+**Date:** 2026-11-11  
+**Revision reviewed:** `aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f`  
 **Method:** Static repository inspection only. No production database connection, schema mutation, deposit, withdrawal, or transfer was performed.
 
 ## What the current code proves
@@ -17,9 +17,15 @@
 - No ledger schema migration or DDL is present in the repository tree for `ledger_accounts`, `ledger_transactions`, or `ledger_entries`. The schema diagnostics can inspect these tables if they exist, but cannot prove the live database has the required structure.
 - No production ledger-posting service was found that atomically writes balanced debit/credit entries and transitions a transaction to `posted`.
 - No verified idempotency-key enforcement, duplicate deposit protection, immutable journal enforcement, reversal workflow, or reconciliation job was found.
-- No transaction-level check was found that prevents an `AVAILABLE` account from becoming negative.
+- The isolated posting service checks projected `AVAILABLE` balances while holding account row locks. PostgreSQL 17 CI integration tests now exercise concurrent debits against a disposable minimal schema; the actual FadeHost schema and trigger interaction remain unverified.
 - The balance query is a display read model; it is not a financial control and must not be treated as authorization to withdraw or invest.
 - Investment, deposit, withdrawal, profit accrual/distribution, and referral reward execution remain disabled or placeholders in the customer flow.
+
+## New verification since the initial audit
+
+- Added a PostgreSQL 17 GitHub Actions service and isolated integration tests for concurrent identical idempotency-key requests and concurrent `AVAILABLE` debits.
+- CI run #42975463597 passed on PostgreSQL 17.11: 46 tests, 46 passed, 0 failed, 0 skipped. The integration tests ran against a uniquely named temporary schema created for the test run. A separate unit run #42975311041 passed 43/43 posting tests, including discarding the client when rollback itself fails.
+- This is meaningful database-backed verification, but it does not establish that FadeHost's production schema, triggers, or functions match the test schema.
 
 ## Safe code improvements in this revision
 
