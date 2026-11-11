@@ -195,3 +195,150 @@ test("PostgreSQL rolls back the whole journal when an entry insert fails", {
   assert.equal(transactions.rows[0].count, 0);
   assert.equal(entries.rows[0].count, 0);
 });
+
+
+test("deferred constraint-trigger failure at COMMIT rolls back the entire journal", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const credit = await createAccount("CLEARING");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_deferred_reject()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF NEW.amount = 8.88 THEN
+        RAISE EXCEPTION 'forced deferred constraint failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE CONSTRAINT TRIGGER profino_test_deferred_reject
+    AFTER INSERT ON ledger_entries
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION profino_test_deferred_reject();
+  `);
+
+  await assert.rejects(
+    postLedgerTransaction({
+      pool,
+      transactionType: "deferred-trigger-rollback-test",
+      idempotencyKey: "postgres-deferred-trigger-failure",
+      entries: [
+        { account_id: debit, entry_type: "debit", amount: "8.88", currency: "USDT" },
+        { account_id: credit, entry_type: "credit", amount: "8.88", currency: "USDT" }
+      ]
+    }),
+    /forced deferred constraint failure/
+  );
+
+  const transactions = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE idempotency_key = $1",
+    ["postgres-deferred-trigger-failure"]
+  );
+  const entries = await pool.query(
+    `SELECT COUNT(*)::int AS count
+       FROM ledger_entries le
+       JOIN ledger_transactions lt ON lt.id = le.transaction_id
+      WHERE lt.idempotency_key = $1`,
+    ["postgres-deferred-trigger-failure"]
+  );
+  assert.equal(transactions.rows[0].count, 0);
+  assert.equal(entries.rows[0].count, 0);
+});
+
+test("posted ledger entries reject UPDATE and DELETE mutations", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const credit = await createAccount("CLEARING");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_prevent_posted_entry_mutation()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE parent_status TEXT;
+    BEGIN
+      SELECT status INTO parent_status
+      FROM ledger_transactions
+      WHERE id = OLD.transaction_id;
+      IF parent_status = 'posted' THEN
+        RAISE EXCEPTION 'posted ledger entries are immutable';
+      END IF;
+      RETURN OLD;
+    END;
+    $$;
+    CREATE TRIGGER profino_test_prevent_posted_entry_update
+    BEFORE UPDATE OR DELETE ON ledger_entries
+    FOR EACH ROW EXECUTE FUNCTION profino_test_prevent_posted_entry_mutation();
+  `);
+
+  const posted = await postLedgerTransaction({
+    pool,
+    transactionType: "immutability-test",
+    idempotencyKey: "postgres-posted-entry-immutability",
+    entries: [
+      { account_id: debit, entry_type: "debit", amount: "4.25", currency: "USDT" },
+      { account_id: credit, entry_type: "credit", amount: "4.25", currency: "USDT" }
+    ]
+  });
+
+  await assert.rejects(
+    pool.query(
+      "UPDATE ledger_entries SET amount = 99.99 WHERE transaction_id = $1",
+      [posted.transactionId]
+    ),
+    /posted ledger entries are immutable/
+  );
+  await assert.rejects(
+    pool.query(
+      "DELETE FROM ledger_entries WHERE transaction_id = $1",
+      [posted.transactionId]
+    ),
+    /posted ledger entries are immutable/
+  );
+
+  const result = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_entries WHERE transaction_id = $1",
+    [posted.transactionId]
+  );
+  assert.equal(result.rows[0].count, 2);
+});
+
+test("concurrent reuse of one idempotency key with different payloads cannot double-post", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const creditA = await createAccount("CLEARING");
+  const creditB = await createAccount("CLEARING");
+  const makeEntries = (credit) => [
+    { account_id: debit, entry_type: "debit", amount: "2.5", currency: "USDT" },
+    { account_id: credit, entry_type: "credit", amount: "2.5", currency: "USDT" }
+  ];
+
+  const outcomes = await Promise.allSettled([
+    postLedgerTransaction({
+      pool,
+      transactionType: "concurrent-idempotency-mismatch",
+      idempotencyKey: "parallel-mismatched-key",
+      entries: makeEntries(creditA)
+    }),
+    postLedgerTransaction({
+      pool,
+      transactionType: "concurrent-idempotency-mismatch",
+      idempotencyKey: "parallel-mismatched-key",
+      entries: makeEntries(creditB)
+    })
+  ]);
+
+  assert.equal(outcomes.filter((item) => item.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter((item) => item.status === "rejected").length, 1);
+  const count = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE idempotency_key = $1",
+    ["parallel-mismatched-key"]
+  );
+  assert.equal(count.rows[0].count, 1);
+});
