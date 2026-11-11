@@ -33,6 +33,6 @@
 3. Implement a single atomic posting service with per-currency debit/credit equality, unique idempotency keys, row-level locking, and no-negative-available-balance enforcement.
 4. Make posted journal rows immutable; corrections must use compensating/reversal entries with audit records.
 5. Add integration tests against a disposable PostgreSQL database, including concurrency, duplicate requests, rollback, and reconciliation.
-6. Complete legal, custody, sanctions/AML, and operational review before enabling deposits, withdrawals, investment allocations, or live arbitrage.
+6. Complete legal, custody, sanctions/AML, and operational review before enabling deposits, withdrawals, or investment allocations.
 
 **Conclusion:** The current code can display posted-ledger balances, but it is not yet a complete or production-safe financial ledger. No real-money workflow should be enabled on the basis of the current wallet screen or these helper tests.
