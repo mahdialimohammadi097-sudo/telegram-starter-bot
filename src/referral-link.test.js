@@ -16,6 +16,13 @@ test("normalizes surrounding whitespace in a referral code", () => {
   );
 });
 
+test("normalizes uppercase hexadecimal codes to the stored lowercase form", () => {
+  assert.equal(
+    buildReferralInviteLink("ABCDEF0123456789"),
+    "https://t.me/PROFINO1bot?start=ref_abcdef0123456789"
+  );
+});
+
 test("rejects missing, malformed, or non-hex referral codes", () => {
   for (const value of [null, "", "short", "0123456789abcdeg", "0123456789abcdef<script>"]) {
     assert.throws(() => buildReferralInviteLink(value), /Invalid referral code/);
