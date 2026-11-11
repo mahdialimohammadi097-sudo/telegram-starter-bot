@@ -24,6 +24,17 @@ before(async () => {
 
   const fixture = new URL("../test/fixtures/ledger-contract.sql", import.meta.url);
   await pool.query(await readFile(fixture, "utf8"));
+  // Only the columns involved in the simulated review are needed here.
+  await pool.query(`
+    CREATE TABLE deposit_requests (
+      id bigserial PRIMARY KEY,
+      user_id bigint NOT NULL REFERENCES users(id),
+      amount numeric NOT NULL CHECK (amount > 0),
+      transfer_event text NOT NULL,
+      status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+      reviewed_at timestamptz
+    )
+  `);
 });
 
 after(async () => {
@@ -403,75 +414,79 @@ test("a stored sub-unit balance cannot be silently rounded during posting", {
   assert.equal(result.rowCount, 0);
 });
 
-test("two approvals of one simulated deposit credit the customer's wallet once", {
-  skip: !enabled
-}, async () => {
-  const { rows: [user] } = await pool.query("INSERT INTO users (id) VALUES (501) RETURNING id");
-  const clearing = await createAccount("CLEARING");
+async function createSimulationWallet(id) {
+  const { rows: [user] } = await pool.query("INSERT INTO users (id) VALUES ($1) RETURNING id", [id]);
   await pool.query(
     `INSERT INTO ledger_accounts (user_id, account_code, account_type)
-     SELECT $1, 'simulation:' || kind, kind
+     SELECT $1, 'simulation:' || $1::bigint::text || ':' || kind, kind
      FROM unnest(ARRAY['AVAILABLE', 'INVESTED', 'PROFIT']) AS kind`,
     [user.id]
   );
-  // Only the columns involved in the simulated review are needed here.
-  await pool.query(`
-    CREATE TABLE deposit_requests (
-      id bigserial PRIMARY KEY,
-      user_id bigint NOT NULL REFERENCES users(id),
-      amount numeric NOT NULL CHECK (amount > 0),
-      transfer_event text NOT NULL,
-      status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
-      reviewed_at timestamptz
-    )
-  `);
+  return user.id;
+}
+
+async function displayedBalances(userId) {
+  const balances = await getWalletBalances(pool, userId);
+  return Object.values(balances).map(formatUsdt);
+}
+
+function approveSimulatedClaim(requestId, clearing, observedTransfers) {
+  return withLedgerTransaction(pool, async client => {
+    const { rows: [deposit] } = await client.query(
+      `SELECT d.user_id, d.status, d.transfer_event, trim_scale(d.amount)::text AS amount, a.id AS account_id
+       FROM deposit_requests d JOIN ledger_accounts a ON a.user_id = d.user_id
+       WHERE d.id = $1 AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
+       FOR UPDATE OF d`, [requestId]
+    );
+    if (deposit.status === "rejected") throw new Error("Request already rejected");
+    const observed = observedTransfers.get(deposit.transfer_event);
+    if (!observed || observed.userId !== deposit.user_id || observed.amount !== deposit.amount) {
+      throw new Error("Claim does not match the simulated transfer");
+    }
+    const journal = await postJournalInTransaction(client, {
+      transactionType: "simulated-deposit", referenceId: requestId,
+      idempotencyKey: `simulated-deposit:${deposit.transfer_event}`,
+      entries: [
+        { account_id: clearing, entry_type: "debit", amount: deposit.amount, currency: "USDT" },
+        { account_id: deposit.account_id, entry_type: "credit", amount: deposit.amount, currency: "USDT" }
+      ]
+    });
+    if (deposit.status === "pending") {
+      await client.query(
+        "UPDATE deposit_requests SET status = 'approved', reviewed_at = now() WHERE id = $1",
+        [requestId]
+      );
+    }
+    return journal;
+  });
+}
+
+test("two approvals of one simulated deposit credit the customer's wallet once", {
+  skip: !enabled
+}, async () => {
+  const userId = await createSimulationWallet(501);
+  const clearing = await createAccount("CLEARING");
+  const observed = new Map([
+    ["test-chain:sample-tx:0", { userId, amount: "25" }],
+    ["test-chain:sample-tx:1", { userId, amount: "25" }]
+  ]);
   const { rows: [request] } = await pool.query(
-    "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, 'test-chain:sample-tx:0') RETURNING id", [user.id]
+    "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, 'test-chain:sample-tx:0') RETURNING id", [userId]
   );
 
-  function simulateApproval(requestId = request.id) {
-    return withLedgerTransaction(pool, async client => {
-      const { rows: [deposit] } = await client.query(
-        `SELECT d.status, d.transfer_event, trim_scale(d.amount)::text AS amount, a.id AS account_id
-         FROM deposit_requests d JOIN ledger_accounts a ON a.user_id = d.user_id
-         WHERE d.id = $1 AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
-         FOR UPDATE OF d`, [requestId]
-      );
-      if (deposit.status === "rejected") throw new Error("Request already rejected");
-      const journal = await postJournalInTransaction(client, {
-        transactionType: "simulated-deposit", referenceId: requestId,
-        idempotencyKey: `simulated-deposit:${deposit.transfer_event}`,
-        entries: [
-          { account_id: clearing, entry_type: "debit", amount: deposit.amount, currency: "USDT" },
-          { account_id: deposit.account_id, entry_type: "credit", amount: deposit.amount, currency: "USDT" }
-        ]
-      });
-      if (deposit.status === "pending") {
-        await client.query(
-          "UPDATE deposit_requests SET status = 'approved', reviewed_at = now() WHERE id = $1",
-          [requestId]
-        );
-      }
-      return journal;
-    });
-  }
+  const simulateApproval = (id = request.id) => approveSimulatedClaim(id, clearing, observed);
 
-  async function displayedBalances() {
-    const balances = await getWalletBalances(pool, user.id);
-    return Object.values(balances).map(formatUsdt);
-  }
-
-  assert.deepEqual(await displayedBalances(), Array(3).fill("0.00000000"));
+  assert.deepEqual(await displayedBalances(userId), Array(3).fill("0.00000000"));
   // Force review failure after journal insertion. The credit must also roll back.
   await pool.query("ALTER TABLE deposit_requests ADD CONSTRAINT force_failure CHECK (status <> 'approved')");
   await assert.rejects(simulateApproval(), { code: "23514" });
-  assert.deepEqual(await displayedBalances(), Array(3).fill("0.00000000"));
+  assert.deepEqual(await displayedBalances(userId), Array(3).fill("0.00000000"));
   await pool.query("ALTER TABLE deposit_requests DROP CONSTRAINT force_failure");
   const [first, second] = await Promise.all([simulateApproval(), simulateApproval()]);
   assert.equal(first.transactionId, second.transactionId);
   assert.notEqual(first.idempotent, second.idempotent);
   assert.equal((await simulateApproval()).idempotent, true);
-  assert.deepEqual(await displayedBalances(), ["25.00000000", "0.00000000", "0.00000000"]);
+  assert.deepEqual(await displayedBalances(userId), ["25.00000000", "0.00000000", "0.00000000"]);
   const review = await pool.query("SELECT status, reviewed_at FROM deposit_requests WHERE id = $1", [request.id]);
   assert.equal(review.rows[0].status, "approved");
   assert.ok(review.rows[0].reviewed_at);
@@ -481,7 +496,7 @@ test("two approvals of one simulated deposit credit the customer's wallet once",
   const claims = await pool.query(
     `INSERT INTO deposit_requests (user_id, amount, transfer_event)
      VALUES ($1, 25, 'test-chain:sample-tx:1'), ($1, 25, 'test-chain:sample-tx:1')
-     RETURNING id`, [user.id]
+     RETURNING id`, [userId]
   );
   const outcomes = await Promise.allSettled(claims.rows.map(row => simulateApproval(row.id)));
   assert.equal(outcomes.filter(row => row.status === "fulfilled").length, 1);
@@ -493,5 +508,30 @@ test("two approvals of one simulated deposit credit the customer's wallet once",
   assert.deepEqual(reviews.rows.map(row => row.status), ["approved", "pending"]);
   assert.equal((await simulateApproval(reviews.rows[0].id)).idempotent, true);
   await assert.rejects(simulateApproval(reviews.rows[1].id), /different request/);
-  assert.deepEqual(await displayedBalances(), ["50.00000000", "0.00000000", "0.00000000"]);
+  assert.deepEqual(await displayedBalances(userId), ["50.00000000", "0.00000000", "0.00000000"]);
+});
+
+test("an early claim cannot divert another wallet's simulated deposit", { skip: !enabled }, async () => {
+  const owner = await createSimulationWallet(502);
+  const other = await createSimulationWallet(503);
+  const clearing = await createAccount("CLEARING");
+  // Trusted test input, prepared independently of the submitted claims.
+  const event = "test-chain:ownership-tx:0";
+  const observed = new Map([[event, { userId: owner, amount: "25" }]]);
+  async function claim(userId, amount, eventId) {
+    const result = await pool.query(
+      "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, $2, $3) RETURNING id",
+      [userId, amount, eventId]
+    );
+    return approveSimulatedClaim(result.rows[0].id, clearing, observed);
+  }
+  await assert.rejects(claim(other, "25", event), /does not match/);
+  await assert.rejects(claim(owner, "25.00000001", event), /does not match/);
+  await assert.rejects(claim(owner, "25", "test-chain:unknown:0"), /does not match/);
+  assert.deepEqual(await displayedBalances(other), Array(3).fill("0.00000000"));
+  assert.deepEqual(await displayedBalances(owner), Array(3).fill("0.00000000"));
+  const journal = await claim(owner, "25.00000000", event);
+  assert.equal(journal.idempotent, false);
+  assert.deepEqual(await displayedBalances(owner), ["25.00000000", "0.00000000", "0.00000000"]);
+  assert.deepEqual(await displayedBalances(other), Array(3).fill("0.00000000"));
 });
