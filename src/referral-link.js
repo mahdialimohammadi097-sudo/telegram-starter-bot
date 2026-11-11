@@ -1,7 +1,7 @@
 const BOT_USERNAME = "PROFINO1bot";
 
 export function buildReferralInviteLink(referralCode) {
-  const code = String(referralCode ?? "").trim();
+  const code = String(referralCode ?? "").trim().toLowerCase();
   if (!/^[a-f0-9]{16}$/i.test(code)) {
     throw new TypeError("Invalid referral code");
   }
