@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-10  
 **Revision reviewed:** `516730193d3c60ec91736a9d1e1ca37167abf283`  
-**Method:** Static repository inspection only. No production database connection, schema mutation, deposit, withdrawal, or transfer was performed.
+**Method:** Static repository inspection plus review of previously supplied read-only aggregate inventory output. No production schema mutation, deposit, withdrawal, or transfer was performed. This audit did not retrieve or inspect a complete production DDL/schema snapshot.
 
 ## What the current code proves
 
@@ -21,6 +21,10 @@ The following work was added after the revision audited above. It is evidence of
 - GitHub Actions run [#239](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/42914533133) passed on PR #36 head `5e5cc5579666090b8e98a91bd9804d2d1bdfc0e1`. The job initialized the PostgreSQL service, installed dependencies, checked JavaScript syntax, and ran `npm test`. The PR reports 43 tests passed, 0 failed, 0 skipped; the two PostgreSQL concurrency cases executed rather than being skipped.
 - The integration schema is deliberately minimal. It does not reproduce the actual FadeHost production schema, deferred trigger/function bodies, all production constraints, or immutable-posting rules. Therefore this CI result is not production-schema verification.
 
+## Production database evidence boundary
+
+A prior read-only diagnostic reported 9/9 expected core tables, 24 total tables, 68 indexes and 16 user-defined triggers. An earlier manual table listing counted 25 tables; the count discrepancy has not been reconciled. The diagnostic exposed aggregate inventory only. No complete production table definitions, column types/precision, foreign-key and unique-constraint definitions, deferred constraints, trigger definitions, or trigger-function bodies were captured for this audit. Therefore, the existence/count of core objects must not be described as verification of their financial semantics or correctness.
+
 ## What is not implemented or not evidenced in the current main branch
 
 - No ledger schema migration or DDL is present in the repository tree for `ledger_accounts`, `ledger_transactions`, or `ledger_entries`. The schema diagnostics can inspect these tables if they exist, but cannot prove the live database has the required structure.
@@ -37,7 +41,7 @@ The following work was added after the revision audited above. It is evidence of
 
 ## Release blockers before real funds
 
-1. Obtain a read-only snapshot of the actual production schema and verify columns, precision, foreign keys, unique constraints, indexes, and triggers.
+1. Obtain and reconcile a complete read-only snapshot of the actual production schema; verify columns, numeric precision, foreign keys, unique constraints, indexes, deferred constraints, trigger definitions, and trigger-function bodies. The aggregate inventory above is insufficient.
 2. Reconcile the draft ledger foundation with the exact production DDL and deferred trigger/function definitions; add migrations only after an independently reviewed schema design.
 3. Verify production idempotency, transaction rollback, concurrent duplicate requests, concurrent available-balance debits, and immutable posted-row behavior against the real schema contract in a disposable database.
 4. Make posted journal rows immutable; corrections must use compensating/reversal entries with audit records.
