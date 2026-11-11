@@ -3,6 +3,7 @@ import { pool } from "./database.js";
 import { isConfirmationCurrent } from "./admin-status-guard.js";
 import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
 import { adminText } from "./admin-language.js";
+import { rollbackTransaction } from "./transaction-safety.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -404,8 +405,11 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
   }
 
   const client = await pool.connect();
+  let transactionOpen = false;
+  let releaseError = null;
   try {
     await client.query("BEGIN");
+    transactionOpen = true;
     const locked = await client.query(
       "SELECT id, status FROM users WHERE telegram_id = $1 FOR UPDATE",
       [telegramId]
@@ -414,6 +418,7 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
     if (!locked.rowCount ||
         !isConfirmationCurrent(locked.rows[0].status, expectedStatus, newStatus)) {
       await client.query("ROLLBACK");
+      transactionOpen = false;
       await ctx.answerCallbackQuery({
         text: language === "fa"
           ? "این تأیید منقضی شده است. جزئیات کاربر را دوباره باز کنید و تلاش کنید."
@@ -440,6 +445,9 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
       "UPDATE users SET status = $1 WHERE telegram_id = $2 AND status = $3 RETURNING id, telegram_id, status",
       [newStatus, telegramId, expectedStatus]
     );
+    if (updated.rowCount !== 1) {
+      throw new Error("User status update did not affect exactly one row.");
+    }
     const auditDetails = JSON.stringify({ old_status: oldStatus, new_status: newStatus });
 
     await client.query(
@@ -456,15 +464,19 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
       ]
     );
     await client.query("COMMIT");
+    transactionOpen = false;
     await ctx.answerCallbackQuery({
       text: language === "fa" ? "وضعیت کاربر به‌روزرسانی شد." : "User status updated."
     });
     await showUser(ctx, telegramId, true);
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    if (transactionOpen) {
+      releaseError = await rollbackTransaction(client, error);
+      transactionOpen = false;
+    }
     throw error;
   } finally {
-    client.release();
+    client.release(releaseError);
   }
 }
 
