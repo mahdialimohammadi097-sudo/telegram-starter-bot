@@ -36,6 +36,10 @@ Percentages below describe implementation completeness in the audited source. A 
 - SIGINT/SIGTERM stop the scheduler and health monitor, stop Telegram polling, close the HTTP server, and close the PostgreSQL pool.
 - The external uptime workflow now judges availability from `/healthz` only, not from the always-live root page.
 
+## Repository release governance
+
+- The GitHub `main` branch currently reports `protected=false`. No branch-protection or ruleset configuration was changed during this audit. Before production releases, require pull requests, passing required checks, and restricted direct pushes/force pushes. This is a repository setting that must be enabled by an authorized repository administrator.
+
 ## Confirmed safeguards
 - The customer-facing bot strings inspected in `src/commands.js` are English.
 - Wallet balances are read from ledger transactions with `posted` status only.
