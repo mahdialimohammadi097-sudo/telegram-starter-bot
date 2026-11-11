@@ -1,0 +1,43 @@
+name: PostgreSQL 17 restore drill
+
+on:
+  push:
+    branches: [infra/postgres17-restore-drill]
+    paths:
+      - .github/workflows/postgres-restore.yml
+      - scripts/test-postgres-restore.sh
+  pull_request:
+    paths:
+      - .github/workflows/postgres-restore.yml
+      - scripts/test-postgres-restore.sh
+      - src/admin-ops.js
+      - src/post-history.js
+      - src/database.js
+      - package*.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Prepare PostgreSQL 17 binaries
+        run: |
+          if [[ ! -x /usr/lib/postgresql/17/bin/postgres ]]; then
+            sudo apt-get update -q
+            sudo apt-get install -y postgresql-17 postgresql-client-17
+          fi
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+      - name: Run synthetic dump and restore
+        run: bash scripts/test-postgres-restore.sh
