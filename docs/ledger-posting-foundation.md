@@ -27,8 +27,8 @@ The exact production trigger/function bodies, all column nullability/defaults, a
 
 ## Verification completed on 2026-11-11
 
-- GitHub Actions run #239 executed 43 tests against Node.js and a PostgreSQL 17 service: 43 passed, 0 failed, 0 skipped.
-- The two database-backed cases cover concurrent identical idempotency-key requests and concurrent `AVAILABLE` debits.
+- GitHub Actions run #42975463597 executed 46 tests against PostgreSQL 17.11: 46 passed, 0 failed, 0 skipped. The branch includes the latest PR #35 posting implementation and its rollback-failure client-discard regression test.
+- Three database-backed cases cover concurrent identical idempotency-key requests, concurrent `AVAILABLE` debits, and whole-journal rollback after an injected trigger failure.
 - Each run uses a temporary isolated schema. The test DDL is intentionally minimal and is not claimed to match the actual FadeHost production schema or its trigger/function definitions.
 
 ## Remaining mandatory verification
