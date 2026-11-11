@@ -4,6 +4,7 @@ import { isConfirmationCurrent } from "./admin-status-guard.js";
 import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
 import { adminText } from "./admin-language.js";
 import { rollbackTransaction } from "./transaction-safety.js";
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -84,8 +85,8 @@ async function recordAdminActivity(ctx, action, targetUserIdInput = null, detail
     );
     return { ok: result.rowCount === 1, id: result.rows[0]?.id };
   } catch (error) {
-    console.error("[admin-ops] activity recording failed:", error.message);
-    return { ok: false, error: String(error?.message || error).slice(0, 500) };
+    console.error("[admin-ops] activity recording failed:", safeDiagnosticCode(error));
+    return { ok: false, error: "Database operation failed (" + safeDiagnosticCode(error) + ")." };
   }
 }
 
@@ -556,7 +557,7 @@ export function registerAdminOps(bot) {
     try {
       await showAdminLanguage(ctx);
     } catch (error) {
-      console.error("[admin-ops] language settings failed:", error);
+      console.error("[admin-ops] language settings failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."));
     }
   });
@@ -568,7 +569,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showAdminLanguage(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] language screen failed:", error);
+      console.error("[admin-ops] language screen failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."), show_alert: true });
     }
   });
@@ -591,7 +592,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery({ text: language === "fa" ? "زبان فارسی ذخیره شد." : "English preference saved." });
       await showAdminLanguage(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] language preference update failed:", error);
+      console.error("[admin-ops] language preference update failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to save language preference.", "ذخیره تنظیم زبان ممکن نشد."), show_alert: true });
     }
   });
@@ -603,7 +604,7 @@ export function registerAdminOps(bot) {
     try {
       await showDashboard(ctx);
     } catch (error) {
-      console.error("[admin-ops] dashboard failed:", error);
+      console.error("[admin-ops] dashboard failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load the admin dashboard. Please try again.", "بارگذاری داشبورد مدیریت ممکن نشد. دوباره تلاش کنید."));
     }
   });
@@ -613,7 +614,7 @@ export function registerAdminOps(bot) {
     const language = await getAdminLanguage(ctx);
     try { await showDashboard(ctx); }
     catch (error) {
-      console.error("[admin-ops] stats failed:", error);
+      console.error("[admin-ops] stats failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load admin statistics.", "بارگذاری آمار مدیریت ممکن نشد."));
     }
   });
@@ -628,7 +629,7 @@ export function registerAdminOps(bot) {
     await recordAdminActivity(ctx, "admin_user_lookup", telegramId);
     try { await showUser(ctx, telegramId); }
     catch (error) {
-      console.error("[admin-ops] user lookup failed:", error);
+      console.error("[admin-ops] user lookup failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load this user.", "بارگذاری اطلاعات این کاربر ممکن نشد."));
     }
   });
@@ -680,7 +681,7 @@ export function registerAdminOps(bot) {
         : "PROFINO — USER SEARCH\n\n" + lines.join("\n") + "\n\nShowing up to 10 matches.";
       return ctx.reply(message, { reply_markup: keyboard });
     } catch (error) {
-      console.error("[admin-ops] user search failed:", error);
+      console.error("[admin-ops] user search failed:", safeDiagnosticCode(error));
       return ctx.reply(language === "fa"
         ? "در حال حاضر جست‌وجوی کاربران ممکن نیست."
         : "Unable to search users right now.");
@@ -786,9 +787,9 @@ export function registerAdminOps(bot) {
           : "No CHECK constraints found.")
       );
     } catch (error) {
-      console.error("[admin-ops] schema diagnostic failed:", error);
+      console.error("[admin-ops] schema diagnostic failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to inspect admin audit schema. Diagnostic: ", "بررسی ساختار ممیزی مدیریت ممکن نشد. جزئیات: ") +
-        String(error?.message || error).slice(0, 500));
+        safeDiagnosticCode(error));
     }
   });
 
@@ -804,10 +805,10 @@ export function registerAdminOps(bot) {
     }
     try { await showAuditLog(ctx); }
     catch (error) {
-      console.error("[admin-ops] audit log failed:", error);
+      console.error("[admin-ops] audit log failed:", safeDiagnosticCode(error));
       await ctx.reply(
         adminText(language, "Unable to load admin activity.\nDiagnostic: ", "بارگذاری فعالیت‌های مدیریت ممکن نشد\nجزئیات: ") +
-        String(error?.message || error).slice(0, 700)
+        safeDiagnosticCode(error)
       );
     }
   });
@@ -819,7 +820,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showDashboard(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] dashboard refresh failed:", error);
+      console.error("[admin-ops] dashboard refresh failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to refresh.", "به‌روزرسانی ممکن نشد."), show_alert: true });
     }
   });
@@ -832,7 +833,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showUsers(ctx, page, true);
     } catch (error) {
-      console.error("[admin-ops] users list failed:", error);
+      console.error("[admin-ops] users list failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load users.", "بارگذاری کاربران ممکن نشد."), show_alert: true });
     }
   });
@@ -844,7 +845,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showUser(ctx, ctx.callbackQuery.data.split(":")[1], true);
     } catch (error) {
-      console.error("[admin-ops] user details failed:", error);
+      console.error("[admin-ops] user details failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load user.", "بارگذاری اطلاعات کاربر ممکن نشد."), show_alert: true });
     }
   });
@@ -854,7 +855,7 @@ export function registerAdminOps(bot) {
     const [, telegramId, status] = ctx.callbackQuery.data.split(":");
     try { await confirmUserStatus(ctx, telegramId, status); }
     catch (error) {
-      console.error("[admin-ops] status confirmation failed:", error);
+      console.error("[admin-ops] status confirmation failed:", safeDiagnosticCode(error));
       const language = await getAdminLanguage(ctx);
       await ctx.answerCallbackQuery({
         text: language === "fa" ? "آماده‌سازی تغییر وضعیت ممکن نشد." : "Unable to prepare status change.",
@@ -868,7 +869,7 @@ export function registerAdminOps(bot) {
     const [, telegramId, status, expectedStatus] = ctx.callbackQuery.data.split(":");
     try { await applyUserStatus(ctx, telegramId, status, expectedStatus); }
     catch (error) {
-      console.error("[admin-ops] status update failed:", error);
+      console.error("[admin-ops] status update failed:", safeDiagnosticCode(error));
       const language = await getAdminLanguage(ctx);
       await ctx.answerCallbackQuery({
         text: language === "fa" ? "به‌روزرسانی وضعیت کاربر ممکن نشد." : "Unable to update user status.",
@@ -884,7 +885,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showPosts(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] post overview failed:", error);
+      console.error("[admin-ops] post overview failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post overview.", "بارگذاری نمای کلی پست‌ها ممکن نشد."), show_alert: true });
     }
   });
@@ -912,17 +913,17 @@ export function registerAdminOps(bot) {
       // dashboard message; this avoids Telegram edit restrictions.
       await showAuditLog(ctx, false);
     } catch (error) {
-      console.error("[admin-ops] activity view failed:", error);
+      console.error("[admin-ops] activity view failed:", safeDiagnosticCode(error));
 
       // Do not answer the same callback query twice. If editing the dashboard
       // fails (or the audit query fails), send a visible fallback message.
       try {
         await ctx.reply(
           adminText(language, "Unable to load admin activity.\nDiagnostic: ", "بارگذاری فعالیت‌های مدیریت ممکن نشد\nجزئیات: ") +
-          String(error?.message || error).slice(0, 700)
+          safeDiagnosticCode(error)
         );
       } catch (replyError) {
-        console.error("[admin-ops] activity fallback reply failed:", replyError);
+        console.error("[admin-ops] activity fallback reply failed:", safeDiagnosticCode(replyError));
       }
     }
   });
@@ -942,10 +943,10 @@ export function registerAdminOps(bot) {
         }
       }
     } catch (error) {
-      console.error("[admin-ops] core database schema inspection failed:", error);
+      console.error("[admin-ops] core database schema inspection failed:", safeDiagnosticCode(error));
       await ctx.reply(
         adminText(language, "Unable to inspect the core database schema.\nDiagnostic: ", "بررسی ساختار پایگاه داده اصلی ممکن نشد.\nجزئیات: ") +
-        String(error?.message || error).slice(0, 500)
+        safeDiagnosticCode(error)
       );
     }
   });
