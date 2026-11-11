@@ -420,26 +420,27 @@ test("two approvals of one simulated deposit credit the customer's wallet once",
       id bigserial PRIMARY KEY,
       user_id bigint NOT NULL REFERENCES users(id),
       amount numeric NOT NULL CHECK (amount > 0),
+      transfer_event text NOT NULL,
       status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
       reviewed_at timestamptz
     )
   `);
   const { rows: [request] } = await pool.query(
-    "INSERT INTO deposit_requests (user_id, amount) VALUES ($1, 25) RETURNING id", [user.id]
+    "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, 'test-chain:sample-tx:0') RETURNING id", [user.id]
   );
 
-  function simulateApproval() {
+  function simulateApproval(requestId = request.id) {
     return withLedgerTransaction(pool, async client => {
       const { rows: [deposit] } = await client.query(
-        `SELECT d.status, trim_scale(d.amount)::text AS amount, a.id AS account_id
+        `SELECT d.status, d.transfer_event, trim_scale(d.amount)::text AS amount, a.id AS account_id
          FROM deposit_requests d JOIN ledger_accounts a ON a.user_id = d.user_id
          WHERE d.id = $1 AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
-         FOR UPDATE OF d`, [request.id]
+         FOR UPDATE OF d`, [requestId]
       );
       if (deposit.status === "rejected") throw new Error("Request already rejected");
       const journal = await postJournalInTransaction(client, {
-        transactionType: "simulated-deposit", referenceId: request.id,
-        idempotencyKey: `simulated-deposit:${request.id}`,
+        transactionType: "simulated-deposit", referenceId: requestId,
+        idempotencyKey: `simulated-deposit:${deposit.transfer_event}`,
         entries: [
           { account_id: clearing, entry_type: "debit", amount: deposit.amount, currency: "USDT" },
           { account_id: deposit.account_id, entry_type: "credit", amount: deposit.amount, currency: "USDT" }
@@ -448,7 +449,7 @@ test("two approvals of one simulated deposit credit the customer's wallet once",
       if (deposit.status === "pending") {
         await client.query(
           "UPDATE deposit_requests SET status = 'approved', reviewed_at = now() WHERE id = $1",
-          [request.id]
+          [requestId]
         );
       }
       return journal;
@@ -474,4 +475,23 @@ test("two approvals of one simulated deposit credit the customer's wallet once",
   const review = await pool.query("SELECT status, reviewed_at FROM deposit_requests WHERE id = $1", [request.id]);
   assert.equal(review.rows[0].status, "approved");
   assert.ok(review.rows[0].reviewed_at);
+
+  // Two distinct claims reference the same synthetic transfer log. The ledger
+  // key identifies the log, while referenceId identifies the winning request.
+  const claims = await pool.query(
+    `INSERT INTO deposit_requests (user_id, amount, transfer_event)
+     VALUES ($1, 25, 'test-chain:sample-tx:1'), ($1, 25, 'test-chain:sample-tx:1')
+     RETURNING id`, [user.id]
+  );
+  const outcomes = await Promise.allSettled(claims.rows.map(row => simulateApproval(row.id)));
+  assert.equal(outcomes.filter(row => row.status === "fulfilled").length, 1);
+  assert.match(outcomes.find(row => row.status === "rejected").reason.message, /different request/);
+  const reviews = await pool.query(
+    "SELECT id, status FROM deposit_requests WHERE transfer_event = $1 ORDER BY status",
+    ["test-chain:sample-tx:1"]
+  );
+  assert.deepEqual(reviews.rows.map(row => row.status), ["approved", "pending"]);
+  assert.equal((await simulateApproval(reviews.rows[0].id)).idempotent, true);
+  await assert.rejects(simulateApproval(reviews.rows[1].id), /different request/);
+  assert.deepEqual(await displayedBalances(), ["50.00000000", "0.00000000", "0.00000000"]);
 });
