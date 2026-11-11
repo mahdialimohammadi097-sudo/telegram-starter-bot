@@ -99,6 +99,7 @@ export async function postLedgerTransaction({
 
   const client = await pool.connect();
   let transactionOpen = false;
+  let releaseError = null;
 
   try {
     await client.query("BEGIN");
@@ -240,11 +241,13 @@ export async function postLedgerTransaction({
         await client.query("ROLLBACK");
       } catch (rollbackError) {
         error.rollbackError = rollbackError;
+        // A client with an uncertain transaction state must not return to the pool.
+        releaseError = rollbackError;
       }
     }
     throw error;
   } finally {
-    client.release();
+    client.release(releaseError);
   }
 }
 
