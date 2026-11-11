@@ -195,3 +195,264 @@ test("PostgreSQL rolls back the whole journal when an entry insert fails", {
   assert.equal(transactions.rows[0].count, 0);
   assert.equal(entries.rows[0].count, 0);
 });
+
+
+test("deferred constraint-trigger failure at COMMIT rolls back the entire journal", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const credit = await createAccount("CLEARING");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_deferred_reject()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF NEW.amount = 8.88 THEN
+        RAISE EXCEPTION 'forced deferred constraint failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE CONSTRAINT TRIGGER profino_test_deferred_reject
+    AFTER INSERT ON ledger_entries
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION profino_test_deferred_reject();
+  `);
+
+  await assert.rejects(
+    postLedgerTransaction({
+      pool,
+      transactionType: "deferred-trigger-rollback-test",
+      idempotencyKey: "postgres-deferred-trigger-failure",
+      entries: [
+        { account_id: debit, entry_type: "debit", amount: "8.88", currency: "USDT" },
+        { account_id: credit, entry_type: "credit", amount: "8.88", currency: "USDT" }
+      ]
+    }),
+    /forced deferred constraint failure/
+  );
+
+  const transactions = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE idempotency_key = $1",
+    ["postgres-deferred-trigger-failure"]
+  );
+  const entries = await pool.query(
+    `SELECT COUNT(*)::int AS count
+       FROM ledger_entries le
+       JOIN ledger_transactions lt ON lt.id = le.transaction_id
+      WHERE lt.idempotency_key = $1`,
+    ["postgres-deferred-trigger-failure"]
+  );
+  assert.equal(transactions.rows[0].count, 0);
+  assert.equal(entries.rows[0].count, 0);
+});
+
+test("posted ledger entries reject UPDATE and DELETE mutations", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const credit = await createAccount("CLEARING");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_prevent_posted_entry_mutation()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE parent_status TEXT;
+    BEGIN
+      SELECT status INTO parent_status
+      FROM ledger_transactions
+      WHERE id = OLD.transaction_id;
+      IF parent_status = 'posted' THEN
+        RAISE EXCEPTION 'posted ledger entries are immutable';
+      END IF;
+      RETURN OLD;
+    END;
+    $$;
+    CREATE TRIGGER profino_test_prevent_posted_entry_update
+    BEFORE UPDATE OR DELETE ON ledger_entries
+    FOR EACH ROW EXECUTE FUNCTION profino_test_prevent_posted_entry_mutation();
+  `);
+
+  const posted = await postLedgerTransaction({
+    pool,
+    transactionType: "immutability-test",
+    idempotencyKey: "postgres-posted-entry-immutability",
+    entries: [
+      { account_id: debit, entry_type: "debit", amount: "4.25", currency: "USDT" },
+      { account_id: credit, entry_type: "credit", amount: "4.25", currency: "USDT" }
+    ]
+  });
+
+  await assert.rejects(
+    pool.query(
+      "UPDATE ledger_entries SET amount = 99.99 WHERE transaction_id = $1",
+      [posted.transactionId]
+    ),
+    /posted ledger entries are immutable/
+  );
+  await assert.rejects(
+    pool.query(
+      "DELETE FROM ledger_entries WHERE transaction_id = $1",
+      [posted.transactionId]
+    ),
+    /posted ledger entries are immutable/
+  );
+
+  const result = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_entries WHERE transaction_id = $1",
+    [posted.transactionId]
+  );
+  assert.equal(result.rows[0].count, 2);
+});
+
+test("concurrent reuse of one idempotency key with different payloads cannot double-post", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const creditA = await createAccount("CLEARING");
+  const creditB = await createAccount("CLEARING");
+  const makeEntries = (credit) => [
+    { account_id: debit, entry_type: "debit", amount: "2.5", currency: "USDT" },
+    { account_id: credit, entry_type: "credit", amount: "2.5", currency: "USDT" }
+  ];
+
+  const outcomes = await Promise.allSettled([
+    postLedgerTransaction({
+      pool,
+      transactionType: "concurrent-idempotency-mismatch",
+      idempotencyKey: "parallel-mismatched-key",
+      entries: makeEntries(creditA)
+    }),
+    postLedgerTransaction({
+      pool,
+      transactionType: "concurrent-idempotency-mismatch",
+      idempotencyKey: "parallel-mismatched-key",
+      entries: makeEntries(creditB)
+    })
+  ]);
+
+  assert.equal(outcomes.filter((item) => item.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter((item) => item.status === "rejected").length, 1);
+  const count = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_transactions WHERE idempotency_key = $1",
+    ["parallel-mismatched-key"]
+  );
+  assert.equal(count.rows[0].count, 1);
+});
+
+
+test("database refuses to mark an unbalanced journal as posted", {
+  skip: !enabled
+}, async () => {
+  const account = await createAccount("CLEARING");
+  const transaction = await pool.query(
+    `INSERT INTO ledger_transactions
+       (transaction_type, idempotency_key, status)
+     VALUES ('unbalanced-posting-test', 'unbalanced-posting-blocked', 'pending')
+     RETURNING id`
+  );
+  await pool.query(
+    `INSERT INTO ledger_entries
+       (transaction_id, account_id, entry_type, amount, currency)
+     VALUES ($1, $2, 'debit', 1, 'USDT')`,
+    [transaction.rows[0].id, account]
+  );
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_reject_unbalanced_posting()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE
+      debit_total NUMERIC(30, 8);
+      credit_total NUMERIC(30, 8);
+      entry_count BIGINT;
+    BEGIN
+      IF NEW.status = 'posted' AND OLD.status IS DISTINCT FROM 'posted' THEN
+        SELECT COUNT(*),
+               COALESCE(SUM(amount) FILTER (WHERE entry_type = 'debit'), 0),
+               COALESCE(SUM(amount) FILTER (WHERE entry_type = 'credit'), 0)
+          INTO entry_count, debit_total, credit_total
+          FROM ledger_entries
+         WHERE transaction_id = NEW.id;
+        IF entry_count < 2 OR debit_total <> credit_total THEN
+          RAISE EXCEPTION 'unbalanced journal cannot be posted';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER profino_test_reject_unbalanced_posting
+    BEFORE UPDATE OF status ON ledger_transactions
+    FOR EACH ROW EXECUTE FUNCTION profino_test_reject_unbalanced_posting();
+  `);
+
+  await assert.rejects(
+    pool.query(
+      "UPDATE ledger_transactions SET status = 'posted' WHERE id = $1",
+      [transaction.rows[0].id]
+    ),
+    /unbalanced journal cannot be posted/
+  );
+  const state = await pool.query(
+    "SELECT status FROM ledger_transactions WHERE id = $1",
+    [transaction.rows[0].id]
+  );
+  assert.equal(state.rows[0].status, "pending");
+});
+
+test("database rejects new entries attached to an already posted journal", {
+  skip: !enabled
+}, async () => {
+  const debit = await createAccount("CLEARING");
+  const credit = await createAccount("CLEARING");
+  const posted = await postLedgerTransaction({
+    pool,
+    transactionType: "posted-entry-insert-guard",
+    idempotencyKey: "posted-entry-insert-guard",
+    entries: [
+      { account_id: debit, entry_type: "debit", amount: "3", currency: "USDT" },
+      { account_id: credit, entry_type: "credit", amount: "3", currency: "USDT" }
+    ]
+  });
+  const extra = await createAccount("CLEARING");
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION profino_test_reject_insert_into_posted_journal()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    DECLARE parent_status TEXT;
+    BEGIN
+      SELECT status INTO parent_status
+        FROM ledger_transactions
+       WHERE id = NEW.transaction_id;
+      IF parent_status = 'posted' THEN
+        RAISE EXCEPTION 'cannot append entries to a posted journal';
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+    CREATE TRIGGER profino_test_reject_insert_into_posted_journal
+    BEFORE INSERT ON ledger_entries
+    FOR EACH ROW EXECUTE FUNCTION profino_test_reject_insert_into_posted_journal();
+  `);
+
+  await assert.rejects(
+    pool.query(
+      `INSERT INTO ledger_entries
+         (transaction_id, account_id, entry_type, amount, currency)
+       VALUES ($1, $2, 'debit', 1, 'USDT')`,
+      [posted.transactionId, extra]
+    ),
+    /cannot append entries to a posted journal/
+  );
+  const count = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM ledger_entries WHERE transaction_id = $1",
+    [posted.transactionId]
+  );
+  assert.equal(count.rows[0].count, 2);
+});
