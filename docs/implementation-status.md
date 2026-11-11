@@ -57,7 +57,7 @@ Percentages below describe implementation completeness in the audited source. A 
 ## Next safe implementation sequence
 - **Completed runtime foundation:** startup/readiness/reconnect/shutdown implementation and automated tests; live FadeHost smoke test remains pending.
 - **Completed admin localization foundation:** persisted language preference and the principal admin workflows.
-- **Phase 1:** Production schema review and ledger invariant tests (read-only first); initial report and exact eight-decimal helper hardening are in draft PR #29.
+- **Phase 1:** PR #29's read-only diagnostic and exact eight-decimal helper hardening are merged. Collecting and reviewing the complete live `/dbschema` output remains pending. PR #31 extends diagnostic metadata and tests it against disposable PostgreSQL 17; PRs #35/#36 provide an isolated ledger-posting foundation and integration tests, still draft and not production-enabled.
 - **Phase 3:** Referral attribution without monetary rewards.
 - **Phase 4:** Testnet deposit watcher and reconciliation, behind a disabled-by-default feature flag.
 - **Phase 5:** Withdrawal workflow and risk controls, also disabled until independently reviewed.
