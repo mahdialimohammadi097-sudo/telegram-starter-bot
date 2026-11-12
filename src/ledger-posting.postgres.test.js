@@ -434,8 +434,8 @@ async function displayedBalances(userId) {
   return Object.values(balances).map(formatUsdt);
 }
 
-function approveSimulatedClaim(requestId, observedTransfers) {
-  return withLedgerTransaction(pool, async client => {
+function approveSimulatedClaim(requestId, observedTransfers, workerPool = pool) {
+  return withLedgerTransaction(workerPool, async client => {
     const { rows: [deposit] } = await client.query(
       `SELECT d.user_id, d.status, d.transfer_event, trim_scale(d.amount)::text AS amount, a.id AS account_id
        FROM deposit_requests d JOIN ledger_accounts a ON a.user_id = d.user_id
@@ -558,12 +558,37 @@ test("a captured finalized testnet receipt credits the simulated wallet once", {
     await assert.rejects(approveFromReceipt(sample.observation, { ...sample.expected, [field]: otherAddress }));
   }
   assert.deepEqual(await displayedBalances(owner), Array(3).fill("0.00000000"));
-  const [a, b] = await Promise.all([
-    approveFromReceipt(sample.observation, sample.expected),
-    approveFromReceipt(sample.observation, sample.expected)
-  ]);
-  assert.equal(a.transactionId, b.transactionId);
-  assert.notEqual(a.idempotent, b.idempotent);
+  await pool.query(`
+    CREATE TABLE simulation_wallet_assignments (recipient text PRIMARY KEY, user_id bigint REFERENCES users(id));
+    CREATE TABLE simulation_inbox (request_id bigint PRIMARY KEY REFERENCES deposit_requests(id),
+      observation jsonb NOT NULL, expected jsonb NOT NULL)
+  `);
+  await pool.query("INSERT INTO simulation_wallet_assignments VALUES ($1, $2)", [sample.expected.recipient, owner]);
+  await pool.query("INSERT INTO simulation_inbox VALUES ($1, $2, $3)", [request.id, sample.observation, sample.expected]);
+
+  async function processFromNewConnection() {
+    const worker = new pg.Pool({ connectionString: process.env.DATABASE_URL, options: `-c search_path=${schema}` });
+    try {
+      const { rows: [item] } = await worker.query(
+        `SELECT i.*, w.user_id FROM simulation_inbox i
+         JOIN simulation_wallet_assignments w ON w.recipient = i.expected->>'recipient'`
+      );
+      const transfer = readTestnetTransfer(item.observation, item.expected);
+      return await approveSimulatedClaim(item.request_id, new Map([
+        [transfer.event, { userId: item.user_id, amount: transfer.amount }]
+      ]), worker);
+    } finally {
+      await worker.end();
+    }
+  }
+  // The first worker commits and exits before acknowledging the inbox item.
+  const first = await processFromNewConnection();
+  assert.equal(first.idempotent, false);
+  const replays = await Promise.all([processFromNewConnection(), processFromNewConnection()]);
+  for (const replay of replays) {
+    assert.equal(replay.transactionId, first.transactionId);
+    assert.equal(replay.idempotent, true);
+  }
   assert.deepEqual(await displayedBalances(owner), ["1.00000000", "0.00000000", "0.00000000"]);
 });
 
