@@ -1271,9 +1271,15 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const history = await screen("Transaction History");
   const amounts = history.split("\n").filter(line => line.includes(" UTC · ")).map(line => line.split(" UTC · ")[1]);
   assert.deepEqual(amounts, [
-    "AVAILABLE · +27.36000000 USDT", "AVAILABLE · -27.36000000 USDT",
-    "AVAILABLE · +27.36000000 USDT", "INVESTED · -25.00000000 USDT",
-    "INVESTED · +25.00000000 USDT", "AVAILABLE · -25.00000000 USDT", "AVAILABLE · +25.00000000 USDT"
+    "AVAILABLE · +27.36000000 USDT · Simulated withdrawal cancelled",
+    "Reserved for withdrawal · -27.36000000 USDT · Simulated withdrawal cancelled",
+    "Reserved for withdrawal · +27.36000000 USDT · Simulated withdrawal reserved",
+    "AVAILABLE · -27.36000000 USDT · Simulated withdrawal reserved",
+    "AVAILABLE · +27.36000000 USDT · Simulated settlement",
+    "INVESTED · -25.00000000 USDT · Simulated settlement",
+    "INVESTED · +25.00000000 USDT · Simulated investment opened",
+    "AVAILABLE · -25.00000000 USDT · Simulated investment opened",
+    "AVAILABLE · +25.00000000 USDT · Simulated deposit"
   ]);
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });

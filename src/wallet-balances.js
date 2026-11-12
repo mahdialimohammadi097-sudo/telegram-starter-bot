@@ -54,12 +54,12 @@ export async function getWalletBalances(pool, userId) {
 
 export async function getRecentWalletEntries(pool, userId) {
   const result = await pool.query(
-    `SELECT t.created_at, a.account_type, e.entry_type, e.amount
+    `SELECT t.created_at, t.transaction_type, a.account_type, e.entry_type, e.amount
      FROM ledger_accounts a
      JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
      JOIN ledger_transactions t ON t.id = e.transaction_id
      WHERE a.user_id = $1 AND a.currency = 'USDT' AND t.status = 'posted'
-       AND a.account_type IN ('AVAILABLE', 'INVESTED', 'PROFIT')
+       AND a.account_type IN ('AVAILABLE', 'INVESTED', 'PROFIT', 'WITHDRAWAL_HOLD')
      ORDER BY t.created_at DESC, t.id DESC, e.id DESC
      LIMIT 10`, [userId]
   );

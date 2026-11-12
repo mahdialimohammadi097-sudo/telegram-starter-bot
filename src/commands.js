@@ -27,6 +27,14 @@ const mainMenu = new Keyboard()
   .text("Transaction History").text("Support")
   .resized();
 
+const simulationHistoryLabels = new Map([
+  ["simulated-deposit", "Simulated deposit"],
+  ["simulated-investment-open", "Simulated investment opened"],
+  ["simulated-investment-settle", "Simulated settlement"],
+  ["sim-withdraw-reserve", "Simulated withdrawal reserved"],
+  ["sim-withdraw-release", "Simulated withdrawal cancelled"]
+]);
+
 const backMenu = new Keyboard()
   .text("⬅ Main Menu")
   .resized();
@@ -559,7 +567,10 @@ export function registerCommands(bot) {
           const lines = entries.map(entry => {
             const utc = entry.created_at.toISOString().slice(0, 16).replace("T", " ");
             const sign = entry.entry_type === "credit" ? "+" : "-";
-            return utc + " UTC · " + entry.account_type + " · " + sign + formatUsdt(entry.amount) + " USDT";
+            const account = entry.account_type === "WITHDRAWAL_HOLD" ? "Reserved for withdrawal" : entry.account_type;
+            const label = simulationHistoryLabels.get(entry.transaction_type);
+            const line = utc + " UTC · " + account + " · " + sign + formatUsdt(entry.amount) + " USDT";
+            return label ? line + " · " + label : line;
           });
           const summary = lines.length ? "Latest posted wallet entries (up to 10)\n" + lines.join("\n") : "No posted wallet entries yet.";
           return ctx.reply("TRANSACTION HISTORY\n\n" + summary, { reply_markup: walletMenu });
