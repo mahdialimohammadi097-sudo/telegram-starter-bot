@@ -34,7 +34,7 @@ export async function getWalletBalances(pool, userId) {
   };
 
   for (const row of result.rows) {
-    if (Object.hasOwn(balances, row.account_type)) {
+    if (Object.hasOwn(balances, row.account_type) || row.account_type === "WITHDRAWAL_HOLD") {
       balances[row.account_type] = row.balance;
     }
   }

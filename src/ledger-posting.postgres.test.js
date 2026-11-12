@@ -901,6 +901,7 @@ test("private Telegram wallet and history resolve the sender's posted USDT entri
     }
     assert.match((await select(10514, "My Wallet"))[0], /Available Balance: 25\.00000000 USDT/);
     const visibleButtons = () => replies[0].reply_markup.keyboard.flat().map(button => button.text);
+    assert.doesNotMatch(replies[0].text, /Reserved for Withdrawal/);
     assert.deepEqual(visibleButtons(), ["Transaction History", "⬅ Main Menu"]);
     const [history] = await select(10514, visibleButtons()[0]);
     assert.deepEqual(visibleButtons(), ["My Wallet", "⬅ Main Menu"]);
@@ -924,6 +925,20 @@ test("private Telegram wallet and history resolve the sender's posted USDT entri
       appPool.query = originalQuery;
     }
     assert.match((await select(10514, visibleButtons()[0]))[0], /AVAILABLE/);
+    const { rows: [held] } = await client.query(
+      "INSERT INTO ledger_accounts (user_id, account_code, account_type) VALUES ($1, 'telegram-hold-514', 'WITHDRAWAL_HOLD') RETURNING id", [owner]
+    );
+    await postJournalInTransaction(client, {
+      transactionType: "sim-withdraw-reserve", idempotencyKey: "telegram-view-reserve",
+      entries: [
+        { account_id: wallet.id, entry_type: "debit", amount: "7.25", currency: "USDT" },
+        { account_id: held.id, entry_type: "credit", amount: "7.25", currency: "USDT" }
+      ]
+    });
+    const [reservedWallet] = await select(10514, "My Wallet");
+    assert.match(reservedWallet, /Available Balance: 17\.75000000 USDT/);
+    assert.match(reservedWallet, /Reserved for Withdrawal: 7\.25000000 USDT/);
+    assert.doesNotMatch((await select(10515, "My Wallet"))[0], /Reserved for Withdrawal/);
     assert.deepEqual(await select(10514, "Transaction History", "group"), []);
     assert.deepEqual(await select(10516, "My Wallet"), ["Please send /start to register first."]);
     await client.query("UPDATE users SET status = 'blocked' WHERE id = $1", [owner]);
@@ -1101,7 +1116,9 @@ test("withdrawal recovery reconciles request state, held funds and available bal
   async function check(expectedStatus, availableAmount, heldAmount, movementCount) {
     const requests = await pool.query("SELECT status FROM simulation_withdrawals WHERE user_id = $1", [owner]);
     assert.deepEqual(requests.rows.map(row => row.status), expectedStatus ? [expectedStatus] : []);
-    assert.equal((await displayedBalances(owner))[0], availableAmount);
+    const displayed = await getWalletBalances(pool, owner);
+    assert.equal(formatUsdt(displayed.AVAILABLE), availableAmount);
+    assert.equal(formatUsdt(displayed.WITHDRAWAL_HOLD), heldAmount);
     const { rows: [balance] } = await pool.query(
       `SELECT count(*)::int AS movements,
         coalesce(sum(CASE WHEN e.entry_type = 'credit' THEN e.amount ELSE -e.amount END), 0) AS net

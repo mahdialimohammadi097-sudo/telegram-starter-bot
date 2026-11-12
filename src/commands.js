@@ -565,6 +565,7 @@ export function registerCommands(bot) {
           "MY WALLET\n\n" +
           `Available Balance: ${format(balances.AVAILABLE)} USDT\n` +
           `Invested Balance: ${format(balances.INVESTED)} USDT\n` +
+          (balances.WITHDRAWAL_HOLD !== undefined ? `Reserved for Withdrawal: ${format(balances.WITHDRAWAL_HOLD)} USDT\n` : "") +
           `Recorded Profit: ${format(balances.PROFIT)} USDT\n\n` +
           "Balances reflect posted ledger transactions only.",
           { reply_markup: walletMenu }
