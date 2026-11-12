@@ -53,11 +53,13 @@ before(async () => {
       reviewed_at timestamptz
     )
   `);
+  await pool.query("CREATE TABLE simulation_reviewers (user_id bigint PRIMARY KEY REFERENCES users(id), active boolean NOT NULL)");
   await pool.query(`CREATE TABLE simulation_withdrawals (
     id bigserial PRIMARY KEY, user_id bigint NOT NULL REFERENCES users(id), request_key text NOT NULL,
     amount numeric(36,8) NOT NULL CHECK (amount > 0),
     available_id bigint NOT NULL REFERENCES ledger_accounts(id), held_id bigint NOT NULL REFERENCES ledger_accounts(id),
     status text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'cancelled')),
+    cancelled_by_reviewer bigint REFERENCES simulation_reviewers(user_id),
     release_id bigint UNIQUE REFERENCES ledger_transactions(id), UNIQUE (user_id, request_key)
   )`);
 });
@@ -1583,4 +1585,42 @@ test("offline queue reports the reserve shortage and drains overdue investments 
     due_count: 0, first_id: null, reserve_balance: "0", first_shortfall: "0", total_shortfall: "0"
   });
   assert.deepEqual(await displayedBalances(owner), ["158.96000000", "0.00000000", "0.00000000"]);
+});
+
+test("reviewer and customer cancellations share one release and preserve the original actor", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelWithdrawal, cancelAsSimulationReviewer } = await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(650);
+  const reviewer = await createSimulationWallet(651);
+  await pool.query("INSERT INTO simulation_reviewers VALUES ($1, false)", [reviewer]);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "15");
+  const reserve = key => reserveWithdrawal(pool, customer, key, "5");
+  const actor = async id => (await pool.query(
+    "SELECT cancelled_by_reviewer FROM simulation_withdrawals WHERE id = $1", [id]
+  )).rows[0].cancelled_by_reviewer;
+  const first = await reserve("review-first");
+  await assert.rejects(cancelAsSimulationReviewer(pool, customer, first.id), /Unauthorized/);
+  await assert.rejects(cancelAsSimulationReviewer(pool, reviewer, first.id), /Unauthorized/);
+  await pool.query("UPDATE simulation_reviewers SET active = true WHERE user_id = $1", [reviewer]);
+  const review = id => cancelAsSimulationReviewer(pool, reviewer, id);
+  const cancel = id => cancelWithdrawal(pool, customer, id);
+  const journal = await review(first.id);
+  assert.equal(await cancel(first.id), journal);
+  assert.equal(await actor(first.id), reviewer);
+  const second = await reserve("customer-first");
+  assert.equal(await cancel(second.id), await review(second.id));
+  assert.equal(await actor(second.id), null);
+  const third = await reserve("concurrent-review");
+  const [one, two] = await Promise.all([review(third.id), cancel(third.id)]);
+  assert.equal(one, two);
+  const winner = await actor(third.id);
+  assert.ok(winner === null || winner === reviewer);
+  assert.equal(await review(third.id), one);
+  assert.equal(await actor(third.id), winner);
+  const balances = await getWalletBalances(pool, customer);
+  assert.equal(formatUsdt(balances.AVAILABLE), "15.00000000");
+  assert.equal(formatUsdt(balances.WITHDRAWAL_HOLD), "0.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });

@@ -54,10 +54,32 @@ export async function cancelWithdrawal(pool, userId, id) {
     if (!request) throw new Error("Unknown withdrawal");
     if (request.status === "cancelled") return request.release_id;
     if (request.status !== "reserved") throw new Error("Withdrawal cannot be cancelled");
-    const journal = await postMovement(client, request, "release", request.held_id, request.available_id);
-    await client.query("UPDATE simulation_withdrawals SET status = 'cancelled', release_id = $2 WHERE id = $1",
-      [request.id, journal.transactionId]);
-    return journal.transactionId;
+    return releaseReservation(client, request, null);
+  });
+}
+
+async function releaseReservation(client, request, reviewerId) {
+  const journal = await postMovement(client, request, "release", request.held_id, request.available_id);
+  await client.query(
+    "UPDATE simulation_withdrawals SET status = 'cancelled', release_id = $2, cancelled_by_reviewer = $3 WHERE id = $1",
+    [request.id, journal.transactionId, reviewerId]
+  );
+  return journal.transactionId;
+}
+
+export async function cancelAsSimulationReviewer(pool, reviewerId, id) {
+  return withLedgerTransaction(pool, async client => {
+    const reviewer = await client.query(
+      "SELECT user_id FROM simulation_reviewers WHERE user_id = $1 AND active FOR SHARE", [reviewerId]
+    );
+    if (!reviewer.rowCount) throw new Error("Unauthorized simulation reviewer");
+    const { rows: [request] } = await client.query(
+      "SELECT * FROM simulation_withdrawals WHERE id = $1 FOR UPDATE", [id]
+    );
+    if (!request) throw new Error("Unknown withdrawal");
+    if (request.status === "cancelled") return request.release_id;
+    if (request.status !== "reserved") throw new Error("Withdrawal cannot be cancelled");
+    return releaseReservation(client, request, reviewerId);
   });
 }
 
