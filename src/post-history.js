@@ -1,3 +1,4 @@
+import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
@@ -11,17 +12,6 @@ function isAdminPrivate(ctx) {
   return ctx.from?.id === ADMIN_ID && ctx.chat?.type === "private";
 }
 
-function parseUtcDateTime(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(value);
-  if (!match) return null;
-  const [year, month, day, hour, minute] = match.slice(1).map(Number);
-  if (year < 2000 || month < 1 || month > 12 || hour > 23 || minute > 59) return null;
-  const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 ||
-      date.getUTCDate() !== day || date.getUTCHours() !== hour ||
-      date.getUTCMinutes() !== minute || date.getTime() <= Date.now() + 60000) return null;
-  return date;
-}
 
 function formatUtc(value, language = "en") {
   return new Date(value).toLocaleString(language === "fa" ? "fa-IR" : "en-GB", {
@@ -119,7 +109,7 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   );
   const total = count.rows[0].total;
   if (!total) {
-    const empty = adminText(language, "No posts found for status: ", "هیچ پستی با وضعیت ") + status.toUpperCase() + adminText(language, ".", " پیدا نشد.");
+    const empty = adminText(language, "No posts found for status: ", "هیچ پستی با وضعیت ") + postStatusLabel(status, language) + adminText(language, ".", " پیدا نشد.");
     if (edit) return ctx.editMessageText(empty);
     return ctx.reply(empty);
   }
@@ -131,16 +121,16 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   }
   keyboard.row();
   for (const post of result.rows) {
-    keyboard.text("#" + post.id + " · " + (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده" }[post.status] || post.status) : post.status.toUpperCase()), "posthist_detail:" + post.id).row();
+    keyboard.text("#" + post.id + " · " + postStatusLabel(post.status, language), "posthist_detail:" + post.id).row();
   }
   if (page > 0) keyboard.text(adminText(language, "← Previous", "← قبلی"), "posthist_page:" + status + ":" + (page - 1));
   if (offset + result.rowCount < total) keyboard.text(adminText(language, "Next →", "بعدی →"), "posthist_page:" + status + ":" + (page + 1));
   const body = result.rows.map(post =>
     "#" + post.id + " — " + post.title + "\n" +
-    adminText(language, "Status: ", "وضعیت: ") + (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده" }[post.status] || post.status) : post.status.toUpperCase()) + "\n" +
+    adminText(language, "Status: ", "وضعیت: ") + postStatusLabel(post.status, language) + "\n" +
     adminText(language, "Scheduled: ", "زمان‌بندی: ") + formatUtc(post.scheduled_at, language)
   ).join("\n\n");
-  const message = adminText(language, "PROFINO — POST HISTORY (", "پروفینو — تاریخچه پست‌ها (") + status.toUpperCase() + ")\n\n" + body + adminText(language, "\n\nShowing ", "\n\nنمایش ") + (offset + 1) + "–" + (offset + result.rowCount) + adminText(language, " of ", " از ") + total;
+  const message = adminText(language, "PROFINO — POST HISTORY (", "پروفینو — تاریخچه پست‌ها (") + postStatusLabel(status, language) + ")\n\n" + body + adminText(language, "\n\nShowing ", "\n\nنمایش ") + (offset + 1) + "–" + (offset + result.rowCount) + adminText(language, " of ", " از ") + total;
   if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
   return ctx.reply(message, { reply_markup: keyboard });
 }
@@ -172,7 +162,7 @@ async function showDetails(ctx, postId, edit = false) {
     adminText(language, "PROFINO — POST #", "پروفینو — پست شماره ") + post.id,
     "",
     adminText(language, "Title: ", "عنوان: ") + post.title,
-    adminText(language, "Status: ", "وضعیت: ") + (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده", preview_unknown: "وضعیت پیش‌نمایش نامشخص", publishing: "در حال انتشار", publish_unknown: "وضعیت انتشار نامشخص", failed: "ناموفق" }[post.status] || post.status) : post.status.toUpperCase()),
+    adminText(language, "Status: ", "وضعیت: ") + postStatusLabel(post.status, language),
     adminText(language, "Scheduled: ", "زمان‌بندی: ") + formatUtc(post.scheduled_at, language),
     adminText(language, "Created: ", "ایجاد: ") + formatUtc(post.created_at, language),
     adminText(language, "Updated: ", "به‌روزرسانی: ") + formatUtc(post.updated_at, language),

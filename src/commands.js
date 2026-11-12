@@ -1,3 +1,4 @@
+import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
@@ -65,21 +66,6 @@ function isPrivateChat(ctx) {
   return ctx.chat?.type === "private";
 }
 
-function parseUtcDateTime(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/.exec(value);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  if (year < 2000 || month < 1 || month > 12 || hour > 23 || minute > 59) return null;
-  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 ||
-      date.getUTCDate() !== day || date.getUTCHours() !== hour ||
-      date.getUTCMinutes() !== minute || date.getTime() <= Date.now() + 60000) return null;
-  return date;
-}
 
 async function showScheduledPosts(ctx, language) {
   const result = await pool.query(
@@ -112,7 +98,7 @@ async function showScheduledPosts(ctx, language) {
       adminText(language, "ID: ", "شناسه: ") + post.id,
       adminText(language, "Title: ", "عنوان: ") + post.title,
       adminText(language, "Time: ", "زمان: ") + date + " UTC",
-      adminText(language, "Status: ", "وضعیت: ") + post.status.toUpperCase()
+      adminText(language, "Status: ", "وضعیت: ") + postStatusLabel(post.status, language)
     ].join("\n");
   });
   const heading = adminText(language, "PROFINO — SCHEDULED POSTS", "پست‌های زمان‌بندی‌شده");
@@ -405,8 +391,7 @@ export function registerCommands(bot) {
       }
 
       if (draft.step === "scheduled_at") {
-        const dateText = choice.trim().replace(/[۰-۹٠-٩]/g, digit => String(digit.charCodeAt(0) & 15));
-        const scheduledAt = parseUtcDateTime(dateText);
+        const scheduledAt = parseUtcDateTime(choice.trim());
 
         if (!scheduledAt) {
           return ctx.reply(

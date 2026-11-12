@@ -1,3 +1,4 @@
+import { parseUtcDateTime } from "./post-schedule.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
@@ -17,27 +18,6 @@ function previewKeyboard(postId, language = "en") {
     .text(adminText(language, "Cancel Post", "لغو پست"), "post_cancel:" + postId);
 }
 
-function parseUtcDateTime(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(value);
-  if (!match) return null;
-  const y = Number(match[1]);
-  const mo = Number(match[2]);
-  const d = Number(match[3]);
-  const h = Number(match[4]);
-  const mi = Number(match[5]);
-  if (y < 2000 || mo < 1 || mo > 12 || h > 23 || mi > 59) return null;
-
-  const date = new Date(Date.UTC(y, mo - 1, d, h, mi, 0));
-  if (
-    date.getUTCFullYear() !== y ||
-    date.getUTCMonth() !== mo - 1 ||
-    date.getUTCDate() !== d ||
-    date.getUTCHours() !== h ||
-    date.getUTCMinutes() !== mi ||
-    date.getTime() <= Date.now() + 60000
-  ) return null;
-  return date;
-}
 
 async function getCurrentPreview(ctx, postId) {
   const message = ctx.callbackQuery && ctx.callbackQuery.message;
