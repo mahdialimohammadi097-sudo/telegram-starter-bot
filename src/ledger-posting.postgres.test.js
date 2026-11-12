@@ -910,11 +910,12 @@ test("private Telegram wallet and history resolve the sender's posted USDT entri
 });
 
 test("simulated investments enforce five per owner and move each principal exactly once", { skip: !enabled }, async () => {
-  const { openSimulatedInvestment } = await import("../test-support/simulated-investment.js");
+  const { openSimulatedInvestment, settleSimulatedInvestment } = await import("../test-support/simulated-investment.js");
   await pool.query(`CREATE TABLE simulation_investments (
     id bigserial PRIMARY KEY, user_id bigint NOT NULL REFERENCES users(id), request_id text NOT NULL,
     plan text NOT NULL, principal integer NOT NULL, profit_percent integer NOT NULL, fee_percent integer NOT NULL,
     opened_at timestamptz NOT NULL DEFAULT now(), matures_at timestamptz NOT NULL,
+    settlement_id bigint UNIQUE REFERENCES ledger_transactions(id),
     status text NOT NULL DEFAULT 'active', UNIQUE(user_id, request_id)
   )`);
   const owner = await createSimulationWallet(520);
@@ -946,4 +947,26 @@ test("simulated investments enforce five per owner and move each principal exact
      FROM simulation_investments WHERE user_id = $1`, [other]
   );
   assert.deepEqual(snapshot, { profit_percent: 14, fee_percent: 4, correct_term: true });
+  const reserve = await createAccount("AVAILABLE");
+  const feeAccount = await createAccount("CLEARING");
+  const settle = user => settleSimulatedInvestment(pool, user, ids[0], reserve, feeAccount);
+  await assert.rejects(settle(owner), /not due/);
+  await assert.rejects(settle(other), /Unknown investment/);
+  await pool.query("UPDATE simulation_investments SET matures_at = now() WHERE id = $1", [ids[0]]);
+  await assert.rejects(settle(owner), /Insufficient/);
+  await assert.rejects(open("after-failed-settlement"), /Five active/);
+  await seedAvailableBalance(reserve, "40");
+  const [paid, retry] = await Promise.all([settle(owner), settle(owner)]);
+  assert.equal(paid, retry);
+  assert.deepEqual(await displayedBalances(owner), ["131.60000000", "400.00000000", "0.00000000"]);
+  const feeEntry = await pool.query(
+    "SELECT trim_scale(amount)::text AS fee FROM ledger_entries WHERE transaction_id = $1 AND account_id = $2 AND entry_type = 'credit'",
+    [paid, feeAccount]
+  );
+  assert.deepEqual(feeEntry.rows, [{ fee: "8.4" }]);
+  await open("manual-reinvestment", "STARTER 100");
+  assert.equal(await settle(owner), paid);
+  await assert.rejects(open("sixth-after-reinvestment"), /Five active/);
+  assert.deepEqual(await displayedBalances(owner), ["31.60000000", "500.00000000", "0.00000000"]);
+
 });

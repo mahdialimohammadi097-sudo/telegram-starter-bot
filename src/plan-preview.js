@@ -17,10 +17,14 @@ export function previewSettlement(input) {
   const [name, amount, ...extra] = String(input ?? "").trim().toUpperCase().split(/\s+/);
   const plan = plans.get(name);
   if (!plan || !amounts.has(amount) || extra.length) return null;
+  return { name, ...plan, amount, ...settlementAmounts(amount, plan.profitPercent, plan.feePercent) };
+}
+
+export function settlementAmounts(amount, profitPercent, feePercent) {
   const principal = toUsdtUnitsExact(amount);
-  const profit = principal * BigInt(plan.profitPercent) / 100n;
+  const profit = principal * BigInt(profitPercent) / 100n;
   const gross = principal + profit;
-  const fee = gross * BigInt(plan.feePercent) / 100n;
-  return { name, ...plan, amount, profit: decimal(profit), gross: decimal(gross),
+  const fee = gross * BigInt(feePercent) / 100n;
+  return { profit: decimal(profit), gross: decimal(gross),
     fee: decimal(fee), payout: decimal(gross - fee) };
 }
