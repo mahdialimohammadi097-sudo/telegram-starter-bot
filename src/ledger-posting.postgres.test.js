@@ -1232,7 +1232,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const { pool: appPool } = await import("./database.js");
   const { openSimulatedInvestment, settleSimulatedInvestment } = await import("../test-support/simulated-investment.js");
   const { reserveWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
-  t.mock.method(appPool, "query", pool.query.bind(pool));
+  const queries = t.mock.method(appPool, "query", pool.query.bind(pool));
   const bot = new Bot("offline", { botInfo: { id: 700, is_bot: true, first_name: "Test", username: "offline_bot" } });
   registerCommands(bot);
   const telegramId = 32025;
@@ -1240,19 +1240,23 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const replies = [];
   bot.api.config.use(async (_prev, method, payload) => {
     assert.equal(method, "sendMessage");
-    assert.equal(payload.chat_id, telegramId);
-    replies.push(payload.text);
+    replies.push(payload);
     return { ok: true, result: true };
   });
-  async function screen(text) {
+  async function screen(text, sender = telegramId, type = "private") {
     replies.length = 0;
     await bot.handleUpdate({ update_id: ++sequence, message: {
-      message_id: sequence, date: 0, text, chat: { type: "private", id: telegramId },
-      from: { id: telegramId, is_bot: false, first_name: "Fixture" },
+      message_id: sequence, date: 0, text, chat: { type, id: type === "private" ? sender : -700 },
+      from: { id: sender, is_bot: false, first_name: "Fixture" },
       entities: text === "/start" ? [{ type: "bot_command", offset: 0, length: 6 }] : []
     } });
+    if (type !== "private") {
+      assert.deepEqual(replies, []);
+      return;
+    }
     assert.equal(replies.length, 1);
-    return replies[0];
+    assert.equal(replies[0].chat_id, sender);
+    return replies[0].text;
   }
   async function wallet(available, invested, held) {
     const lines = (await screen("My Wallet")).split("\n");
@@ -1320,6 +1324,26 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
     "AVAILABLE · -25.00000000 USDT · Simulated investment opened",
     "AVAILABLE · +25.00000000 USDT · Simulated deposit"
   ]);
+  const secondUser = 32026;
+  await screen("/start", secondUser);
+  const emptyViews = new Map([
+    ["Deposit", "No posted simulation activity yet."],
+    ["Withdraw", "No posted simulation activity yet."],
+    ["My Investments", "No simulated investment activity yet."],
+    ["Daily Profits", "No simulated settlements yet."]
+  ]);
+  const beginRead = queries.mock.callCount();
+  for (const [view, empty] of emptyViews) {
+    assert.ok((await screen(view, secondUser)).endsWith(empty));
+    await screen(view, secondUser, "group");
+  }
+  const readQueries = queries.mock.calls.slice(beginRead);
+  assert.ok(readQueries.length > 0);
+  assert.ok(readQueries.every(call => /^\s*(SELECT|WITH)\b/i.test(call.arguments[0])));
+  await pool.query("UPDATE users SET status = 'blocked' WHERE telegram_id = $1", [secondUser]);
+  for (const view of emptyViews.keys()) {
+    assert.match(await screen(view, secondUser), /Your account is not active/);
+  }
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
 

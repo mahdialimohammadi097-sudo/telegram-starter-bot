@@ -1,6 +1,19 @@
 # PROFINO implementation status
 
-## Central review, 2026-11-11
+## Review candidate, 2026-11-12
+
+PR #51 targets `feature/simulated-deposit-wallet`. The customer menu and ledger tests below run against disposable PostgreSQL 17 with offline Telegram updates. The [validation run for revision e3e67d1](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/43267089520) passed all 104 tests on Node.js 22, 24 and 26.
+
+| Review area | Demonstrated on the candidate | Scope still open |
+| --- | --- | --- |
+| Registration and wallet | Private registration creates three USDT ledger accounts. Repeated registration repairs missing accounts. The wallet reads posted entries and pages older history by owner. | Verify the release candidate against the target registration schema and triggers. |
+| Plans and settlement | The menu previews 15 plan/amount combinations. Test code opens a SMART investment for 25 test USDT, advances maturity and settles 27.36. The customer sees 2.36 in net profit for the UTC settlement date. | Opening and settlement in this journey are driven by simulation helpers. |
+| Transfers | The transfer screens display posted credits, reservations and releases. Tests cover concurrent retries, interrupted commits and independent reconciliation. | A simulated release returns held funds to the available wallet. External payout delivery and authorization remain unverified. |
+| Private administration | Tests exercise owner-only access, stored English/Persian preference, user search and post-history navigation. | Complete the remaining localization review and review any future financial approval workflow separately. |
+
+For the end-to-end example, review the test named `one private Telegram wallet tracks a synthetic deposit, SMART settlement, withdrawal hold and release` in `src/ledger-posting.postgres.test.js`. Compare the customer screens with the posted ledger journals. The candidate remains on its review branch pending owner review and a separate publication decision.
+
+## Historical central review, 2026-11-11
 
 Production baseline: `main` at `aeefcc9`. The public readiness endpoint returned ready. The open work below is on review branches. Customer text is English and the private admin panel supports English and Persian. Scope excludes exchange integration and automated trading.
 
