@@ -771,3 +771,35 @@ test("reconciliation flags a committed pending simulated journal even with balan
     });
   }
 });
+
+test("reconciliation identifies every approved claim sharing a transfer event", { skip: !enabled }, async () => {
+  const owner = await createSimulationWallet(510);
+  const other = await createSimulationWallet(511);
+  const event = "test-chain:duplicate-approved:0";
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const addClaim = async userId => {
+      const { rows: [claim] } = await client.query(
+        "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, $2) RETURNING id",
+        [userId, event]
+      );
+      return claim.id;
+    };
+    const original = await addClaim(owner);
+    const journal = await reviewSimulatedClaim(client, original, new Map([[event, { userId: owner, amount: "25" }]]));
+    const duplicate = await addClaim(other);
+    const discrepancies = () => findSimulationDiscrepancies(client, simulationClearing);
+    assert.deepEqual(await discrepancies(), []);
+    await client.query("UPDATE deposit_requests SET status = 'approved' WHERE id = $1", [duplicate]);
+    assert.deepEqual(await discrepancies(), [
+      { request_id: original, journal_id: journal.transactionId },
+      { request_id: duplicate, journal_id: null }
+    ]);
+    await client.query("UPDATE deposit_requests SET status = 'rejected' WHERE id = $1", [duplicate]);
+    assert.deepEqual(await discrepancies(), []);
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
+});
