@@ -52,39 +52,61 @@ export async function settleSimulatedInvestment(pool, userId, investmentId, rese
   return withLedgerTransaction(pool, async client => {
     // Take locks in the same order as opening so a freed slot is visible atomically.
     await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
-    const { rows: [investment] } = await client.query(
-      `SELECT status, settlement_id, principal, profit_percent, fee_percent, matures_at <= now() AS mature
-       FROM simulation_investments WHERE id = $1 AND user_id = $2 FOR UPDATE`, [investmentId, userId]
-    );
-    if (!investment) throw new Error("Unknown investment");
-    if (investment.status === "settled") return investment.settlement_id;
-    if (investment.status !== "active" || !investment.mature) throw new Error("Investment is not due");
-    const { rows } = await client.query(
-      `SELECT account_type, id FROM ledger_accounts WHERE user_id = $1 AND currency = 'USDT'
-       AND account_type IN ('AVAILABLE', 'INVESTED')`, [userId]
-    );
-    const accounts = new Map(rows.map(row => [row.account_type, row.id]));
-    if (accounts.size !== 2) throw new Error("Incomplete investment wallet");
-    const { profit, fee, payout } = settlementAmounts(investment.principal, investment.profit_percent, investment.fee_percent);
-    const sources = await client.query(
-      `SELECT id FROM ledger_accounts WHERE user_id IS NULL AND currency = 'USDT'
-       AND ((id = $1 AND account_type = 'AVAILABLE') OR (id = $2 AND account_type = 'CLEARING'))`, [reserveId, feeId]
-    );
-    if (sources.rowCount !== 2) throw new Error("Invalid simulation settlement accounts");
-    const journal = await postJournalInTransaction(client, {
-      transactionType: "simulated-investment-settle", referenceId: investmentId,
-      idempotencyKey: "simulated-investment-settle:" + investmentId,
-      entries: [
-        { account_id: accounts.get("INVESTED"), entry_type: "debit", amount: String(investment.principal), currency: "USDT" },
-        { account_id: reserveId, entry_type: "debit", amount: profit, currency: "USDT" },
-        { account_id: accounts.get("AVAILABLE"), entry_type: "credit", amount: payout, currency: "USDT" },
-        { account_id: feeId, entry_type: "credit", amount: fee, currency: "USDT" }
-      ]
-    });
-    await client.query(
-      "UPDATE simulation_investments SET status = 'settled', settlement_id = $2 WHERE id = $1",
-      [investmentId, journal.transactionId]
-    );
-    return journal.transactionId;
+    return settleLockedInvestment(client, userId, investmentId, reserveId, feeId);
   });
+}
+
+export async function settleNextDueSimulation(pool, reserveId, feeId) {
+  return withLedgerTransaction(pool, async client => {
+    // Claim the owner first, matching the lock order used for manual settlement and opening.
+    const { rows: [owner] } = await client.query(
+      `SELECT u.id FROM simulation_investments i JOIN users u ON u.id = i.user_id
+       WHERE i.status = 'active' AND i.matures_at <= now()
+       ORDER BY i.matures_at, i.id LIMIT 1 FOR UPDATE OF u SKIP LOCKED`
+    );
+    if (!owner) return null;
+    const { rows: [due] } = await client.query(
+      `SELECT id FROM simulation_investments WHERE user_id = $1 AND status = 'active' AND matures_at <= now()
+       ORDER BY matures_at, id LIMIT 1 FOR UPDATE`, [owner.id]
+    );
+    if (!due) return null;
+    return settleLockedInvestment(client, owner.id, due.id, reserveId, feeId);
+  });
+}
+
+async function settleLockedInvestment(client, userId, investmentId, reserveId, feeId) {
+  const { rows: [investment] } = await client.query(
+    `SELECT status, settlement_id, principal, profit_percent, fee_percent, matures_at <= now() AS mature
+     FROM simulation_investments WHERE id = $1 AND user_id = $2 FOR UPDATE`, [investmentId, userId]
+  );
+  if (!investment) throw new Error("Unknown investment");
+  if (investment.status === "settled") return investment.settlement_id;
+  if (investment.status !== "active" || !investment.mature) throw new Error("Investment is not due");
+  const { rows } = await client.query(
+    `SELECT account_type, id FROM ledger_accounts WHERE user_id = $1 AND currency = 'USDT'
+     AND account_type IN ('AVAILABLE', 'INVESTED')`, [userId]
+  );
+  const accounts = new Map(rows.map(row => [row.account_type, row.id]));
+  if (accounts.size !== 2) throw new Error("Incomplete investment wallet");
+  const { profit, fee, payout } = settlementAmounts(investment.principal, investment.profit_percent, investment.fee_percent);
+  const sources = await client.query(
+    `SELECT id FROM ledger_accounts WHERE user_id IS NULL AND currency = 'USDT'
+     AND ((id = $1 AND account_type = 'AVAILABLE') OR (id = $2 AND account_type = 'CLEARING'))`, [reserveId, feeId]
+  );
+  if (sources.rowCount !== 2) throw new Error("Invalid simulation settlement accounts");
+  const journal = await postJournalInTransaction(client, {
+    transactionType: "simulated-investment-settle", referenceId: investmentId,
+    idempotencyKey: "simulated-investment-settle:" + investmentId,
+    entries: [
+      { account_id: accounts.get("INVESTED"), entry_type: "debit", amount: String(investment.principal), currency: "USDT" },
+      { account_id: reserveId, entry_type: "debit", amount: profit, currency: "USDT" },
+      { account_id: accounts.get("AVAILABLE"), entry_type: "credit", amount: payout, currency: "USDT" },
+      { account_id: feeId, entry_type: "credit", amount: fee, currency: "USDT" }
+    ]
+  });
+  await client.query(
+    "UPDATE simulation_investments SET status = 'settled', settlement_id = $2 WHERE id = $1",
+    [investmentId, journal.transactionId]
+  );
+  return journal.transactionId;
 }
