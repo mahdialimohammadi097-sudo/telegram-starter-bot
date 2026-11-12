@@ -110,3 +110,28 @@ async function settleLockedInvestment(client, userId, investmentId, reserveId, f
   );
   return journal.transactionId;
 }
+
+export async function inspectDueSimulationQueue(pool, reserveId) {
+  const { rows: [snapshot] } = await pool.query(
+    `WITH due AS (
+       SELECT id, matures_at, principal * profit_percent / 100::numeric AS required
+       FROM simulation_investments WHERE status = 'active' AND matures_at <= now()
+     ), first_due AS (
+       SELECT id, required FROM due ORDER BY matures_at, id LIMIT 1
+     ), reserve AS (
+       SELECT a.id, coalesce(sum(CASE WHEN e.entry_type = 'credit' THEN e.amount ELSE -e.amount END)
+         FILTER (WHERE t.status = 'posted'), 0) AS balance
+       FROM ledger_accounts a LEFT JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
+       LEFT JOIN ledger_transactions t ON t.id = e.transaction_id
+       WHERE a.id = $1 AND a.user_id IS NULL AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
+       GROUP BY a.id
+     )
+     SELECT (SELECT count(*)::int FROM due) AS due_count, f.id AS first_id,
+            trim_scale(r.balance)::text AS reserve_balance,
+            trim_scale(greatest(0, f.required - r.balance))::text AS first_shortfall,
+            trim_scale(greatest(0, (SELECT sum(required) FROM due) - r.balance))::text AS total_shortfall
+     FROM reserve r LEFT JOIN first_due f ON true`, [reserveId]
+  );
+  if (!snapshot) throw new Error("Invalid simulation reserve account");
+  return snapshot;
+}

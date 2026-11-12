@@ -1408,3 +1408,43 @@ test("daily simulated profits isolate owners and group complete posted settlemen
     client.release();
   }
 });
+
+test("offline queue reports the reserve shortage and drains overdue investments after funding", { skip: !enabled }, async () => {
+  const { inspectDueSimulationQueue, openSimulatedInvestment, settleNextDueSimulation } =
+    await import("../test-support/simulated-investment.js");
+  const owner = await createSimulationWallet(640);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  await seedAvailableBalance(available.id, "125");
+  const first = await openSimulatedInvestment(pool, owner, "queue-first", "PRO 100");
+  const second = await openSimulatedInvestment(pool, owner, "queue-second", "SMART 25");
+  const reserve = await createAccount("AVAILABLE");
+  const fees = await createAccount("CLEARING");
+  await seedAvailableBalance(reserve, "3.5");
+  const inspect = () => inspectDueSimulationQueue(pool, reserve);
+  const run = () => settleNextDueSimulation(pool, reserve, fees);
+  await assert.rejects(inspectDueSimulationQueue(pool, fees), /Invalid simulation reserve/);
+  await pool.query("UPDATE simulation_investments SET matures_at = now() WHERE id IN ($1, $2)", [first, second]);
+  const shortage = { due_count: 2, first_id: first, reserve_balance: "3.5", first_shortfall: "36.5", total_shortfall: "40" };
+  assert.deepEqual(await inspect(), shortage);
+  await assert.rejects(run(), /Insufficient/);
+  assert.deepEqual(await inspect(), shortage);
+  // Add the missing amount as a distinct synthetic credit.
+  await postLedgerTransaction({ pool, transactionType: "test-reserve-topup", idempotencyKey: "queue-recovery-topup",
+    entries: [
+      { account_id: simulationClearing, entry_type: "debit", amount: "40", currency: "USDT" },
+      { account_id: reserve, entry_type: "credit", amount: "40", currency: "USDT" }
+    ]
+  });
+  assert.ok(await run());
+  assert.deepEqual(await inspect(), {
+    due_count: 1, first_id: second, reserve_balance: "3.5", first_shortfall: "0", total_shortfall: "0"
+  });
+  assert.ok(await run());
+  assert.equal(await run(), null);
+  assert.deepEqual(await inspect(), {
+    due_count: 0, first_id: null, reserve_balance: "0", first_shortfall: "0", total_shortfall: "0"
+  });
+  assert.deepEqual(await displayedBalances(owner), ["158.96000000", "0.00000000", "0.00000000"]);
+});
