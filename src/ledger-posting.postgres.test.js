@@ -40,6 +40,13 @@ before(async () => {
       reviewed_at timestamptz
     )
   `);
+  await pool.query(`CREATE TABLE simulation_withdrawals (
+    id bigserial PRIMARY KEY, user_id bigint NOT NULL REFERENCES users(id), request_key text NOT NULL,
+    amount numeric(36,8) NOT NULL CHECK (amount > 0),
+    available_id bigint NOT NULL REFERENCES ledger_accounts(id), held_id bigint NOT NULL REFERENCES ledger_accounts(id),
+    status text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'cancelled')),
+    release_id bigint UNIQUE REFERENCES ledger_transactions(id), UNIQUE (user_id, request_key)
+  )`);
 });
 
 after(async () => {
@@ -1020,13 +1027,6 @@ test("simulated investments enforce five per owner and move each principal exact
 
 test("simulated withdrawal holds and cancellations conserve funds under concurrent retries", { skip: !enabled }, async () => {
   const { reserveWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
-  await pool.query(`CREATE TABLE simulation_withdrawals (
-    id bigserial PRIMARY KEY, user_id bigint NOT NULL REFERENCES users(id), request_key text NOT NULL,
-    amount numeric(36,8) NOT NULL CHECK (amount > 0),
-    available_id bigint NOT NULL REFERENCES ledger_accounts(id), held_id bigint NOT NULL REFERENCES ledger_accounts(id),
-    status text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'cancelled')),
-    release_id bigint UNIQUE REFERENCES ledger_transactions(id), UNIQUE (user_id, request_key)
-  )`);
   const owner = await createSimulationWallet(522);
   const other = await createSimulationWallet(523);
   const { rows: [available] } = await pool.query(
@@ -1062,4 +1062,69 @@ test("simulated withdrawal holds and cancellations conserve funds under concurre
   );
   assert.deepEqual(summary, { movements: 4, held: "0" });
   assert.equal((await pool.query("SELECT id FROM simulation_withdrawals WHERE user_id = $1", [owner])).rowCount, 2);
+});
+
+test("withdrawal recovery reconciles request state, held funds and available balance across lost commits and replies", {
+  skip: !enabled
+}, async () => {
+  const { reserveWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const owner = await createSimulationWallet(524);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  const { rows: [held] } = await pool.query(
+    "INSERT INTO ledger_accounts (user_id, account_code, account_type) VALUES ($1, 'withdraw-524', 'WITHDRAWAL_HOLD') RETURNING id", [owner]
+  );
+  await seedAvailableBalance(available.id, "25");
+
+  // Destroy the worker's checked-out connection immediately before COMMIT or
+  // after PostgreSQL commits but before the caller receives confirmation.
+  function interruptedWorker(afterCommit) {
+    return { async connect() {
+      const client = await pool.connect();
+      let disconnected = false;
+      return {
+        async query(sql, ...args) {
+          if (disconnected) throw new Error("Worker disconnected");
+          if (sql !== "COMMIT") return client.query(sql, ...args);
+          if (afterCommit) await client.query(sql);
+          disconnected = true;
+          client.release(true);
+          throw new Error("Worker disconnected");
+        },
+        release(error) { if (!disconnected) client.release(error); }
+      };
+    } };
+  }
+
+  const reserve = worker => reserveWithdrawal(worker, owner, "recovery", "7.25");
+  async function check(expectedStatus, availableAmount, heldAmount, movementCount) {
+    const requests = await pool.query("SELECT status FROM simulation_withdrawals WHERE user_id = $1", [owner]);
+    assert.deepEqual(requests.rows.map(row => row.status), expectedStatus ? [expectedStatus] : []);
+    assert.equal((await displayedBalances(owner))[0], availableAmount);
+    const { rows: [balance] } = await pool.query(
+      `SELECT count(*)::int AS movements,
+        coalesce(sum(CASE WHEN e.entry_type = 'credit' THEN e.amount ELSE -e.amount END), 0) AS net
+       FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
+       WHERE e.account_id = $1 AND t.status = 'posted'`, [held.id]
+    );
+    assert.equal(balance.movements, movementCount);
+    assert.equal(formatUsdt(balance.net), heldAmount);
+  }
+
+  await assert.rejects(reserve(interruptedWorker(false)), /Worker disconnected/);
+  await check(null, "25.00000000", "0.00000000", 0);
+  await assert.rejects(reserve(interruptedWorker(true)), /Worker disconnected/);
+  const [request, duplicate] = await Promise.all([reserve(pool), reserve(pool)]);
+  assert.deepEqual(request, duplicate);
+  await check("reserved", "17.75000000", "7.25000000", 1);
+
+  const cancel = worker => cancelWithdrawal(worker, owner, request.id);
+  await assert.rejects(cancel(interruptedWorker(false)), /Worker disconnected/);
+  await check("reserved", "17.75000000", "7.25000000", 1);
+  await assert.rejects(cancel(interruptedWorker(true)), /Worker disconnected/);
+  const [release, replay] = await Promise.all([cancel(pool), cancel(pool)]);
+  assert.equal(release, replay);
+  assert.equal((await reserve(pool)).status, "cancelled");
+  await check("cancelled", "25.00000000", "0.00000000", 2);
 });
