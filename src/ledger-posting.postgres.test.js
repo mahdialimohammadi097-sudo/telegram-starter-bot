@@ -435,34 +435,36 @@ async function displayedBalances(userId) {
 }
 
 function approveSimulatedClaim(requestId, observedTransfers, workerPool = pool) {
-  return withLedgerTransaction(workerPool, async client => {
-    const { rows: [deposit] } = await client.query(
-      `SELECT d.user_id, d.status, d.transfer_event, trim_scale(d.amount)::text AS amount, a.id AS account_id
-       FROM deposit_requests d JOIN ledger_accounts a ON a.user_id = d.user_id
-       WHERE d.id = $1 AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
-       FOR UPDATE OF d`, [requestId]
-    );
-    if (deposit.status === "rejected") throw new Error("Request already rejected");
-    const observed = observedTransfers.get(deposit.transfer_event);
-    if (!observed || observed.userId !== deposit.user_id || observed.amount !== deposit.amount) {
-      throw new Error("Claim does not match the simulated transfer");
-    }
-    const journal = await postJournalInTransaction(client, {
-      transactionType: "simulated-deposit", referenceId: requestId,
-      idempotencyKey: `simulated-deposit:${deposit.transfer_event}`,
-      entries: [
-        { account_id: simulationClearing, entry_type: "debit", amount: deposit.amount, currency: "USDT" },
-        { account_id: deposit.account_id, entry_type: "credit", amount: deposit.amount, currency: "USDT" }
-      ]
-    });
-    if (deposit.status === "pending") {
-      await client.query(
-        "UPDATE deposit_requests SET status = 'approved', reviewed_at = now() WHERE id = $1",
-        [requestId]
-      );
-    }
-    return journal;
+  return withLedgerTransaction(workerPool, client => reviewSimulatedClaim(client, requestId, observedTransfers));
+}
+
+async function reviewSimulatedClaim(client, requestId, observedTransfers) {
+  const { rows: [deposit] } = await client.query(
+    `SELECT d.user_id, d.status, d.transfer_event, trim_scale(d.amount)::text AS amount, a.id AS account_id
+     FROM deposit_requests d JOIN ledger_accounts a ON a.user_id = d.user_id
+     WHERE d.id = $1 AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
+     FOR UPDATE OF d`, [requestId]
+  );
+  if (deposit.status === "rejected") throw new Error("Request already rejected");
+  const observed = observedTransfers.get(deposit.transfer_event);
+  if (!observed || observed.userId !== deposit.user_id || observed.amount !== deposit.amount) {
+    throw new Error("Claim does not match the simulated transfer");
+  }
+  const journal = await postJournalInTransaction(client, {
+    transactionType: "simulated-deposit", referenceId: requestId,
+    idempotencyKey: `simulated-deposit:${deposit.transfer_event}`,
+    entries: [
+      { account_id: simulationClearing, entry_type: "debit", amount: deposit.amount, currency: "USDT" },
+      { account_id: deposit.account_id, entry_type: "credit", amount: deposit.amount, currency: "USDT" }
+    ]
   });
+  if (deposit.status === "pending") {
+    await client.query(
+      "UPDATE deposit_requests SET status = 'approved', reviewed_at = now() WHERE id = $1",
+      [requestId]
+    );
+  }
+  return journal;
 }
 
 test("two approvals of one simulated deposit credit the customer's wallet once", {
@@ -621,4 +623,46 @@ test("independent reconciliation detects a missing credit, an orphan journal and
     await client.query("ROLLBACK");
     client.release();
   }
+});
+
+test("disconnect before commit rolls back the simulated approval and allows recovery", { skip: !enabled }, async () => {
+  const owner = await createSimulationWallet(506);
+  const event = "test-chain:disconnect-before-commit:0";
+  const observed = new Map([[event, { userId: owner, amount: "25" }]]);
+  const { rows: [request] } = await pool.query(
+    "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, $2) RETURNING id",
+    [owner, event]
+  );
+  const interrupted = await pool.connect();
+  let discardedJournal;
+  try {
+    await interrupted.query("BEGIN");
+    discardedJournal = await reviewSimulatedClaim(interrupted, request.id, observed);
+    assert.equal(discardedJournal.posted, true);
+  } finally {
+    // Destroy the open connection without issuing COMMIT or ROLLBACK.
+    interrupted.release(true);
+  }
+
+  // Wait for PostgreSQL to release the interrupted transaction's row lock.
+  const { rows: [pending] } = await pool.query(
+    "SELECT status, reviewed_at FROM deposit_requests WHERE id = $1 FOR UPDATE", [request.id]
+  );
+  assert.deepEqual(pending, { status: "pending", reviewed_at: null });
+  for (const sql of [
+    "SELECT id FROM ledger_transactions WHERE id = $1",
+    "SELECT transaction_id FROM ledger_entries WHERE transaction_id = $1"
+  ]) {
+    assert.equal((await pool.query(sql, [discardedJournal.transactionId])).rowCount, 0);
+  }
+  assert.deepEqual(await displayedBalances(owner), Array(3).fill("0.00000000"));
+
+  const recovered = await approveSimulatedClaim(request.id, observed);
+  const replay = await approveSimulatedClaim(request.id, observed);
+  assert.equal(recovered.idempotent, false);
+  assert.equal(replay.idempotent, true);
+  assert.equal(replay.transactionId, recovered.transactionId);
+  const { rows: [review] } = await pool.query("SELECT status FROM deposit_requests WHERE id = $1", [request.id]);
+  assert.equal(review.status, "approved");
+  assert.deepEqual(await displayedBalances(owner), ["25.00000000", "0.00000000", "0.00000000"]);
 });
