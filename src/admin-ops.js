@@ -153,9 +153,9 @@ async function showDashboard(ctx, edit = false, showQueue = false) {
       ].join("\n");
 
   if (edit) {
-    return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language) });
+    return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language, showQueue) });
   }
-  return ctx.reply(message, { reply_markup: dashboardKeyboard(language) });
+  return ctx.reply(message, { reply_markup: dashboardKeyboard(language, showQueue) });
 }
 
 async function showUsers(ctx, page = 0, edit = false) {
