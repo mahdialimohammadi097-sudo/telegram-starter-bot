@@ -1409,7 +1409,7 @@ test("daily simulated profits isolate owners and group complete posted settlemen
   }
 });
 
-test("offline queue reports the reserve shortage and drains overdue investments after funding", { skip: !enabled }, async () => {
+test("offline queue reports the reserve shortage and drains overdue investments after funding", { skip: !enabled }, async t => {
   const { inspectDueSimulationQueue, openSimulatedInvestment, settleNextDueSimulation } =
     await import("../test-support/simulated-investment.js");
   const owner = await createSimulationWallet(640);
@@ -1428,6 +1428,53 @@ test("offline queue reports the reserve shortage and drains overdue investments 
   await pool.query("UPDATE simulation_investments SET matures_at = now() WHERE id IN ($1, $2)", [first, second]);
   const shortage = { due_count: 2, first_id: first, reserve_balance: "3.5", first_shortfall: "36.5", total_shortfall: "40" };
   assert.deepEqual(await inspect(), shortage);
+  const { Bot } = await import("grammy");
+  const { registerCommands } = await import("./commands.js");
+  const { pool: appPool } = await import("./database.js");
+  const admin = 8810232463;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("CREATE TEMP TABLE admin_preferences (user_id bigint PRIMARY KEY, language text)");
+    await client.query("INSERT INTO users (telegram_id, status) VALUES ($1, 'active')", [admin]);
+    await client.query("INSERT INTO admin_preferences SELECT id, 'fa' FROM users WHERE telegram_id = $1", [admin]);
+    t.mock.method(appPool, "query", client.query.bind(client));
+    const bot = new Bot("offline", { botInfo: { id: 7, is_bot: true, first_name: "Test", username: "offline_bot" } });
+    let reads = 0;
+    registerCommands(bot, { inspectTestQueue: () => {
+      reads++;
+      return inspectDueSimulationQueue(client, reserve);
+    } });
+    const replies = [];
+    bot.api.config.use(async (_next, method, payload) => {
+      assert.equal(method, "sendMessage");
+      replies.push(payload.text);
+      return { ok: true, result: true };
+    });
+    let sequence = 0;
+    const readQueue = async (sender = admin, type = "private") => {
+      replies.length = 0;
+      await bot.handleUpdate({ update_id: ++sequence, message: {
+        message_id: sequence, date: 0, text: "/simqueue",
+        entities: [{ type: "bot_command", offset: 0, length: 9 }],
+        chat: { type, id: type === "private" ? sender : -7 },
+        from: { id: sender, first_name: "Fixture", is_bot: false }
+      } });
+      return replies.join("\n");
+    };
+    assert.equal(await readQueue(admin, "group"), "");
+    assert.equal(await readQueue(99), "Access denied.");
+    assert.equal(reads, 0);
+    const persian = await readQueue();
+    assert.ok(persian.includes("کسری اولین تسویه: 36.5") && persian.includes("کسری کل صف: 40"));
+    await client.query("UPDATE admin_preferences SET language = 'en'");
+    const english = await readQueue();
+    assert.ok(english.includes("Due investments: 2") && english.includes("Reserve balance: 3.5"));
+    assert.equal(reads, 2);
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
   await assert.rejects(run(), /Insufficient/);
   assert.deepEqual(await inspect(), shortage);
   // Add the missing amount as a distinct synthetic credit.

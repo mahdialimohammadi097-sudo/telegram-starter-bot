@@ -130,7 +130,7 @@ async function showScheduledPosts(ctx, language) {
   return ctx.reply(page);
 }
 
-export function registerCommands(bot, { openTestInvestment } = {}) {
+export function registerCommands(bot, { openTestInvestment, inspectTestQueue } = {}) {
   const rateLimiter = createRateLimiter();
   // Keep all bot interactions private. This prevents group-based access-control
   // bypasses and avoids exposing account or administrative information in groups.
@@ -220,7 +220,7 @@ export function registerCommands(bot, { openTestInvestment } = {}) {
 
   registerPostManagement(bot);
   registerPostHistory(bot);
-  registerAdminOps(bot);
+  registerAdminOps(bot, { inspectTestQueue });
   bot.command("start", async (ctx) => {
     try {
       const user = await getOrCreateUser(ctx);
@@ -251,6 +251,7 @@ export function registerCommands(bot, { openTestInvestment } = {}) {
     const commands = [
       ["/admin", "Open the admin dashboard", "باز کردن داشبورد مدیریت"],
       ["/adminlanguage", "Choose the admin panel language (English/Persian)", "انتخاب زبان پنل مدیریت"],
+      ...(inspectTestQueue ? [["/simqueue", "Inspect the simulated settlement queue", "بررسی صف تسویه آزمایشی"]] : []),
       ["/planpreview <plan> <amount>", "Simulate a settlement in USDT", "شبیه‌سازی تسویه به USDT"],
       ["/adminstats", "View operations overview", "نمای کلی عملیات"],
       ["/user <telegram_id>", "Inspect a user", "مشاهده مشخصات کاربر"],

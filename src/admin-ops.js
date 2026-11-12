@@ -547,7 +547,33 @@ async function showAdminLanguage(ctx, language, edit = false) {
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
-export function registerAdminOps(bot) {
+export function registerAdminOps(bot, { inspectTestQueue } = {}) {
+  if (inspectTestQueue) {
+    bot.command("simqueue", async ctx => {
+      if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+      const language = await getAdminLanguage(ctx);
+      let queue;
+      try {
+        queue = await inspectTestQueue();
+      } catch (error) {
+        console.error("[admin-ops] simulation queue failed:", safeDiagnosticCode(error));
+        return ctx.reply(adminText(language, "Unable to read the simulation queue.", "خواندن صف آزمایشی ممکن نشد."));
+      }
+      const label = (en, fa) => adminText(language, en, fa);
+      const lines = [
+        label("Settlement simulation · test USDT", "شبیه‌سازی تسویه · تتر آزمایشی"),
+        label("Due investments: ", "سرمایه‌گذاری‌های سررسیدشده: ") + queue.due_count,
+        label("Reserve balance: ", "موجودی ذخیره: ") + queue.reserve_balance
+      ];
+      if (queue.first_id !== null) {
+        lines.push(label("First investment: #", "اولین سرمایه‌گذاری: #") + queue.first_id,
+          label("First settlement shortfall: ", "کسری اولین تسویه: ") + queue.first_shortfall,
+          label("Total shortfall: ", "کسری کل صف: ") + queue.total_shortfall);
+      }
+      return ctx.reply(lines.join("\n"));
+    });
+  }
+
   bot.command("planpreview", async ctx => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
