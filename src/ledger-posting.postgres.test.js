@@ -998,3 +998,49 @@ test("simulated investments enforce five per owner and move each principal exact
   }
 
 });
+
+test("simulated withdrawal holds and cancellations conserve funds under concurrent retries", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  await pool.query(`CREATE TABLE simulation_withdrawals (
+    id bigserial PRIMARY KEY, user_id bigint NOT NULL REFERENCES users(id), request_key text NOT NULL,
+    amount numeric(36,8) NOT NULL CHECK (amount > 0),
+    available_id bigint NOT NULL REFERENCES ledger_accounts(id), held_id bigint NOT NULL REFERENCES ledger_accounts(id),
+    status text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'cancelled')),
+    release_id bigint UNIQUE REFERENCES ledger_transactions(id), UNIQUE (user_id, request_key)
+  )`);
+  const owner = await createSimulationWallet(522);
+  const other = await createSimulationWallet(523);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  const { rows: [hold] } = await pool.query(
+    "INSERT INTO ledger_accounts (user_id, account_code, account_type) VALUES ($1, 'withdraw-522', 'WITHDRAWAL_HOLD') RETURNING id",
+    [owner]
+  );
+  await seedAvailableBalance(available.id, "25");
+  const reserve = (key, amount) => reserveWithdrawal(pool, owner, key, amount);
+  await assert.rejects(reserve("precision", "1.000000001"), /eight decimal/);
+  await assert.rejects(reserve("zero", "0"), /positive/);
+  const [first, replay] = await Promise.all([reserve("first", "5"), reserve("first", "5.00")]);
+  assert.deepEqual(first, replay);
+  await assert.rejects(reserve("first", "4"), /mismatch/);
+  const race = await Promise.allSettled([reserve("second", "20"), reserve("third", "20")]);
+  assert.equal(race.filter(item => item.status === "fulfilled").length, 1);
+  assert.match(race.find(item => item.status === "rejected").reason.message, /Insufficient/);
+  const winner = race.find(item => item.status === "fulfilled").value;
+  assert.equal((await displayedBalances(owner))[0], "0.00000000");
+  await assert.rejects(cancelWithdrawal(pool, other, first.id), /Unknown withdrawal/);
+  const cancel = () => cancelWithdrawal(pool, owner, first.id);
+  const released = await Promise.all([cancel(), cancel()]);
+  assert.equal(released[0], released[1]);
+  assert.equal((await reserve("first", "5")).status, "cancelled");
+  assert.equal((await displayedBalances(owner))[0], "5.00000000");
+  await cancelWithdrawal(pool, owner, winner.id);
+  assert.equal((await displayedBalances(owner))[0], "25.00000000");
+  const { rows: [summary] } = await pool.query(
+    `SELECT count(*)::int AS movements, trim_scale(sum(CASE WHEN entry_type = 'credit' THEN amount ELSE -amount END))::text AS held
+     FROM ledger_entries WHERE account_id = $1`, [hold.id]
+  );
+  assert.deepEqual(summary, { movements: 4, held: "0" });
+  assert.equal((await pool.query("SELECT id FROM simulation_withdrawals WHERE user_id = $1", [owner])).rowCount, 2);
+});
