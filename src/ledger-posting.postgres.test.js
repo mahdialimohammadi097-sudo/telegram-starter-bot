@@ -731,3 +731,43 @@ for (const finish of ["disconnect", "commit"]) {
     assert.deepEqual(await findSimulationDiscrepancies(pool, simulationClearing), []);
   });
 }
+
+test("reconciliation flags a committed pending simulated journal even with balanced entries", {
+  skip: !enabled
+}, async () => {
+  const owner = await createSimulationWallet(509);
+  const event = "test-chain:stranded:0";
+  const { rows: [request] } = await pool.query(
+    "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, $2) RETURNING id",
+    [owner, event]
+  );
+  // Commit the incomplete journal so reconciliation reads it from a separate transaction.
+  const journal = await withLedgerTransaction(pool, async client => {
+    const { rows: [row] } = await client.query(
+      `INSERT INTO ledger_transactions (transaction_type, reference_id, idempotency_key)
+       VALUES ('simulated-deposit', $1, $2) RETURNING id`, [request.id, `simulated-deposit:${event}`]
+    );
+    await client.query(
+      `INSERT INTO ledger_entries (transaction_id, account_id, entry_type, amount)
+       SELECT $1, id, 'credit', 25 FROM ledger_accounts WHERE user_id = $2 AND account_type = 'AVAILABLE'
+       UNION ALL SELECT $1::bigint, $3::bigint, 'debit', 25`, [row.id, owner, simulationClearing]
+    );
+    return row.id;
+  });
+  try {
+    assert.deepEqual(await findSimulationDiscrepancies(pool, simulationClearing), [
+      { request_id: null, journal_id: journal }
+    ]);
+    await pool.query("UPDATE deposit_requests SET status = 'approved' WHERE id = $1", [request.id]);
+    assert.deepEqual(await findSimulationDiscrepancies(pool, simulationClearing), [
+      { request_id: request.id, journal_id: journal }
+    ]);
+    assert.deepEqual(await displayedBalances(owner), Array(3).fill("0.00000000"));
+  } finally {
+    await withLedgerTransaction(pool, async client => {
+      await client.query("DELETE FROM ledger_entries WHERE transaction_id = $1", [journal]);
+      await client.query("DELETE FROM ledger_transactions WHERE id = $1", [journal]);
+      await client.query("DELETE FROM deposit_requests WHERE id = $1", [request.id]);
+    });
+  }
+});
