@@ -81,7 +81,7 @@ function parseUtcDateTime(value) {
   return date;
 }
 
-async function showScheduledPosts(ctx) {
+async function showScheduledPosts(ctx, language) {
   const result = await pool.query(
     `SELECT id, title, scheduled_at, status
      FROM scheduled_posts
@@ -99,7 +99,7 @@ async function showScheduledPosts(ctx) {
   );
 
   if (result.rowCount === 0) {
-    return ctx.reply("No scheduled or pending posts found.");
+    return ctx.reply(adminText(language, "No scheduled or pending posts found.", "پستی در صف زمان‌بندی یا تأیید نیست."));
   }
 
   const lines = result.rows.map(post => {
@@ -109,17 +109,22 @@ async function showScheduledPosts(ctx) {
     );
 
     return [
-      `ID: ${post.id}`,
-      `Title: ${post.title}`,
-      `Time: ${date}`,
-      `Status: ${post.status.toUpperCase()}`
+      adminText(language, "ID: ", "شناسه: ") + post.id,
+      adminText(language, "Title: ", "عنوان: ") + post.title,
+      adminText(language, "Time: ", "زمان: ") + date + " UTC",
+      adminText(language, "Status: ", "وضعیت: ") + post.status.toUpperCase()
     ].join("\n");
   });
-
-  return ctx.reply(
-    "PROFINO — SCHEDULED POSTS\n\n" +
-    lines.join("\n\n--------------------\n\n")
-  );
+  const heading = adminText(language, "PROFINO — SCHEDULED POSTS", "پست‌های زمان‌بندی‌شده");
+  let page = heading;
+  for (const line of lines) {
+    if (page.length + line.length + 2 > 4096) {
+      await ctx.reply(page);
+      page = heading;
+    }
+    page += "\n\n" + line;
+  }
+  return ctx.reply(page);
 }
 
 export function registerCommands(bot) {
@@ -288,7 +293,9 @@ export function registerCommands(bot) {
       );
     }
 
+    const language = await getAdminLanguage(ctx);
     clearPostManagementSession(ADMIN_ID);
+    clearPostHistorySession(ADMIN_ID);
     adminDrafts.set(ADMIN_ID, {
       step: "title",
       title: null,
@@ -296,11 +303,12 @@ export function registerCommands(bot) {
     });
 
     return ctx.reply(
-      "PROFINO — NEW POST\n\n" +
+      adminText(language, "PROFINO — NEW POST\n\n" +
       "Step 1 of 3\n\n" +
       "Send the post title in English.\n\n" +
       "Maximum length: 255 characters.\n\n" +
-      "Send /cancelpost to cancel."
+      "Send /cancelpost to cancel.",
+        "پست جدید · مرحله ۱ از ۳\n\nعنوان انگلیسی پست را بفرستید (حداکثر ۲۵۵ نویسه). برای لغو، /cancelpost را بفرستید.")
     );
   });
 
@@ -310,14 +318,15 @@ export function registerCommands(bot) {
       return ctx.reply("Access denied.");
     }
 
+    const language = await getAdminLanguage(ctx);
     const existed = adminDrafts.delete(ADMIN_ID);
     const managementExisted = clearPostManagementSession(ADMIN_ID);
     const historyExisted = clearPostHistorySession(ADMIN_ID);
 
     return ctx.reply(
       existed || managementExisted || historyExisted
-        ? "Current post operation cancelled."
-        : "There is no active post draft or edit session."
+        ? adminText(language, "Current post operation cancelled.", "عملیات جاری پست لغو شد.")
+        : adminText(language, "There is no active post draft or edit session.", "پیش‌نویس یا ویرایش فعالی وجود ندارد.")
     );
   });
 
@@ -327,13 +336,14 @@ export function registerCommands(bot) {
       return ctx.reply("Access denied.");
     }
 
+    const language = await getAdminLanguage(ctx);
     try {
-      await showScheduledPosts(ctx);
+      await showScheduledPosts(ctx, language);
     } catch (error) {
       console.error("[scheduled-posts] Failed:", safeDiagnosticCode(error));
 
       await ctx.reply(
-        "Unable to retrieve scheduled posts. Please try again."
+        adminText(language, "Unable to retrieve scheduled posts. Please try again.", "دریافت فهرست پست‌ها ممکن نشد. دوباره تلاش کنید.")
       );
     }
   });
@@ -350,12 +360,14 @@ export function registerCommands(bot) {
         return;
       }
 
+      const language = await getAdminLanguage(ctx);
       if (draft.step === "title") {
         const title = choice.trim();
 
         if (!title || title.length > 255) {
           return ctx.reply(
-            "Invalid title. Please send a title between 1 and 255 characters."
+            adminText(language, "Invalid title. Please send a title between 1 and 255 characters.",
+            "عنوان باید بین ۱ تا ۲۵۵ نویسه باشد.")
           );
         }
 
@@ -363,9 +375,10 @@ export function registerCommands(bot) {
         draft.step = "content";
 
         return ctx.reply(
-          "Step 2 of 3\n\n" +
+          adminText(language, "Step 2 of 3\n\n" +
           "Send the complete post content in English.\n\n" +
-          "Maximum length: 3500 characters."
+          "Maximum length: 3500 characters.",
+            "مرحله ۲ از ۳\n\nمتن کامل پست را به انگلیسی بفرستید (حداکثر ۳۵۰۰ نویسه).")
         );
       }
 
@@ -374,7 +387,8 @@ export function registerCommands(bot) {
 
         if (!content || content.length > 3500) {
           return ctx.reply(
-            "Invalid content. Please send between 1 and 3500 characters."
+            adminText(language, "Invalid content. Please send between 1 and 3500 characters.",
+            "متن پست باید بین ۱ تا ۳۵۰۰ نویسه باشد.")
           );
         }
 
@@ -382,23 +396,24 @@ export function registerCommands(bot) {
         draft.step = "scheduled_at";
 
         return ctx.reply(
-          "Step 3 of 3\n\n" +
+          adminText(language, "Step 3 of 3\n\n" +
           "Send the scheduled date and time in UTC.\n\n" +
           "Required format:\n" +
-          "YYYY-MM-DD HH:mm\n\n" +
-          "Example:\n" +
-          "2026-11-12 18:30"
+          "YYYY-MM-DD HH:mm",
+            "مرحله ۳ از ۳\n\nتاریخ میلادی و ساعت را به وقت UTC و با قالب YYYY-MM-DD HH:mm بفرستید.")
         );
       }
 
       if (draft.step === "scheduled_at") {
-        const scheduledAt = parseUtcDateTime(choice.trim());
+        const dateText = choice.trim().replace(/[۰-۹٠-٩]/g, digit => String(digit.charCodeAt(0) & 15));
+        const scheduledAt = parseUtcDateTime(dateText);
 
         if (!scheduledAt) {
           return ctx.reply(
-            "Invalid date or time.\n\n" +
+            adminText(language, "Invalid date or time.\n\n" +
             "Use YYYY-MM-DD HH:mm in UTC.\n" +
-            "The scheduled time must be at least one minute in the future."
+            "The scheduled time must be at least one minute in the future.",
+            "تاریخ یا ساعت معتبر نیست. زمان باید دست‌کم یک دقیقه در آینده و با قالب YYYY-MM-DD HH:mm به وقت UTC باشد.")
           );
         }
 
@@ -428,20 +443,22 @@ export function registerCommands(bot) {
           });
 
           return ctx.reply(
-            "PROFINO — POST SCHEDULED\n\n" +
+            adminText(language, "PROFINO — POST SCHEDULED\n\n" +
             `Post ID: ${post.id}\n` +
             `Title: ${post.title}\n` +
             `Scheduled time: ${formattedTime} UTC\n` +
             "Status: SCHEDULED\n\n" +
             "The bot will send you a private preview at the scheduled time.\n\n" +
-            "Nothing will be published until you approve it."
+            "Nothing will be published until you approve it.",
+            `پست زمان‌بندی شد\n\nشناسه: ${post.id}\nعنوان: ${post.title}\nزمان: ${formattedTime} UTC\n\nدر زمان مقرر، پیش‌نمایش خصوصی برای شما ارسال می‌شود. انتشار به تأیید شما نیاز دارد.`)
           );
         } catch (error) {
           console.error("[newpost] Database error:", safeDiagnosticCode(error));
 
           return ctx.reply(
-            "Unable to save the post.\n" +
-            "Your draft is still available. Please try again."
+            adminText(language, "Unable to save the post.\n" +
+            "Your draft is still available. Please try again.",
+            "ذخیره پست ممکن نشد. پیش‌نویس شما موجود است؛ دوباره تلاش کنید.")
           );
         }
       }
