@@ -14,6 +14,17 @@ function isSuperAdminPrivate(ctx) {
   return ctx.from?.id === SUPER_ADMIN_ID && ctx.chat?.type === "private";
 }
 
+function userStatusLabel(status, language) {
+  if (language === "fa") {
+    switch (status) {
+      case "active": return "فعال";
+      case "blocked": return "مسدود";
+      case "pending": return "در انتظار";
+    }
+  }
+  return status.toUpperCase();
+}
+
 function formatDate(value, language = "en") {
   if (!value) return "—";
   return new Date(value).toLocaleString(language === "fa" ? "fa-IR" : "en-GB", {
@@ -162,7 +173,7 @@ async function showUsers(ctx, page = 0, edit = false) {
     const name = [user.first_name, user.username ? "@" + user.username : null]
       .filter(Boolean).join(" · ") || String(user.telegram_id);
     keyboard.text(
-      (name + " — " + user.status.toUpperCase()).slice(0, 60),
+      (name + " — " + userStatusLabel(user.status, language)).slice(0, 60),
       "admin_user:" + user.telegram_id
     ).row();
   }
@@ -179,7 +190,7 @@ async function showUsers(ctx, page = 0, edit = false) {
           ? result.rows.map(user =>
               "شناسه: " + user.telegram_id +
               " | " + (user.username ? "@" + user.username : (user.first_name || "بدون نام")) +
-              " | " + user.status.toUpperCase()
+              " | " + userStatusLabel(user.status, language)
             ).join("\n")
           : "کاربری پیدا نشد.",
         "",
@@ -193,7 +204,7 @@ async function showUsers(ctx, page = 0, edit = false) {
           ? result.rows.map(user =>
               "ID: " + user.telegram_id +
               " | " + (user.username ? "@" + user.username : (user.first_name || "No name")) +
-              " | " + user.status.toUpperCase()
+              " | " + userStatusLabel(user.status, language)
             ).join("\n")
           : "No users found.",
         "",
@@ -229,7 +240,7 @@ async function showUser(ctx, telegramId, edit = false) {
         "شناسه تلگرام: " + user.telegram_id,
         "نام کاربری: " + (user.username ? "@" + user.username : "تنظیم نشده"),
         "نام: " + [user.first_name, user.last_name].filter(Boolean).join(" "),
-        "وضعیت: " + user.status.toUpperCase(),
+        "وضعیت: " + userStatusLabel(user.status, language),
         "کد معرف: " + (user.referral_code || "—"),
         "تاریخ عضویت: " + formatDate(user.created_at, language),
         "",
@@ -242,7 +253,7 @@ async function showUser(ctx, telegramId, edit = false) {
         "Telegram ID: " + user.telegram_id,
         "Username: " + (user.username ? "@" + user.username : "Not set"),
         "Name: " + [user.first_name, user.last_name].filter(Boolean).join(" "),
-        "Status: " + user.status.toUpperCase(),
+        "Status: " + userStatusLabel(user.status, language),
         "Referral code: " + (user.referral_code || "—"),
         "Registered: " + formatDate(user.created_at, language),
         "",
@@ -318,7 +329,7 @@ async function showAuditLog(ctx, edit = false) {
       ? (language === "fa" ? " | شناسه تلگرام: " : " | Telegram: ") + row.target_telegram_id
       : "") +
     (row.details?.new_status
-      ? (language === "fa" ? " | وضعیت جدید: " : " | New status: ") + row.details.new_status.toUpperCase()
+      ? (language === "fa" ? " | وضعیت جدید: " : " | New status: ") + userStatusLabel(row.details.new_status, language)
       : "")
   );
   const message = language === "fa"
@@ -368,7 +379,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
         "تأیید " + (newStatus === "active" ? "فعال‌سازی" : "تعلیق") + " کاربر",
         "",
         "شناسه تلگرام: " + telegramId,
-        "وضعیت فعلی: " + current.status.toUpperCase(),
+        "وضعیت فعلی: " + userStatusLabel(current.status, language),
         "وضعیت جدید: " + newStatus.toUpperCase(),
         "",
         "این عملیات هیچ وجهی را جابه‌جا یا تغییر نمی‌دهد."
@@ -377,7 +388,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
         "CONFIRM USER " + action.toUpperCase(),
         "",
         "Telegram ID: " + telegramId,
-        "Current status: " + current.status.toUpperCase(),
+        "Current status: " + userStatusLabel(current.status, language),
         "New status: " + newStatus.toUpperCase(),
         "",
         "This does not move or alter funds."
@@ -650,7 +661,7 @@ export function registerAdminOps(bot) {
   bot.command("usersearch", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    const term = ctx.match?.trim();
+    const term = ctx.match?.trim().replace(/^@/, "");
     if (!term || term.length > 80) {
       return ctx.reply(language === "fa"
         ? "روش استفاده: /usersearch <شناسه تلگرام، نام کاربری یا نام>"
@@ -663,12 +674,12 @@ export function registerAdminOps(bot) {
         `SELECT telegram_id, username, first_name, last_name, status
          FROM users
          WHERE telegram_id::text = $1
-            OR COALESCE(username, '') ILIKE '%' || $1 || '%'
-            OR COALESCE(first_name, '') ILIKE '%' || $1 || '%'
-            OR COALESCE(last_name, '') ILIKE '%' || $1 || '%'
+            OR strpos(lower(username), lower($1)) > 0
+            OR strpos(lower(first_name), lower($1)) > 0
+            OR strpos(lower(last_name), lower($1)) > 0
          ORDER BY created_at DESC, id DESC
          LIMIT 10`,
-        [term.replace(/^@/, "")]
+        [term]
       );
 
       if (!result.rowCount) {
@@ -680,12 +691,12 @@ export function registerAdminOps(bot) {
         const name = [user.first_name, user.last_name].filter(Boolean).join(" ") ||
           (user.username ? "@" + user.username : (language === "fa" ? "بدون نام" : "No name"));
         keyboard.text(
-          (name + " — " + user.status.toUpperCase()).slice(0, 60),
+          (name + " — " + userStatusLabel(user.status, language)).slice(0, 60),
           "admin_user:" + user.telegram_id
         ).row();
         return (language === "fa" ? "شناسه: " : "ID: ") + user.telegram_id + " | " +
           (user.username ? "@" + user.username : name) +
-          " | " + user.status.toUpperCase();
+          " | " + userStatusLabel(user.status, language);
       });
 
       keyboard.text(language === "fa" ? "بازگشت" : "Back", "admin_home");

@@ -12,7 +12,9 @@ test("private admin language survives new updates and handles unavailable prefer
   try {
     await client.query("BEGIN");
     await client.query(`
-      CREATE TEMP TABLE users (id bigint PRIMARY KEY, telegram_id bigint UNIQUE, status text);
+      CREATE TEMP TABLE users (id bigint PRIMARY KEY, telegram_id bigint UNIQUE, status text, username text, first_name text,
+        last_name text, referral_code text, created_at timestamptz);
+      CREATE TEMP TABLE admin_users (user_id bigint, role text, status text);
       CREATE TEMP TABLE admin_preferences (user_id bigint PRIMARY KEY, language text, updated_at timestamptz);
       CREATE TEMP TABLE scheduled_posts (
         id bigserial PRIMARY KEY, title varchar(255), content text, scheduled_at timestamptz, status text
@@ -20,6 +22,7 @@ test("private admin language survives new updates and handles unavailable prefer
       SET LOCAL search_path TO pg_temp
     `);
     await client.query("INSERT INTO users VALUES (1, $1, 'active')", [admin]);
+    await client.query("INSERT INTO users (id, telegram_id, username, status) VALUES (2, 123456, 'qa_user', 'blocked'), (3, 654321, 'qaXuser', 'active')");
     const query = t.mock.method(pool, "query", client.query.bind(client));
     const logs = t.mock.method(console, "error", () => {});
     const bot = new Bot("offline", { botInfo: { id: 7, is_bot: true, first_name: "Test", username: "offline_bot" } });
@@ -59,6 +62,20 @@ test("private admin language survives new updates and handles unavailable prefer
     assert.match(calls[1].payload.text, /تنظیم زبان پنل مدیریت/);
     await update("/planpreview SMART 25");
     assert.match(calls[0].payload.text, /مبلغ خالص تسویه: 27\.36/);
+
+    await update("/usersearch @QA_USER");
+    assert.match(calls[0].payload.text, /@qa_user \| مسدود/);
+    assert.doesNotMatch(calls[0].payload.text, /qaXuser/);
+    const button = calls[0].payload.reply_markup.inline_keyboard[0][0];
+    assert.equal(button.callback_data, "admin_user:123456");
+    assert.deepEqual(await update(button.callback_data), ["answerCallbackQuery", "editMessageText"]);
+    assert.match(calls[1].payload.text, /وضعیت: مسدود/);
+    await update("/usersearch %");
+    assert.equal(calls[0].payload.text, "کاربر منطبقی پیدا نشد.");
+    await update("/usersearch @");
+    assert.match(calls[0].payload.text, /روش استفاده/);
+    await update("/usersearch qa", 99);
+    assert.equal(calls[0].payload.text, "Access denied.");
 
     await update("/help");
     assert.match(calls[0].payload.text, /دستورهای مدیریت/);
