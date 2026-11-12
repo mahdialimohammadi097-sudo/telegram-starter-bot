@@ -908,3 +908,42 @@ test("private Telegram wallet and history resolve the sender's posted USDT entri
     client.release();
   }
 });
+
+test("simulated investments enforce five per owner and move each principal exactly once", { skip: !enabled }, async () => {
+  const { openSimulatedInvestment } = await import("../test-support/simulated-investment.js");
+  await pool.query(`CREATE TABLE simulation_investments (
+    id bigserial PRIMARY KEY, user_id bigint NOT NULL REFERENCES users(id), request_id text NOT NULL,
+    plan text NOT NULL, principal integer NOT NULL, profit_percent integer NOT NULL, fee_percent integer NOT NULL,
+    opened_at timestamptz NOT NULL DEFAULT now(), matures_at timestamptz NOT NULL,
+    status text NOT NULL DEFAULT 'active', UNIQUE(user_id, request_id)
+  )`);
+  const owner = await createSimulationWallet(520);
+  const other = await createSimulationWallet(521);
+  async function fund(user, amount) {
+    const result = await pool.query(
+      "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [user]
+    );
+    await seedAvailableBalance(result.rows[0].id, amount);
+  }
+  await fund(owner, "500");
+  const open = (key, plan = "PRO 100") => openSimulatedInvestment(pool, owner, key, plan);
+  const ids = await Promise.all([open("one"), open("one")]);
+  assert.equal(ids[0], ids[1]);
+  await Promise.all(["two", "three", "four"].map(key => open(key)));
+  const race = await Promise.allSettled([open("five"), open("six")]);
+  assert.equal(race.filter(result => result.status === "fulfilled").length, 1);
+  assert.match(race.find(result => result.status === "rejected").reason.message, /Five active/);
+  assert.equal(await open("one"), ids[0]);
+  await assert.rejects(open("one", "SMART 25"), /different investment/);
+  assert.deepEqual(await displayedBalances(owner), ["0.00000000", "500.00000000", "0.00000000"]);
+  await assert.rejects(openSimulatedInvestment(pool, other, "one", "SMART 25"), /Insufficient/i);
+  assert.equal((await pool.query("SELECT id FROM simulation_investments WHERE user_id = $1", [other])).rowCount, 0);
+  await fund(other, "25");
+  await openSimulatedInvestment(pool, other, "one", "SMART 25");
+  assert.deepEqual(await displayedBalances(other), ["0.00000000", "25.00000000", "0.00000000"]);
+  const { rows: [snapshot] } = await pool.query(
+    `SELECT profit_percent, fee_percent, matures_at = opened_at + interval '720 hours' AS correct_term
+     FROM simulation_investments WHERE user_id = $1`, [other]
+  );
+  assert.deepEqual(snapshot, { profit_percent: 14, fee_percent: 4, correct_term: true });
+});
