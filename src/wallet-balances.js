@@ -1,3 +1,9 @@
+export class IncompleteWalletError extends Error {
+  constructor() {
+    super("Wallet accounts are incomplete");
+  }
+}
+
 export async function getWalletBalances(pool, userId) {
   const result = await pool.query(
     `SELECT
@@ -40,7 +46,7 @@ export async function getWalletBalances(pool, userId) {
   }
 
   if (Object.values(balances).some(value => value === null)) {
-    throw new Error("Wallet accounts are incomplete");
+    throw new IncompleteWalletError();
   }
 
   return balances;

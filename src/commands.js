@@ -3,7 +3,7 @@ import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
-import { getWalletBalances, getRecentWalletEntries } from "./wallet-balances.js";
+import { getWalletBalances, getRecentWalletEntries, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
@@ -571,6 +571,11 @@ export function registerCommands(bot) {
           { reply_markup: walletMenu }
         );
       } catch (error) {
+        if (error instanceof IncompleteWalletError) {
+          return ctx.reply("Your account is registered. Wallet balances are unavailable until wallet setup is complete.", {
+            reply_markup: new Keyboard().text("My Wallet").row().text("⬅ Main Menu").resized()
+          });
+        }
         console.error("[wallet] Failed:", safeDiagnosticCode(error));
 
         return ctx.reply(
