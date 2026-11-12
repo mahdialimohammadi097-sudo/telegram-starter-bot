@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { readTestnetTransfer } from "../test-support/bsc-testnet-receipt.js";
 import { findSimulationDiscrepancies } from "../test-support/reconcile-simulated-deposits.js";
 import { formatUsdt } from "./ledger-safety.js";
-import { getWalletBalances } from "./wallet-balances.js";
+import { getWalletBalances, getRecentWalletEntries } from "./wallet-balances.js";
 import { postLedgerTransaction, postJournalInTransaction, withLedgerTransaction } from "./ledger-posting.js";
 
 const enabled = Boolean(process.env.DATABASE_URL);
@@ -798,6 +798,43 @@ test("reconciliation identifies every approved claim sharing a transfer event", 
     ]);
     await client.query("UPDATE deposit_requests SET status = 'rejected' WHERE id = $1", [duplicate]);
     assert.deepEqual(await discrepancies(), []);
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
+});
+
+test("wallet history returns only the owner's ten latest posted USDT entries", { skip: !enabled }, async () => {
+  const owner = await createSimulationWallet(512);
+  const other = await createSimulationWallet(513);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  assert.deepEqual(await getRecentWalletEntries(pool, other), []);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // All test journals share a transaction timestamp, exercising the stable tie breaker.
+    for (let i = 1; i <= 12; i++) {
+      await postJournalInTransaction(client, {
+        transactionType: "history-test", idempotencyKey: "history-" + i,
+        entries: [
+          { account_id: simulationClearing, entry_type: "debit", amount: String(i), currency: "USDT" },
+          { account_id: available.id, entry_type: "credit", amount: String(i), currency: "USDT" }
+        ]
+      });
+    }
+    const { rows: [pending] } = await client.query(
+      "INSERT INTO ledger_transactions (transaction_type) VALUES ('history-test') RETURNING id"
+    );
+    await client.query(
+      "INSERT INTO ledger_entries (transaction_id, account_id, entry_type, amount) VALUES ($1, $2, 'credit', 99)",
+      [pending.id, available.id]
+    );
+    assert.deepEqual(await getRecentWalletEntries(client, other), []);
+    const history = await getRecentWalletEntries(client, owner);
+    assert.deepEqual(history.map(row => Number(row.amount)), [12,11,10,9,8,7,6,5,4,3]);
+    assert.ok(history.every(row => row.entry_type === "credit" && row.account_type === "AVAILABLE"));
   } finally {
     await client.query("ROLLBACK");
     client.release();

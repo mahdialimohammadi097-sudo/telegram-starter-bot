@@ -2,7 +2,7 @@
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
-import { getWalletBalances } from "./wallet-balances.js";
+import { getWalletBalances, getRecentWalletEntries } from "./wallet-balances.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
@@ -520,7 +520,7 @@ export function registerCommands(bot) {
       }
     }
 
-    if (choice === "My Wallet") {
+    if (choice === "My Wallet" || choice === "Transaction History") {
       try {
         const userResult = await pool.query(
           `SELECT id FROM users WHERE telegram_id = $1`,
@@ -531,6 +531,17 @@ export function registerCommands(bot) {
           return ctx.reply(
             "Please send /start to register first."
           );
+        }
+
+        if (choice === "Transaction History") {
+          const entries = await getRecentWalletEntries(pool, userResult.rows[0].id);
+          const lines = entries.map(entry => {
+            const utc = entry.created_at.toISOString().slice(0, 16).replace("T", " ");
+            const sign = entry.entry_type === "credit" ? "+" : "-";
+            return utc + " UTC · " + entry.account_type + " · " + sign + formatUsdt(entry.amount) + " USDT";
+          });
+          const summary = lines.length ? "Latest posted wallet entries (up to 10)\n" + lines.join("\n") : "No posted wallet entries yet.";
+          return ctx.reply("TRANSACTION HISTORY\n\n" + summary, { reply_markup: backMenu });
         }
 
         const balances = await getWalletBalances(pool, userResult.rows[0].id);
@@ -549,7 +560,7 @@ export function registerCommands(bot) {
         console.error("[wallet] Failed:", safeDiagnosticCode(error));
 
         return ctx.reply(
-          "Unable to load wallet balances. Please try again later.",
+          choice === "Transaction History" ? "Unable to load transaction history. Please try again later." : "Unable to load wallet balances. Please try again later.",
           { reply_markup: backMenu }
         );
       }
@@ -571,9 +582,6 @@ export function registerCommands(bot) {
       "Daily Profits":
         "DAILY PROFITS\n\nVerified profit records will appear here when available.",
 
-
-      "Transaction History":
-        "TRANSACTION HISTORY\n\nYour transaction records will appear here.",
 
       "Support":
         "SUPPORT\n\nPlease contact our support team."
