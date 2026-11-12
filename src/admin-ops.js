@@ -3,7 +3,7 @@ import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
 import { isConfirmationCurrent } from "./admin-status-guard.js";
 import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
-import { adminText, getAdminLanguage as getPreferredLanguage } from "./admin-language.js";
+import { adminText, getAdminLanguage } from "./admin-language.js";
 import { rollbackTransaction } from "./transaction-safety.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
@@ -12,18 +12,6 @@ const PAGE_SIZE = 8;
 
 function isSuperAdminPrivate(ctx) {
   return ctx.from?.id === SUPER_ADMIN_ID && ctx.chat?.type === "private";
-}
-
-async function getAdminLanguage(ctx) {
-  const result = await pool.query(
-    `SELECT ap.language
-     FROM users u
-     LEFT JOIN admin_preferences ap ON ap.user_id = u.id
-     WHERE u.telegram_id = $1
-     LIMIT 1`,
-    [ctx.from.id]
-  );
-  return result.rows[0]?.language === "fa" ? "fa" : "en";
 }
 
 function formatDate(value, language = "en") {
@@ -529,16 +517,7 @@ export async function ensureAdminOpsSchema() {
   `);
 }
 
-async function showAdminLanguage(ctx, edit = false) {
-  const result = await pool.query(
-    `SELECT ap.language
-     FROM users u
-     LEFT JOIN admin_preferences ap ON ap.user_id = u.id
-     WHERE u.telegram_id = $1
-     LIMIT 1`,
-    [ctx.from.id]
-  );
-  const language = result.rows[0]?.language || "en";
+async function showAdminLanguage(ctx, language, edit = false) {
   const keyboard = new InlineKeyboard()
     .text((language === "en" ? "✓ " : "") + "English", "admin_language_set:en")
     .text((language === "fa" ? "✓ " : "") + "فارسی", "admin_language_set:fa")
@@ -547,14 +526,21 @@ async function showAdminLanguage(ctx, edit = false) {
   const message = language === "fa"
     ? "تنظیم زبان پنل مدیریت\n\nزبان موردنظر را انتخاب کنید. این تنظیم فقط روی پنل خصوصی ادمین اثر دارد؛ رابط کاربران PROFINO انگلیسی باقی می‌ماند."
     : "ADMIN PANEL LANGUAGE\n\nChoose the language for the private admin panel. This preference does not change the customer-facing PROFINO interface, which remains English.";
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  if (edit) {
+    try {
+      return await ctx.editMessageText(message, { reply_markup: keyboard });
+    } catch (error) {
+      if (error.error_code === 400 && /message is not modified/i.test(error.description || "")) return;
+      console.error("[admin-ops] language screen edit failed:", safeDiagnosticCode(error));
+    }
+  }
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
 export function registerAdminOps(bot) {
   bot.command("planpreview", async ctx => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
-    const language = await getPreferredLanguage(ctx);
+    const language = await getAdminLanguage(ctx);
     const plan = previewSettlement(ctx.match);
     if (!plan) return ctx.reply(adminText(language,
       "Example: /planpreview SMART 25\nPlans: STARTER, SMART, PRO\nAmounts: 10, 25, 50, 75, 100 USDT",
@@ -582,7 +568,7 @@ export function registerAdminOps(bot) {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
     try {
-      await showAdminLanguage(ctx);
+      await showAdminLanguage(ctx, language);
     } catch (error) {
       console.error("[admin-ops] language settings failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."));
@@ -594,10 +580,10 @@ export function registerAdminOps(bot) {
     const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
-      await showAdminLanguage(ctx, true);
+      await showAdminLanguage(ctx, language, true);
     } catch (error) {
       console.error("[admin-ops] language screen failed:", safeDiagnosticCode(error));
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."), show_alert: true });
+      await ctx.reply(adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."));
     }
   });
 
@@ -616,12 +602,12 @@ export function registerAdminOps(bot) {
       if (!result.rowCount) {
         return ctx.answerCallbackQuery({ text: adminText(language, "Admin account is not registered.", "حساب مدیر ثبت نشده است."), show_alert: true });
       }
-      await ctx.answerCallbackQuery({ text: language === "fa" ? "زبان فارسی ذخیره شد." : "English preference saved." });
-      await showAdminLanguage(ctx, true);
     } catch (error) {
       console.error("[admin-ops] language preference update failed:", safeDiagnosticCode(error));
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to save language preference.", "ذخیره تنظیم زبان ممکن نشد."), show_alert: true });
+      return ctx.answerCallbackQuery({ text: adminText(language, "Unable to save language preference.", "ذخیره تنظیم زبان ممکن نشد."), show_alert: true });
     }
+    await ctx.answerCallbackQuery({ text: language === "fa" ? "زبان فارسی ذخیره شد." : "English preference saved." });
+    await showAdminLanguage(ctx, language, true);
   });
 
   bot.command("admin", async (ctx) => {
