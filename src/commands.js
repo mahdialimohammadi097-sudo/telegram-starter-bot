@@ -130,7 +130,7 @@ async function showScheduledPosts(ctx, language) {
   return ctx.reply(page);
 }
 
-export function registerCommands(bot, { openTestInvestment, inspectTestQueue, reserveTestWithdrawal, cancelTestWithdrawal } = {}) {
+export function registerCommands(bot, { openTestInvestment, inspectTestQueue, reserveTestWithdrawal, cancelTestWithdrawal, listTestHolds } = {}) {
   const rateLimiter = createRateLimiter();
   // Keep all bot interactions private. This prevents group-based access-control
   // bypasses and avoids exposing account or administrative information in groups.
@@ -654,15 +654,12 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
           const availability = choice === "Deposit" ? "Real deposits are disabled. Do not send funds." : "Real withdrawals are disabled.";
           const summary = lines.length ? "Latest posted activity (up to 10)\n" + lines.join("\n") : "No posted simulation activity yet.";
           let keyboard = walletMenu;
-          if (choice === "Withdraw" && cancelTestWithdrawal) {
-            const seen = new Set();
+          if (choice === "Withdraw" && cancelTestWithdrawal && listTestHolds) {
             const controls = new InlineKeyboard();
-            for (const row of activity) {
-              if (seen.has(row.reference_id)) continue;
-              seen.add(row.reference_id);
-              if (row.transaction_type === "sim-withdraw-reserve" && /^[1-9]\d{0,18}$/.test(row.reference_id)) {
-                controls.text("Cancel test withdrawal #" + row.reference_id, "sim_cancel_hold:" + row.reference_id).row();
-              }
+            const holds = await listTestHolds(userResult.rows[0].id);
+            for (const hold of holds) {
+              controls.text("Cancel test withdrawal #" + hold.id + " · " + formatUsdt(hold.amount) + " USDT",
+                "sim_cancel_hold:" + hold.id).row();
             }
             if (controls.inline_keyboard.some(row => row.length)) keyboard = controls;
           }

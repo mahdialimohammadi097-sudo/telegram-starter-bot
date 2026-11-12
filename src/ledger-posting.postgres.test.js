@@ -1231,11 +1231,12 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const { registerCommands } = await import("./commands.js");
   const { pool: appPool } = await import("./database.js");
   const { openSimulatedInvestment, settleNextDueSimulation } = await import("../test-support/simulated-investment.js");
-  const { reserveWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const { reserveWithdrawal, cancelWithdrawal, listReservedWithdrawals } = await import("../test-support/simulated-withdrawal.js");
   const queries = t.mock.method(appPool, "query", pool.query.bind(pool));
   const bot = new Bot("offline", { botInfo: { id: 700, is_bot: true, first_name: "Test", username: "offline_bot" } });
   registerCommands(bot, {
     openTestInvestment: (user, key, plan) => openSimulatedInvestment(pool, user, key, plan),
+    listTestHolds: user => listReservedWithdrawals(pool, user),
     reserveTestWithdrawal: (user, key, amount) => reserveWithdrawal(pool, user, key, amount),
     cancelTestWithdrawal: (user, id) => cancelWithdrawal(pool, user, id)
   });
@@ -1351,7 +1352,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.equal(await tap(reserveButton.callback_data, telegramId, reserveMessage), reserved);
   await wallet("0", "0", "27.36");
   assert.ok((await screen("Withdraw")).includes("Simulated withdrawal reserved · #" + withdrawalId + " · 27.36000000 test USDT"));
-  const cancelButton = replies[0].reply_markup.inline_keyboard.flat().find(item => item.text === "Cancel test withdrawal #" + withdrawalId);
+  const cancelButton = replies[0].reply_markup.inline_keyboard.flat().find(item => item.callback_data === "sim_cancel_hold:" + withdrawalId);
   assert.ok(cancelButton);
   const withdrawalMessage = sequence;
   const secondUser = 32026;
@@ -1387,6 +1388,18 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
     ["My Investments", "No simulated investment activity yet."],
     ["Daily Profits", "No simulated settlements yet."]
   ]);
+  // Keep an older hold open while later reserve/release pairs fill the activity window.
+  const oldHold = await reserveWithdrawal(pool, owner, "older-active-hold", "1");
+  for (let n = 0; n < 5; n++) {
+    const newer = await reserveWithdrawal(pool, owner, "newer-closed-" + n, "1");
+    await cancelWithdrawal(pool, owner, newer.id);
+  }
+  const recentActivity = await screen("Withdraw");
+  assert.ok(!recentActivity.includes("· #" + oldHold.id + " ·"));
+  const oldControl = replies[0].reply_markup.inline_keyboard.flat().find(item => item.callback_data === "sim_cancel_hold:" + oldHold.id);
+  assert.ok(oldControl);
+  await tap(oldControl.callback_data, telegramId, sequence);
+  await wallet("27.36", "0", "0");
   const beginRead = queries.mock.callCount();
   for (const [view, empty] of emptyViews) {
     assert.ok((await screen(view, secondUser)).endsWith(empty));

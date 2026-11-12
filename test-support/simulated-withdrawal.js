@@ -60,3 +60,11 @@ export async function cancelWithdrawal(pool, userId, id) {
     return journal.transactionId;
   });
 }
+
+export async function listReservedWithdrawals(pool, userId) {
+  const { rows } = await pool.query(
+    `SELECT id, amount FROM simulation_withdrawals
+     WHERE user_id = $1 AND status = 'reserved' ORDER BY id LIMIT 10`, [userId]
+  );
+  return rows;
+}
