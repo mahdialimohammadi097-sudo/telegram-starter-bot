@@ -5,7 +5,7 @@ import { InlineKeyboard, Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
 import { getWalletBalances, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
-import { formatUsdt } from "./ledger-safety.js";
+import { formatUsdt, toUsdtUnitsExact } from "./ledger-safety.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
@@ -130,7 +130,7 @@ async function showScheduledPosts(ctx, language) {
   return ctx.reply(page);
 }
 
-export function registerCommands(bot, { openTestInvestment, inspectTestQueue, cancelTestWithdrawal } = {}) {
+export function registerCommands(bot, { openTestInvestment, inspectTestQueue, reserveTestWithdrawal, cancelTestWithdrawal } = {}) {
   const rateLimiter = createRateLimiter();
   // Keep all bot interactions private. This prevents group-based access-control
   // bypasses and avoids exposing account or administrative information in groups.
@@ -214,6 +214,38 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, ca
       } catch (error) {
         console.error("[simulation] opening failed:", safeDiagnosticCode(error));
         return ctx.reply("Unable to open this simulation. Check My Investments and your test balance before trying again.");
+      }
+    });
+  }
+
+  if (reserveTestWithdrawal) {
+    bot.command("testwithdraw", async ctx => {
+      const amount = ctx.match.trim();
+      if (!/^\d{1,18}(?:\.\d{1,8})?$/.test(amount) || toUsdtUnitsExact(amount) === 0n) {
+        return ctx.reply("Use /testwithdraw followed by a positive test USDT amount with up to 8 decimal places.");
+      }
+      const normalized = formatUsdt(amount);
+      const key = ctx.message.message_id;
+      return ctx.reply("Simulation only · Reserve " + normalized + " test USDT from your available balance?", {
+        reply_markup: new InlineKeyboard().text("Confirm test reservation", "sim_hold:" + key + ":" + normalized)
+      });
+    });
+    bot.callbackQuery(/^sim_hold:([1-9]\d{0,9}):(\d{1,18}\.\d{8})$/, async ctx => {
+      await ctx.answerCallbackQuery();
+      try {
+        const { rows: [user] } = await pool.query(
+          "SELECT id FROM users WHERE telegram_id = $1 AND status = 'active'", [ctx.from.id]
+        );
+        if (!user) return ctx.reply("Send /start first.");
+        const [, messageId, amount] = ctx.match;
+        const request = await reserveTestWithdrawal(user.id, "telegram-withdraw:" + messageId, amount);
+        return ctx.reply("Simulated withdrawal #" + request.id + " is " + request.status + ".", {
+          reply_markup: new Keyboard().text("Withdraw").text("My Wallet").row().text("⬅ Main Menu").resized()
+        });
+      } catch (error) {
+        if (error.message === "Insufficient available balance") return ctx.reply("Insufficient available test balance.");
+        console.error("[simulation] withdrawal reservation failed:", safeDiagnosticCode(error));
+        return ctx.reply("Unable to reserve the test amount. Check Withdraw and My Wallet before trying again.");
       }
     });
   }
@@ -634,7 +666,8 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, ca
             }
             if (controls.inline_keyboard.some(row => row.length)) keyboard = controls;
           }
-          return ctx.reply(choice.toUpperCase() + " · SIMULATION\n\n" + availability + "\n\n" + summary, { reply_markup: keyboard });
+          const instructions = choice === "Withdraw" && reserveTestWithdrawal ? "\n\nTo preview a reservation, send /testwithdraw followed by the test USDT amount." : "";
+          return ctx.reply(choice.toUpperCase() + " · SIMULATION\n\n" + availability + instructions + "\n\n" + summary, { reply_markup: keyboard });
         }
         if (choice === "Daily Profits") {
           const days = await getDailySimulatedProfits(pool, userResult.rows[0].id);

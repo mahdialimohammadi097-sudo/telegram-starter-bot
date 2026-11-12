@@ -1236,6 +1236,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const bot = new Bot("offline", { botInfo: { id: 700, is_bot: true, first_name: "Test", username: "offline_bot" } });
   registerCommands(bot, {
     openTestInvestment: (user, key, plan) => openSimulatedInvestment(pool, user, key, plan),
+    reserveTestWithdrawal: (user, key, amount) => reserveWithdrawal(pool, user, key, amount),
     cancelTestWithdrawal: (user, id) => cancelWithdrawal(pool, user, id)
   });
   const telegramId = 32025;
@@ -1254,7 +1255,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
     await bot.handleUpdate({ update_id: ++sequence, message: {
       message_id: sequence, date: 0, text, chat: { type, id: type === "private" ? sender : -700 },
       from: { id: sender, is_bot: false, first_name: "Fixture" },
-      entities: text === "/start" ? [{ type: "bot_command", offset: 0, length: 6 }] : []
+      entities: text.startsWith("/") ? [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }] : []
     } });
     if (type !== "private") {
       assert.deepEqual(replies, []);
@@ -1333,10 +1334,23 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
     [settlement, fees]
   );
   assert.deepEqual(feeEntries, [{ fee: "1.14" }]);
-  const withdrawal = await reserveWithdrawal(pool, owner, "journey-hold", "27.36");
+  assert.ok((await screen("Withdraw")).includes("/testwithdraw"));
+  for (const amount of ["0", "-1", "1.000000001"]) {
+    assert.match(await screen("/testwithdraw " + amount), /positive test USDT amount/);
+  }
+  const confirmButton = () => replies[0].reply_markup.inline_keyboard.flat().find(item => item.text === "Confirm test reservation");
+  await screen("/testwithdraw 28");
+  assert.equal(await tap(confirmButton().callback_data, telegramId, sequence), "Insufficient available test balance.");
+  assert.match(await screen("/testwithdraw 27.36"), /Reserve 27\.36000000 test USDT/);
+  const reserveButton = confirmButton();
+  const reserveMessage = sequence;
+  await wallet("27.36", "0", "0");
+  const reserved = await tap(reserveButton.callback_data, telegramId, reserveMessage);
+  const [, withdrawalId] = reserved.match(/Simulated withdrawal #(\d+) is reserved/);
+  assert.equal(await tap(reserveButton.callback_data, telegramId, reserveMessage), reserved);
   await wallet("0", "0", "27.36");
-  assert.ok((await screen("Withdraw")).includes("Simulated withdrawal reserved · #" + withdrawal.id + " · 27.36000000 test USDT"));
-  const cancelButton = replies[0].reply_markup.inline_keyboard.flat().find(item => item.text === "Cancel test withdrawal #" + withdrawal.id);
+  assert.ok((await screen("Withdraw")).includes("Simulated withdrawal reserved · #" + withdrawalId + " · 27.36000000 test USDT"));
+  const cancelButton = replies[0].reply_markup.inline_keyboard.flat().find(item => item.text === "Cancel test withdrawal #" + withdrawalId);
   assert.ok(cancelButton);
   const withdrawalMessage = sequence;
   const secondUser = 32026;
@@ -1344,11 +1358,12 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.match(await tap(cancelButton.callback_data, secondUser, withdrawalMessage), /Unable to cancel/);
   await wallet("0", "0", "27.36");
   const cancellation = await tap(cancelButton.callback_data, telegramId, withdrawalMessage);
-  assert.ok(cancellation.includes("withdrawal #" + withdrawal.id + " is cancelled"));
+  assert.ok(cancellation.includes("withdrawal #" + withdrawalId + " is cancelled"));
   assert.equal(await tap(cancelButton.callback_data, telegramId, withdrawalMessage), cancellation);
+  assert.ok((await tap(reserveButton.callback_data, telegramId, reserveMessage)).includes("is cancelled"));
   const cancelled = await screen("Withdraw");
   assert.ok(replies[0].reply_markup.keyboard);
-  assert.ok(cancelled.includes("Simulated withdrawal cancelled · #" + withdrawal.id + " · 27.36000000 test USDT"));
+  assert.ok(cancelled.includes("Simulated withdrawal cancelled · #" + withdrawalId + " · 27.36000000 test USDT"));
   assert.doesNotMatch(cancelled, /Simulated deposit/);
   assert.equal(await screen("Daily Profits"), daily);
   await wallet("27.36", "0", "0");
