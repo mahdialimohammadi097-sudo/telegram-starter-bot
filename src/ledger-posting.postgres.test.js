@@ -1265,12 +1265,15 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   await pool.query("INSERT INTO ledger_accounts (user_id, account_code, account_type) VALUES ($1, 'journey-hold', 'WITHDRAWAL_HOLD')", [owner]);
   await wallet("0", "0", "0");
   assert.match(await screen("My Investments"), /No simulated investment activity yet/);
+  assert.match(await screen("Deposit"), /No posted simulation activity yet/);
+  assert.match(await screen("Withdraw"), /No posted simulation activity yet/);
   const event = "test-chain:wallet-journey:0";
   const { rows: [claim] } = await pool.query(
     "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, $2) RETURNING id", [owner, event]
   );
   await approveSimulatedClaim(claim.id, new Map([[event, { userId: owner, amount: "25" }]]));
   await wallet("25", "0", "0");
+  assert.ok((await screen("Deposit")).includes("Simulated deposit · #" + claim.id + " · 25.00000000 test USDT"));
   const investment = await openSimulatedInvestment(pool, owner, "journey-plan", "SMART 25");
   await wallet("0", "25", "0");
   assert.match(await screen("Daily Profits"), /No simulated settlements yet/);
@@ -1297,7 +1300,11 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.deepEqual(feeEntries, [{ fee: "1.14" }]);
   const withdrawal = await reserveWithdrawal(pool, owner, "journey-hold", "27.36");
   await wallet("0", "0", "27.36");
+  assert.ok((await screen("Withdraw")).includes("Simulated withdrawal reserved · #" + withdrawal.id + " · 27.36000000 test USDT"));
   await cancelWithdrawal(pool, owner, withdrawal.id);
+  const cancelled = await screen("Withdraw");
+  assert.ok(cancelled.includes("Simulated withdrawal cancelled · #" + withdrawal.id + " · 27.36000000 test USDT"));
+  assert.doesNotMatch(cancelled, /Simulated deposit/);
   assert.equal(await screen("Daily Profits"), daily);
   await wallet("27.36", "0", "0");
   const history = await screen("Transaction History");

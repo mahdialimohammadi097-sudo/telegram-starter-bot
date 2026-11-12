@@ -120,3 +120,21 @@ export async function getDailySimulatedProfits(pool, userId) {
   );
   return rows;
 }
+
+export async function getSimulatedTransferActivity(pool, userId, section) {
+  const deposit = section === "Deposit";
+  if (!deposit && section !== "Withdraw") throw new TypeError("Unknown transfer section");
+  const types = deposit ? ["simulated-deposit"] : ["sim-withdraw-reserve", "sim-withdraw-release"];
+  const { rows } = await pool.query(
+    `SELECT t.created_at, t.transaction_type, t.reference_id, e.amount
+     FROM ledger_accounts a
+     JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
+     JOIN ledger_transactions t ON t.id = e.transaction_id
+     WHERE a.user_id = $1 AND a.currency = 'USDT' AND a.account_type = $2
+       AND t.transaction_type = ANY($3::text[]) AND t.status = 'posted'
+       AND e.entry_type = CASE WHEN t.transaction_type = 'sim-withdraw-release' THEN 'debit' ELSE 'credit' END
+     ORDER BY t.created_at DESC, t.id DESC, e.id DESC LIMIT 10`,
+    [userId, deposit ? "AVAILABLE" : "WITHDRAWAL_HOLD", types]
+  );
+  return rows;
+}

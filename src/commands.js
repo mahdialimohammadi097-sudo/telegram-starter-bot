@@ -4,7 +4,7 @@ import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
-import { getWalletBalances, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
+import { getWalletBalances, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
@@ -551,7 +551,8 @@ export function registerCommands(bot) {
     if (olderPage && BigInt(olderPage[1]) > 9223372036854775807n) {
       return ctx.reply("Open Transaction History to see your latest entries.", { reply_markup: mainMenu });
     }
-    if (choice === "My Wallet" || choice === "Transaction History" || choice === "My Investments" || choice === "Daily Profits" || olderPage) {
+    const transferScreen = choice === "Deposit" || choice === "Withdraw";
+    if (transferScreen || choice === "My Wallet" || choice === "Transaction History" || choice === "My Investments" || choice === "Daily Profits" || olderPage) {
       const walletMenu = new Keyboard()
         .text(choice === "My Wallet" ? "Transaction History" : "My Wallet")
         .row().text("⬅ Main Menu").resized();
@@ -567,6 +568,17 @@ export function registerCommands(bot) {
           );
         }
 
+        if (transferScreen) {
+          const activity = await getSimulatedTransferActivity(pool, userResult.rows[0].id, choice);
+          const lines = activity.map(row => {
+            const time = row.created_at.toISOString().slice(0, 16).replace("T", " ");
+            const action = simulationHistoryLabels.get(row.transaction_type);
+            return time + " UTC · " + action + " · #" + row.reference_id + " · " + formatUsdt(row.amount) + " test USDT";
+          });
+          const availability = choice === "Deposit" ? "Real deposits are disabled. Do not send funds." : "Real withdrawals are disabled.";
+          const summary = lines.length ? "Latest posted activity (up to 10)\n" + lines.join("\n") : "No posted simulation activity yet.";
+          return ctx.reply(choice.toUpperCase() + " · SIMULATION\n\n" + availability + "\n\n" + summary, { reply_markup: walletMenu });
+        }
         if (choice === "Daily Profits") {
           const days = await getDailySimulatedProfits(pool, userResult.rows[0].id);
           const lines = days.map(day => day.day + " UTC · " + formatUsdt(day.net_profit) + " test USDT · " +
@@ -631,6 +643,9 @@ export function registerCommands(bot) {
           });
         }
         console.error("[wallet] Failed:", safeDiagnosticCode(error));
+        if (transferScreen) return ctx.reply("Unable to load simulated transfer activity. Please try again later.", {
+          reply_markup: new Keyboard().text(choice).row().text("⬅ Main Menu").resized()
+        });
         if (choice === "Daily Profits" || choice === "My Investments") return ctx.reply(
           choice === "Daily Profits" ? "Unable to load daily profits. Please try again later." : "Unable to load investment activity. Please try again later.", {
           reply_markup: new Keyboard().text(choice).row().text("⬅ Main Menu").resized()
@@ -673,14 +688,6 @@ export function registerCommands(bot) {
     }
 
     const sections = {
-
-      "Deposit":
-        "DEPOSIT\n\nAutomatic deposit verification is not enabled yet. Do not send funds until an official deposit address is displayed.",
-
-      "Withdraw":
-        "WITHDRAW\n\nWithdrawal services are not enabled yet.",
-
-
 
       "Support":
         "SUPPORT\n\nSend /start to create or reopen your account.\n" +
