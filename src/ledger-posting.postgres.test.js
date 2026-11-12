@@ -1386,7 +1386,11 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.equal(await screen("Daily Profits"), daily);
   await wallet("27.36", "0", "0");
   const history = await screen("Transaction History");
-  const amounts = history.split("\n").filter(line => line.includes(" UTC · ")).map(line => line.split(" UTC · ")[1]);
+  const activityLines = history.split("\n").filter(line => line.includes(" UTC · "));
+  assert.ok(activityLines[0].endsWith(releasedReceipt) && activityLines[1].endsWith(releasedReceipt));
+  assert.ok(activityLines[2].endsWith(receiptCommand(heldPage)) && activityLines[3].endsWith(receiptCommand(heldPage)));
+  assert.ok(activityLines.slice(4, 8).every(line => !line.includes("/receipt_")));
+  const amounts = activityLines.map(line => line.split(" UTC · ")[1].replace(/ · \/receipt_\d+$/, ""));
   assert.deepEqual(amounts, [
     "AVAILABLE · +27.36000000 USDT · Simulated withdrawal cancelled",
     "Reserved for withdrawal · -27.36000000 USDT · Simulated withdrawal cancelled",
@@ -1416,6 +1420,25 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.ok(oldControl);
   await tap(oldControl.callback_data, telegramId, sequence);
   await wallet("27.36", "0", "0");
+  // A newer reservation arrives after page one. The older page cursor must still
+  // lead to the original release receipt without shifting rows between pages.
+  const latest = await screen("Transaction History");
+  assert.ok(!latest.includes(releasedReceipt + "\n"));
+  const olderButton = () => replies[0].reply_markup.keyboard.flat().find(item => item.text.startsWith("Older entries"));
+  let nextPage = olderButton();
+  const inserted = await reserveWithdrawal(pool, owner, "while-reading-history", "1");
+  const olderLines = [];
+  for (let page = 0; nextPage && page < 5; page++) {
+    const text = await screen(nextPage.text);
+    olderLines.push(...text.split("\n").filter(line => line.includes(" UTC · ")));
+    nextPage = olderButton();
+  }
+  assert.equal(nextPage, undefined);
+  const releaseLines = olderLines.filter(line => line.endsWith(" · " + releasedReceipt));
+  assert.equal(releaseLines.length, 2);
+  assert.equal(await screen(receiptCommand(releaseLines[0])), receipt);
+  assert.equal(await screen(releasedReceipt, secondUser), "No matching simulation receipt is available.");
+  await cancelWithdrawal(pool, owner, inserted.id);
   const beginRead = queries.mock.callCount();
   for (const [view, empty] of emptyViews) {
     assert.ok((await screen(view, secondUser)).endsWith(empty));

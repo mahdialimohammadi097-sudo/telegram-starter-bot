@@ -59,7 +59,7 @@ export async function getRecentWalletEntries(pool, userId) {
 
 export async function getWalletHistoryPage(pool, userId, beforeId = null) {
   const result = await pool.query(
-    `SELECT t.created_at, e.id AS entry_id, t.transaction_type, a.account_type, e.entry_type, e.amount
+    `SELECT t.created_at, t.id AS journal_id, e.id AS entry_id, t.transaction_type, a.account_type, e.entry_type, e.amount
      FROM ledger_accounts a
      JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
      JOIN ledger_transactions t ON t.id = e.transaction_id
