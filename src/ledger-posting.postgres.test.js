@@ -977,8 +977,27 @@ test("private Telegram wallet and history resolve the sender's posted USDT entri
     assert.doesNotMatch((await select(10515, "My Wallet"))[0], /Reserved for Withdrawal/);
     assert.deepEqual(await select(10514, "Transaction History", "group"), []);
     assert.deepEqual(await select(10516, "My Wallet"), ["Please send /start to register first."]);
+    for (let amount = 1; amount <= 10; amount++) {
+      await postJournalInTransaction(client, {
+        transactionType: "history-test", idempotencyKey: "telegram-page-" + amount,
+        entries: [
+          { account_id: simulationClearing, entry_type: "debit", amount: String(amount), currency: "USDT" },
+          { account_id: wallet.id, entry_type: "credit", amount: String(amount), currency: "USDT" }
+        ]
+      });
+    }
+    await select(10514, "Transaction History");
+    const older = visibleButtons().find(label => label.startsWith("Older entries"));
+    assert.ok(older);
+    const [previous] = await select(10514, older);
+    assert.match(previous, /Older posted wallet entries/);
+    assert.ok(previous.includes("AVAILABLE · +25.00000000 USDT"));
+    assert.equal(previous.split(" UTC · ").length - 1, 3);
+    assert.ok(visibleButtons().includes("Transaction History"));
+    assert.ok(!visibleButtons().some(label => label.startsWith("Older entries")));
+    assert.match((await select(10515, older))[0], /No older entries available/);
     await client.query("UPDATE users SET status = 'blocked' WHERE id = $1", [owner]);
-    for (const screen of ["My Wallet", "Transaction History"]) {
+    for (const screen of ["My Wallet", "Transaction History", older]) {
       assert.deepEqual(await select(10514, screen), ["Your account is not active. Please contact support."]);
     }
   } finally {

@@ -53,15 +53,29 @@ export async function getWalletBalances(pool, userId) {
 }
 
 export async function getRecentWalletEntries(pool, userId) {
+  const page = await getWalletHistoryPage(pool, userId);
+  return page.entries;
+}
+
+export async function getWalletHistoryPage(pool, userId, beforeId = null) {
   const result = await pool.query(
-    `SELECT t.created_at, t.transaction_type, a.account_type, e.entry_type, e.amount
+    `SELECT t.created_at, e.id AS entry_id, t.transaction_type, a.account_type, e.entry_type, e.amount
      FROM ledger_accounts a
      JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
      JOIN ledger_transactions t ON t.id = e.transaction_id
      WHERE a.user_id = $1 AND a.currency = 'USDT' AND t.status = 'posted'
        AND a.account_type IN ('AVAILABLE', 'INVESTED', 'PROFIT', 'WITHDRAWAL_HOLD')
+       AND ($2::bigint IS NULL OR (t.created_at, t.id, e.id) < (
+         SELECT ct.created_at, ct.id, ce.id
+         FROM ledger_entries ce JOIN ledger_accounts ca ON ca.id = ce.account_id
+         JOIN ledger_transactions ct ON ct.id = ce.transaction_id
+         WHERE ce.id = $2 AND ca.user_id = $1 AND ca.currency = 'USDT'
+           AND ce.currency = ca.currency AND ct.status = 'posted'
+           AND ca.account_type IN ('AVAILABLE', 'INVESTED', 'PROFIT', 'WITHDRAWAL_HOLD')
+       ))
      ORDER BY t.created_at DESC, t.id DESC, e.id DESC
-     LIMIT 10`, [userId]
+     LIMIT 11`, [userId, beforeId]
   );
-  return result.rows;
+  const entries = result.rows.slice(0, 10);
+  return { entries, next: result.rows.length > 10 ? entries[9].entry_id : null };
 }

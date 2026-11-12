@@ -3,7 +3,7 @@ import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
-import { getWalletBalances, getRecentWalletEntries, IncompleteWalletError } from "./wallet-balances.js";
+import { getWalletBalances, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
@@ -546,7 +546,11 @@ export function registerCommands(bot) {
       }
     }
 
-    if (choice === "My Wallet" || choice === "Transaction History") {
+    const olderPage = /^Older entries · #(\d{1,19})$/.exec(choice);
+    if (olderPage && BigInt(olderPage[1]) > 9223372036854775807n) {
+      return ctx.reply("Open Transaction History to see your latest entries.", { reply_markup: mainMenu });
+    }
+    if (choice === "My Wallet" || choice === "Transaction History" || olderPage) {
       const walletMenu = new Keyboard()
         .text(choice === "My Wallet" ? "Transaction History" : "My Wallet")
         .row().text("⬅ Main Menu").resized();
@@ -562,8 +566,10 @@ export function registerCommands(bot) {
           );
         }
 
-        if (choice === "Transaction History") {
-          const entries = await getRecentWalletEntries(pool, userResult.rows[0].id);
+        if (choice !== "My Wallet") {
+          const { entries, next } = await getWalletHistoryPage(pool, userResult.rows[0].id, olderPage?.[1]);
+          if (next) walletMenu.row().text("Older entries · #" + next);
+          if (olderPage) walletMenu.row().text("Transaction History");
           const lines = entries.map(entry => {
             const utc = entry.created_at.toISOString().slice(0, 16).replace("T", " ");
             const sign = entry.entry_type === "credit" ? "+" : "-";
@@ -572,7 +578,9 @@ export function registerCommands(bot) {
             const line = utc + " UTC · " + account + " · " + sign + formatUsdt(entry.amount) + " USDT";
             return label ? line + " · " + label : line;
           });
-          const summary = lines.length ? "Latest posted wallet entries (up to 10)\n" + lines.join("\n") : "No posted wallet entries yet.";
+          const heading = olderPage ? "Older posted wallet entries" : "Latest posted wallet entries (up to 10)";
+          const empty = olderPage ? "No older entries available." : "No posted wallet entries yet.";
+          const summary = lines.length ? heading + "\n" + lines.join("\n") : empty;
           return ctx.reply("TRANSACTION HISTORY\n\n" + summary, { reply_markup: walletMenu });
         }
 
@@ -598,7 +606,7 @@ export function registerCommands(bot) {
         console.error("[wallet] Failed:", safeDiagnosticCode(error));
 
         return ctx.reply(
-          choice === "Transaction History" ? "Unable to load transaction history. Please try again later." : "Unable to load wallet balances. Please try again later.",
+          choice !== "My Wallet" ? "Unable to load transaction history. Please try again later." : "Unable to load wallet balances. Please try again later.",
           { reply_markup: new Keyboard().text(choice).row().text("⬅ Main Menu").resized() }
         );
       }
