@@ -908,20 +908,15 @@ test("private Telegram wallet and history resolve the sender's posted USDT entri
     }
     const newcomer = 12524;
     assert.match((await select(newcomer, "/start"))[0], /Your account is ready/);
-    const setupMessage = "Your account is registered. Wallet balances are unavailable until wallet setup is complete.";
-    assert.deepEqual(await select(newcomer, "My Wallet"), [setupMessage]);
-    assert.equal(replies[0].reply_markup.keyboard[0][0].text, "My Wallet");
+    const setupMessage = "Your account is registered. Send /start to complete wallet setup, then open My Wallet again.";
+    assert.match((await select(newcomer, "My Wallet"))[0], /Available Balance: 0\.00000000 USDT/);
     const { rows: [account] } = await client.query("SELECT id FROM users WHERE telegram_id = $1", [newcomer]);
-    async function addAccount(type) {
-      return client.query(
-        "INSERT INTO ledger_accounts (user_id, account_code, account_type) VALUES ($1, $2, $3) RETURNING id",
-        [account.id, "newcomer-" + type, type]
-      );
-    }
-    const { rows: [newAvailable] } = await addAccount("AVAILABLE");
+    const { rows: [newAvailable] } = await client.query(
+      "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [account.id]
+    );
+    await client.query("DELETE FROM ledger_accounts WHERE user_id = $1 AND account_type = 'PROFIT'", [account.id]);
     assert.deepEqual(await select(newcomer, "My Wallet"), [setupMessage]);
-    await addAccount("INVESTED");
-    await addAccount("PROFIT");
+    assert.match((await select(newcomer, "/start"))[0], /Your account is ready/);
     assert.match((await select(newcomer, "My Wallet"))[0], /Available Balance: 0\.00000000 USDT/);
     assert.deepEqual(await select(newcomer, "Transaction History"), ["TRANSACTION HISTORY\n\nNo posted wallet entries yet."]);
     await postJournalInTransaction(client, {

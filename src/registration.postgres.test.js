@@ -15,6 +15,10 @@ test("Telegram registration preserves identity and invite codes across repeated 
       first_name text, last_name text, referral_code text UNIQUE, status text,
       created_at timestamptz DEFAULT now()
     ) ON COMMIT DROP`);
+    await client.query(`CREATE TEMP TABLE ledger_accounts (
+      user_id bigint REFERENCES users(id), account_code text UNIQUE, account_type text, currency text,
+      UNIQUE (user_id, account_type, currency)
+    ) ON COMMIT DROP`);
     await client.query("SET LOCAL search_path TO pg_temp");
     t.mock.method(pool, "query", client.query.bind(client));
     const bot = new Bot("offline", { botInfo: { id: 700, is_bot: true, first_name: "Test", username: "PROFINO1bot" } });
@@ -67,9 +71,18 @@ test("Telegram registration preserves identity and invite codes across repeated 
     assert.match(repaired.referral_code, /^[0-9a-f]{16}$/);
     assert.equal(repaired.id, original.id);
     assert.ok((await send(8002, "Referral Program")).includes("ref_" + repaired.referral_code));
+    const walletRows = () => client.query(
+      "SELECT account_code FROM ledger_accounts WHERE user_id = $1 ORDER BY account_type", [original.id]
+    );
+    const readyWallet = (await walletRows()).rows;
+    assert.equal(readyWallet.length, 3);
+    await send(8002, "/start");
+    assert.deepEqual((await walletRows()).rows, readyWallet);
+    await client.query("DELETE FROM ledger_accounts WHERE user_id = $1 AND account_type = 'PROFIT'", [original.id]);
     await client.query("UPDATE users SET status = 'blocked' WHERE telegram_id = 8002");
     assert.match(await send(8002, "/start", "Blocked update"), /account is not active/);
     assert.deepEqual(await account(8002), repaired);
+    assert.equal((await walletRows()).rowCount, 2);
   } finally {
     await client.query("ROLLBACK");
     client.release();

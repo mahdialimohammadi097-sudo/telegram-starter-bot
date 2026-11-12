@@ -33,19 +33,27 @@ const backMenu = new Keyboard()
 
 async function getOrCreateUser(ctx) {
   const result = await pool.query(
-    `INSERT INTO users
-      (telegram_id, username, first_name, last_name, referral_code, status)
-     VALUES ($1, $2, $3, $4, $5, 'active')
-     ON CONFLICT (telegram_id)
-     DO UPDATE SET
-       username = EXCLUDED.username,
-       first_name = EXCLUDED.first_name,
-       last_name = EXCLUDED.last_name,
-       referral_code = CASE WHEN NULLIF(btrim(users.referral_code), '') IS NULL
-                            THEN EXCLUDED.referral_code ELSE users.referral_code END
-     WHERE users.status = 'active'
-     RETURNING id, telegram_id, username, first_name,
-               last_name, referral_code, status, created_at`,
+    `WITH registered AS (
+       INSERT INTO users
+        (telegram_id, username, first_name, last_name, referral_code, status)
+       VALUES ($1, $2, $3, $4, $5, 'active')
+       ON CONFLICT (telegram_id)
+       DO UPDATE SET
+         username = EXCLUDED.username,
+         first_name = EXCLUDED.first_name,
+         last_name = EXCLUDED.last_name,
+         referral_code = CASE WHEN NULLIF(btrim(users.referral_code), '') IS NULL
+                              THEN EXCLUDED.referral_code ELSE users.referral_code END
+       WHERE users.status = 'active'
+       RETURNING id, telegram_id, username, first_name,
+                 last_name, referral_code, status, created_at
+     ), wallet_setup AS (
+       INSERT INTO ledger_accounts (user_id, account_code, account_type, currency)
+       SELECT u.id, 'user:' || u.id || ':USDT:' || kind, kind, 'USDT'
+       FROM registered u CROSS JOIN unnest(ARRAY['AVAILABLE', 'INVESTED', 'PROFIT']) AS kind
+       ON CONFLICT (user_id, account_type, currency) DO NOTHING
+     )
+     SELECT * FROM registered`,
     [
       ctx.from.id,
       ctx.from.username ?? null,
@@ -572,7 +580,7 @@ export function registerCommands(bot) {
         );
       } catch (error) {
         if (error instanceof IncompleteWalletError) {
-          return ctx.reply("Your account is registered. Wallet balances are unavailable until wallet setup is complete.", {
+          return ctx.reply("Your account is registered. Send /start to complete wallet setup, then open My Wallet again.", {
             reply_markup: new Keyboard().text("My Wallet").row().text("⬅ Main Menu").resized()
           });
         }
