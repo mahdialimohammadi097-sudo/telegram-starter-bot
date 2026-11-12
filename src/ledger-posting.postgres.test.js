@@ -1442,13 +1442,17 @@ test("offline queue reports the reserve shortage and drains overdue investments 
     const bot = new Bot("offline", { botInfo: { id: 7, is_bot: true, first_name: "Test", username: "offline_bot" } });
     await client.query("CREATE TEMP TABLE scheduled_posts (status text); CREATE TEMP TABLE admin_users (user_id bigint, role text, status text)");
     let reads = 0;
+    let readFailure = false;
+    let editFailure;
     registerCommands(bot, { inspectTestQueue: () => {
       reads++;
+      if (readFailure) throw new Error("synthetic private diagnostic");
       return inspectDueSimulationQueue(client, reserve);
     } });
     const replies = [];
     bot.api.config.use(async (_next, method, payload) => {
       replies.push({ method, payload });
+      if (method === "editMessageText" && editFailure) return { ok: false, error_code: 400, description: editFailure };
       return { ok: true, result: true };
     });
     let sequence = 0;
@@ -1499,6 +1503,24 @@ test("offline queue reports the reserve shortage and drains overdue investments 
     await tap(persianButton.callback_data);
     assert.ok(replies.at(-1).payload.text.includes("سرمایه‌گذاری‌های سررسیدشده: 0"));
     assert.ok(!replies.at(-1).payload.text.includes("اولین سرمایه‌گذاری"));
+    assert.ok(findButton("داشبورد"));
+    const refresh = findButton("به‌روزرسانی").callback_data;
+    editFailure = "Bad Request: message is not modified";
+    await tap(refresh);
+    assert.deepEqual(replies.map(item => item.method), ["answerCallbackQuery", "editMessageText"]);
+    readFailure = true;
+    editFailure = undefined;
+    await tap(refresh);
+    assert.equal(replies.at(-1).payload.text, "خواندن صف آزمایشی ممکن نشد.");
+    const retry = findButton("تلاش دوباره").callback_data;
+    const beforeDeniedRetry = reads;
+    await tap(retry, 99);
+    assert.equal(reads, beforeDeniedRetry);
+    readFailure = false;
+    editFailure = "Bad Request: message can't be edited";
+    await tap(retry);
+    assert.deepEqual(replies.map(item => item.method), ["answerCallbackQuery", "editMessageText", "sendMessage"]);
+    assert.ok(replies.at(-1).payload.text.includes("سرمایه‌گذاری‌های سررسیدشده: 0"));
     assert.ok(findButton("داشبورد"));
   } finally {
     await client.query("ROLLBACK");

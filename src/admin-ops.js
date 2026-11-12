@@ -538,12 +538,16 @@ async function showAdminLanguage(ctx, language, edit = false) {
   const message = language === "fa"
     ? "تنظیم زبان پنل مدیریت\n\nزبان موردنظر را انتخاب کنید. این تنظیم فقط روی پنل خصوصی ادمین اثر دارد؛ رابط کاربران PROFINO انگلیسی باقی می‌ماند."
     : "ADMIN PANEL LANGUAGE\n\nChoose the language for the private admin panel. This preference does not change the customer-facing PROFINO interface, which remains English.";
+  return sendAdminScreen(ctx, message, keyboard, edit);
+}
+
+async function sendAdminScreen(ctx, message, keyboard, edit) {
   if (edit) {
     try {
       return await ctx.editMessageText(message, { reply_markup: keyboard });
     } catch (error) {
       if (error.error_code === 400 && /message is not modified/i.test(error.description || "")) return;
-      console.error("[admin-ops] language screen edit failed:", safeDiagnosticCode(error));
+      console.error("[admin-ops] admin screen edit failed:", safeDiagnosticCode(error));
     }
   }
   return ctx.reply(message, { reply_markup: keyboard });
@@ -558,14 +562,18 @@ export function registerAdminOps(bot, { inspectTestQueue } = {}) {
       }
       if (ctx.callbackQuery) await ctx.answerCallbackQuery();
       const language = await getAdminLanguage(ctx);
+      const label = (en, fa) => adminText(language, en, fa);
+      const keyboard = new InlineKeyboard();
       let queue;
       try {
         queue = await inspectTestQueue();
       } catch (error) {
         console.error("[admin-ops] simulation queue failed:", safeDiagnosticCode(error));
-        return ctx.reply(adminText(language, "Unable to read the simulation queue.", "خواندن صف آزمایشی ممکن نشد."));
+        keyboard.text(label("Retry", "تلاش دوباره"), "admin_simqueue")
+          .text(label("Dashboard", "داشبورد"), "admin_home");
+        return sendAdminScreen(ctx, label("Unable to read the simulation queue.", "خواندن صف آزمایشی ممکن نشد."),
+          keyboard, Boolean(ctx.callbackQuery));
       }
-      const label = (en, fa) => adminText(language, en, fa);
       const lines = [
         label("Settlement simulation · test USDT", "شبیه‌سازی تسویه · تتر آزمایشی"),
         label("Due investments: ", "سرمایه‌گذاری‌های سررسیدشده: ") + queue.due_count,
@@ -576,9 +584,9 @@ export function registerAdminOps(bot, { inspectTestQueue } = {}) {
           label("First settlement shortfall: ", "کسری اولین تسویه: ") + queue.first_shortfall,
           label("Total shortfall: ", "کسری کل صف: ") + queue.total_shortfall);
       }
-      const options = { reply_markup: new InlineKeyboard().text(label("Dashboard", "داشبورد"), "admin_home") };
-      if (ctx.callbackQuery) return ctx.editMessageText(lines.join("\n"), options);
-      return ctx.reply(lines.join("\n"), options);
+      keyboard.text(label("Refresh", "به‌روزرسانی"), "admin_simqueue")
+        .text(label("Dashboard", "داشبورد"), "admin_home");
+      return sendAdminScreen(ctx, lines.join("\n"), keyboard, Boolean(ctx.callbackQuery));
     }
     bot.command("simqueue", showQueue);
     bot.callbackQuery("admin_simqueue", showQueue);
