@@ -130,7 +130,7 @@ async function showScheduledPosts(ctx, language) {
   return ctx.reply(page);
 }
 
-export function registerCommands(bot, { openTestInvestment, inspectTestQueue, reserveTestWithdrawal, cancelTestWithdrawal, listTestHolds } = {}) {
+export function registerCommands(bot, { openTestInvestment, inspectTestQueue, reserveTestWithdrawal, cancelTestWithdrawal, listTestHolds, testWithdrawalReview } = {}) {
   const rateLimiter = createRateLimiter();
   // Keep all bot interactions private. This prevents group-based access-control
   // bypasses and avoids exposing account or administrative information in groups.
@@ -270,7 +270,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
   registerPostManagement(bot);
   registerPostHistory(bot);
-  registerAdminOps(bot, { inspectTestQueue });
+  registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview });
   bot.command("start", async (ctx) => {
     try {
       const user = await getOrCreateUser(ctx);
@@ -301,6 +301,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
     const commands = [
       ["/admin", "Open the admin dashboard", "باز کردن داشبورد مدیریت"],
       ["/adminlanguage", "Choose the admin panel language (English/Persian)", "انتخاب زبان پنل مدیریت"],
+      ...(testWithdrawalReview ? [["/reviewhold <id>", "Review a test withdrawal", "بازبینی برداشت آزمایشی"]] : []),
       ...(inspectTestQueue ? [["/simqueue", "Inspect the simulated settlement queue", "بررسی صف تسویه آزمایشی"]] : []),
       ["/planpreview <plan> <amount>", "Simulate a settlement in USDT", "شبیه‌سازی تسویه به USDT"],
       ["/adminstats", "View operations overview", "نمای کلی عملیات"],

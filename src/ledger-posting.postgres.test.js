@@ -1587,8 +1587,8 @@ test("offline queue reports the reserve shortage and drains overdue investments 
   assert.deepEqual(await displayedBalances(owner), ["158.96000000", "0.00000000", "0.00000000"]);
 });
 
-test("reviewer and customer cancellations share one release and preserve the original actor", { skip: !enabled }, async () => {
-  const { reserveWithdrawal, cancelWithdrawal, cancelAsSimulationReviewer } = await import("../test-support/simulated-withdrawal.js");
+test("reviewer and customer cancellations share one release and preserve the original actor", { skip: !enabled }, async t => {
+  const { reserveWithdrawal, cancelWithdrawal, cancelAsSimulationReviewer, simulationWithdrawalReview } = await import("../test-support/simulated-withdrawal.js");
   const customer = await createSimulationWallet(650);
   const reviewer = await createSimulationWallet(651);
   await pool.query("INSERT INTO simulation_reviewers VALUES ($1, false)", [reviewer]);
@@ -1606,6 +1606,57 @@ test("reviewer and customer cancellations share one release and preserve the ori
   await pool.query("UPDATE simulation_reviewers SET active = true WHERE user_id = $1", [reviewer]);
   const review = id => cancelAsSimulationReviewer(pool, reviewer, id);
   const cancel = id => cancelWithdrawal(pool, customer, id);
+  const { Bot } = await import("grammy");
+  const { registerCommands } = await import("./commands.js");
+  const { pool: appPool } = await import("./database.js");
+  const telegramId = 8810232463;
+  await pool.query("UPDATE users SET telegram_id = $1, status = 'active' WHERE id = $2", [telegramId, reviewer]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("CREATE TEMP TABLE admin_preferences (user_id bigint PRIMARY KEY, language text)");
+    await client.query("INSERT INTO admin_preferences VALUES ($1, 'fa')", [reviewer]);
+    t.mock.method(appPool, "query", client.query.bind(client));
+    const bot = new Bot("offline", { botInfo: { id: 7, is_bot: true, first_name: "Test", username: "offline_bot" } });
+    registerCommands(bot, { testWithdrawalReview: simulationWithdrawalReview(pool) });
+    const calls = [];
+    bot.api.config.use(async (_next, method, payload) => {
+      calls.push({ method, payload });
+      return { ok: true, result: true };
+    });
+    let seq = 0;
+    async function update(data, sender = telegramId, type = "private") {
+      calls.length = 0;
+      const from = { id: sender, is_bot: false, first_name: "Fixture" };
+      const message = { message_id: ++seq, date: 0, from, chat: { id: type === "group" ? -7 : sender, type } };
+      const payload = data.startsWith("/") ? { message: { ...message, text: data,
+        entities: [{ type: "bot_command", offset: 0, length: data.split(" ")[0].length }] } } :
+        { callback_query: { id: String(seq), chat_instance: "offline", from, message, data } };
+      await bot.handleUpdate({ update_id: seq, ...payload });
+    }
+    const command = "/reviewhold " + first.id;
+    await update(command, telegramId, "group");
+    assert.equal(calls.length, 0);
+    await update(command);
+    assert.ok(calls[0].payload.text.includes("مبلغ بازگشتی به کیف پول کاربر: 5 USDT"));
+    const confirm = calls[0].payload.reply_markup.inline_keyboard[0][0].callback_data;
+    await update(confirm, 99);
+    assert.equal(calls[0].payload.show_alert, true);
+    await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+    await update(confirm);
+    assert.match(calls.at(-1).payload.text, /تأیید آزادسازی ممکن نشد/);
+    assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "5.00000000");
+    await pool.query("UPDATE simulation_reviewers SET active = true WHERE user_id = $1", [reviewer]);
+    await update(confirm);
+    assert.equal(calls.at(-1).method, "editMessageText");
+    assert.match(calls.at(-1).payload.text, /سند آزادسازی شماره/);
+    await client.query("UPDATE admin_preferences SET language = 'en'");
+    await update(command);
+    assert.equal(calls[0].payload.text, "No reviewable test withdrawal found.");
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
   const journal = await review(first.id);
   assert.equal(await cancel(first.id), journal);
   assert.equal(await actor(first.id), reviewer);

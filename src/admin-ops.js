@@ -553,7 +553,46 @@ async function sendAdminScreen(ctx, message, keyboard, edit) {
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
-export function registerAdminOps(bot, { inspectTestQueue } = {}) {
+export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview } = {}) {
+  if (testWithdrawalReview) {
+    bot.command("reviewhold", async ctx => {
+      if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+      const language = await getAdminLanguage(ctx);
+      const label = (en, fa) => adminText(language, en, fa);
+      const id = ctx.match.trim();
+      if (!/^[1-9]\d{0,18}$/.test(id)) return ctx.reply(label("Usage: /reviewhold <id>", "روش استفاده: /reviewhold <id>"));
+      try {
+        const hold = await testWithdrawalReview.inspect(ctx.from.id, id);
+        if (!hold) return ctx.reply(label("No reviewable test withdrawal found.", "برداشت آزمایشی قابل بازبینی پیدا نشد."));
+        const keyboard = new InlineKeyboard()
+          .text(label("Confirm release", "تأیید آزادسازی"), "admin_sim_release:" + id)
+          .text(label("Back", "بازگشت"), "admin_home");
+        return ctx.reply(label("Release test withdrawal #", "آزادسازی برداشت آزمایشی شماره ") + id + "\n" +
+          label("Amount returned to the customer's wallet: ", "مبلغ بازگشتی به کیف پول کاربر: ") + hold.amount + " USDT",
+          { reply_markup: keyboard });
+      } catch (error) {
+        console.error("[admin-ops] simulated withdrawal review failed:", safeDiagnosticCode(error));
+        return ctx.reply(label("Unable to read this request.", "خواندن درخواست ممکن نشد."));
+      }
+    });
+    bot.callbackQuery(/^admin_sim_release:([1-9]\d{0,18})$/, async ctx => {
+      if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+      await ctx.answerCallbackQuery();
+      const language = await getAdminLanguage(ctx);
+      const id = ctx.match[1];
+      let journal;
+      try {
+        journal = await testWithdrawalReview.release(ctx.from.id, id);
+      } catch (error) {
+        console.error("[admin-ops] simulated release failed:", safeDiagnosticCode(error));
+        return ctx.reply(adminText(language, "Unable to confirm this release.", "تأیید آزادسازی ممکن نشد."));
+      }
+      return sendAdminScreen(ctx, adminText(language, "Test withdrawal #", "برداشت آزمایشی شماره ") + id +
+        adminText(language, " · release journal #", " · سند آزادسازی شماره ") + journal,
+        new InlineKeyboard().text(adminText(language, "Dashboard", "داشبورد"), "admin_home"), true);
+    });
+  }
+
   if (inspectTestQueue) {
     async function showQueue(ctx) {
       if (!isSuperAdminPrivate(ctx)) {

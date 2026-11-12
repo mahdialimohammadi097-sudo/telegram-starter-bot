@@ -68,19 +68,21 @@ async function releaseReservation(client, request, reviewerId) {
 }
 
 export async function cancelAsSimulationReviewer(pool, reviewerId, id) {
-  return withLedgerTransaction(pool, async client => {
-    const reviewer = await client.query(
-      "SELECT user_id FROM simulation_reviewers WHERE user_id = $1 AND active FOR SHARE", [reviewerId]
-    );
-    if (!reviewer.rowCount) throw new Error("Unauthorized simulation reviewer");
-    const { rows: [request] } = await client.query(
-      "SELECT * FROM simulation_withdrawals WHERE id = $1 FOR UPDATE", [id]
-    );
-    if (!request) throw new Error("Unknown withdrawal");
-    if (request.status === "cancelled") return request.release_id;
-    if (request.status !== "reserved") throw new Error("Withdrawal cannot be cancelled");
-    return releaseReservation(client, request, reviewerId);
-  });
+  return withLedgerTransaction(pool, client => releaseAsReviewer(client, reviewerId, id));
+}
+
+async function releaseAsReviewer(client, reviewerId, id) {
+  const reviewer = await client.query(
+    "SELECT user_id FROM simulation_reviewers WHERE user_id = $1 AND active FOR SHARE", [reviewerId]
+  );
+  if (!reviewer.rowCount) throw new Error("Unauthorized simulation reviewer");
+  const { rows: [request] } = await client.query(
+    "SELECT * FROM simulation_withdrawals WHERE id = $1 FOR UPDATE", [id]
+  );
+  if (!request) throw new Error("Unknown withdrawal");
+  if (request.status === "cancelled") return request.release_id;
+  if (request.status !== "reserved") throw new Error("Withdrawal cannot be cancelled");
+  return releaseReservation(client, request, reviewerId);
 }
 
 export async function listReservedWithdrawals(pool, userId) {
@@ -89,4 +91,28 @@ export async function listReservedWithdrawals(pool, userId) {
      WHERE user_id = $1 AND status = 'reserved' ORDER BY id LIMIT 10`, [userId]
   );
   return rows;
+}
+
+export function simulationWithdrawalReview(pool) {
+  return {
+    async inspect(telegramId, id) {
+      const { rows } = await pool.query(
+        `SELECT trim_scale(w.amount)::text AS amount FROM simulation_withdrawals w
+         WHERE w.id = $1 AND w.status = 'reserved' AND EXISTS (
+           SELECT 1 FROM simulation_reviewers r JOIN users u ON u.id = r.user_id
+           WHERE r.active AND u.telegram_id = $2 AND u.status = 'active'
+         )`, [id, telegramId]
+      );
+      return rows[0];
+    },
+    async release(telegramId, id) {
+      return withLedgerTransaction(pool, async client => {
+        const { rows: [user] } = await client.query(
+          "SELECT id FROM users WHERE telegram_id = $1 AND status = 'active' FOR SHARE", [telegramId]
+        );
+        if (!user) throw new Error("Unauthorized simulation reviewer");
+        return releaseAsReviewer(client, user.id, id);
+      });
+    }
+  };
 }
