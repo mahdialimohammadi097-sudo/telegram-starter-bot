@@ -60,7 +60,7 @@ test("Telegram registration preserves identity and invite codes across repeated 
     assert.deepEqual(await account(8002), { ...original, first_name: "Updated" });
     assert.equal((await client.query("SELECT count(*)::int AS n FROM users")).rows[0].n, 2);
     await client.query("UPDATE users SET referral_code = NULL WHERE telegram_id = 8002");
-    assert.match(await send(8002, "My Account"), /Referral Code: Send \\/start/);
+    assert.ok((await send(8002, "My Account")).includes("Referral Code: Send /start"));
     assert.match(await send(8002, "Referral Program"), /Send \/start to generate/);
     await send(8002, "/start");
     const repaired = await account(8002);
