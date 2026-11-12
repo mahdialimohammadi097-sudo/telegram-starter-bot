@@ -301,7 +301,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
     const commands = [
       ["/admin", "Open the admin dashboard", "باز کردن داشبورد مدیریت"],
       ["/adminlanguage", "Choose the admin panel language (English/Persian)", "انتخاب زبان پنل مدیریت"],
-      ...(testWithdrawalReview ? [["/reviewhold <id>", "Review a test withdrawal", "بازبینی برداشت آزمایشی"]] : []),
+      ...(testWithdrawalReview ? [["/reviewhold [id]", "List or review test withdrawals", "فهرست و بازبینی برداشت‌های آزمایشی"]] : []),
       ...(inspectTestQueue ? [["/simqueue", "Inspect the simulated settlement queue", "بررسی صف تسویه آزمایشی"]] : []),
       ["/planpreview <plan> <amount>", "Simulate a settlement in USDT", "شبیه‌سازی تسویه به USDT"],
       ["/adminstats", "View operations overview", "نمای کلی عملیات"],

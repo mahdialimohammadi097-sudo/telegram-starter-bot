@@ -1635,6 +1635,27 @@ test("reviewer and customer cancellations share one release and preserve the ori
       await bot.handleUpdate({ update_id: seq, ...payload });
     }
     const command = "/reviewhold " + first.id;
+    const buttons = () => calls.at(-1).payload.reply_markup.inline_keyboard.flat();
+    const extra = [];
+    for (let n = 0; n < 10; n++) extra.push(await reserveWithdrawal(pool, customer, "page-" + n, "0.10"));
+    await update("/reviewhold", 99);
+    assert.equal(calls[0].payload.text, "Access denied.");
+    await update("/reviewhold");
+    const nextPage = buttons().find(button => button.text === "بعدی").callback_data;
+    assert.equal(buttons().filter(button => button.callback_data.startsWith("admin_sim_inspect:")).length, 10);
+    await update(nextPage);
+    const last = extra.at(-1);
+    const stale = buttons().find(button => button.text === "#" + last.id + " · 0.1 USDT").callback_data;
+    await cancelWithdrawal(pool, customer, last.id);
+    await update(stale);
+    assert.match(calls.at(-1).payload.text, /قابل بازبینی پیدا نشد/);
+    assert.ok(buttons().every(button => !button.callback_data.startsWith("admin_sim_release:")));
+    for (const hold of extra.slice(0, -1)) await cancelWithdrawal(pool, customer, hold.id);
+    await update(buttons()[0].callback_data);
+    const select = buttons().find(button => button.text === "#" + first.id + " · 5 USDT").callback_data;
+    await update(select);
+    assert.match(calls.at(-1).payload.text, /مبلغ بازگشتی به کیف پول کاربر: 5 USDT/);
+
     await update(command, telegramId, "group");
     assert.equal(calls.length, 0);
     await update(command);

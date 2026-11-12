@@ -555,26 +555,44 @@ async function sendAdminScreen(ctx, message, keyboard, edit) {
 
 export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview } = {}) {
   if (testWithdrawalReview) {
-    bot.command("reviewhold", async ctx => {
-      if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    async function showReview(ctx, id, afterId = "0") {
+      const edit = Boolean(ctx.callbackQuery);
+      if (!isSuperAdminPrivate(ctx)) {
+        return edit ? ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true }) : ctx.reply("Access denied.");
+      }
+      if (edit) await ctx.answerCallbackQuery();
       const language = await getAdminLanguage(ctx);
       const label = (en, fa) => adminText(language, en, fa);
-      const id = ctx.match.trim();
-      if (!/^[1-9]\d{0,18}$/.test(id)) return ctx.reply(label("Usage: /reviewhold <id>", "روش استفاده: /reviewhold <id>"));
+      const keyboard = new InlineKeyboard();
       try {
+        if (!id) {
+          const page = await testWithdrawalReview.list(ctx.from.id, afterId);
+          for (const hold of page.holds) {
+            keyboard.text("#" + hold.id + " · " + hold.amount + " USDT", "admin_sim_inspect:" + hold.id).row();
+          }
+          if (page.next) keyboard.text(label("Next", "بعدی"), "admin_sim_holds:" + page.next).row();
+          if (afterId !== "0") keyboard.text(label("First page", "صفحه اول"), "admin_sim_holds:0").row();
+          keyboard.text(label("Dashboard", "داشبورد"), "admin_home");
+          const title = page.holds.length ? label("Select a reserved test withdrawal", "برداشت آزمایشی رزروشده را انتخاب کنید")
+            : label("No reviewable test withdrawals on this page.", "در این صفحه برداشت آزمایشی قابل بازبینی وجود ندارد.");
+          return sendAdminScreen(ctx, title, keyboard, edit);
+        }
+        if (!/^[1-9]\d{0,18}$/.test(id)) return ctx.reply(label("Usage: /reviewhold [id]", "روش استفاده: /reviewhold [id]"));
         const hold = await testWithdrawalReview.inspect(ctx.from.id, id);
-        if (!hold) return ctx.reply(label("No reviewable test withdrawal found.", "برداشت آزمایشی قابل بازبینی پیدا نشد."));
-        const keyboard = new InlineKeyboard()
-          .text(label("Confirm release", "تأیید آزادسازی"), "admin_sim_release:" + id)
-          .text(label("Back", "بازگشت"), "admin_home");
-        return ctx.reply(label("Release test withdrawal #", "آزادسازی برداشت آزمایشی شماره ") + id + "\n" +
-          label("Amount returned to the customer's wallet: ", "مبلغ بازگشتی به کیف پول کاربر: ") + hold.amount + " USDT",
-          { reply_markup: keyboard });
+        if (hold) keyboard.text(label("Confirm release", "تأیید آزادسازی"), "admin_sim_release:" + id).row();
+        keyboard.text(label("Open requests", "درخواست‌های باز"), "admin_sim_holds:0");
+        const message = hold ? label("Release test withdrawal #", "آزادسازی برداشت آزمایشی شماره ") + id + "\n" +
+          label("Amount returned to the customer's wallet: ", "مبلغ بازگشتی به کیف پول کاربر: ") + hold.amount + " USDT"
+          : label("No reviewable test withdrawal found.", "برداشت آزمایشی قابل بازبینی پیدا نشد.");
+        return sendAdminScreen(ctx, message, keyboard, edit);
       } catch (error) {
         console.error("[admin-ops] simulated withdrawal review failed:", safeDiagnosticCode(error));
-        return ctx.reply(label("Unable to read this request.", "خواندن درخواست ممکن نشد."));
+        return ctx.reply(label("Unable to read test withdrawals.", "خواندن برداشت‌های آزمایشی ممکن نشد."));
       }
-    });
+    }
+    bot.command("reviewhold", ctx => showReview(ctx, ctx.match.trim()));
+    bot.callbackQuery(/^admin_sim_holds:(\d{1,19})$/, ctx => showReview(ctx, null, ctx.match[1]));
+    bot.callbackQuery(/^admin_sim_inspect:([1-9]\d{0,18})$/, ctx => showReview(ctx, ctx.match[1]));
     bot.callbackQuery(/^admin_sim_release:([1-9]\d{0,18})$/, async ctx => {
       if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
       await ctx.answerCallbackQuery();
@@ -589,7 +607,7 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
       }
       return sendAdminScreen(ctx, adminText(language, "Test withdrawal #", "برداشت آزمایشی شماره ") + id +
         adminText(language, " · release journal #", " · سند آزادسازی شماره ") + journal,
-        new InlineKeyboard().text(adminText(language, "Dashboard", "داشبورد"), "admin_home"), true);
+        new InlineKeyboard().text(adminText(language, "Open requests", "درخواست‌های باز"), "admin_sim_holds:0"), true);
     });
   }
 

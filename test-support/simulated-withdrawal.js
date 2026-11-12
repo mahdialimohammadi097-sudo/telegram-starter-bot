@@ -95,6 +95,17 @@ export async function listReservedWithdrawals(pool, userId) {
 
 export function simulationWithdrawalReview(pool) {
   return {
+    async list(telegramId, afterId) {
+      const { rows } = await pool.query(
+        `SELECT w.id, trim_scale(w.amount)::text AS amount FROM simulation_withdrawals w
+         WHERE w.status = 'reserved' AND w.id > $2 AND EXISTS (
+           SELECT 1 FROM simulation_reviewers r JOIN users u ON u.id = r.user_id
+           WHERE r.active AND u.telegram_id = $1 AND u.status = 'active'
+         ) ORDER BY w.id LIMIT 11`, [telegramId, afterId]
+      );
+      const holds = rows.slice(0, 10);
+      return { holds, next: rows.length > 10 ? holds[9].id : null };
+    },
     async inspect(telegramId, id) {
       const { rows } = await pool.query(
         `SELECT trim_scale(w.amount)::text AS amount FROM simulation_withdrawals w
