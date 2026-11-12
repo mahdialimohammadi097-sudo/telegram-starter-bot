@@ -6,6 +6,7 @@ import { getAdminLanguage, adminText } from "./admin-language.js";
 
 const ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
+const validStatuses = ["all", "scheduled", "preview_sending", "preview_sent", "preview_unknown", "approved", "publishing", "publish_unknown", "published", "rejected", "cancelled", "failed"];
 const restoreSessions = new Map();
 
 function isAdminPrivate(ctx) {
@@ -110,8 +111,11 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   const total = count.rows[0].total;
   if (!total) {
     const empty = adminText(language, "No posts found for status: ", "هیچ پستی با وضعیت ") + postStatusLabel(status, language) + adminText(language, ".", " پیدا نشد.");
-    if (edit) return ctx.editMessageText(empty);
-    return ctx.reply(empty);
+    const keyboard = new InlineKeyboard()
+      .text(adminText(language, "Post operations", "عملیات انتشار"), "admin_posts");
+    if (status !== "all") keyboard.text(adminText(language, "All posts", "همه پست‌ها"), "posthist_filter:all");
+    if (edit) return ctx.editMessageText(empty, { reply_markup: keyboard });
+    return ctx.reply(empty, { reply_markup: keyboard });
   }
 
   const keyboard = new InlineKeyboard();
@@ -125,6 +129,7 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   }
   if (page > 0) keyboard.text(adminText(language, "← Previous", "← قبلی"), "posthist_page:" + status + ":" + (page - 1));
   if (offset + result.rowCount < total) keyboard.text(adminText(language, "Next →", "بعدی →"), "posthist_page:" + status + ":" + (page + 1));
+  keyboard.row().text(adminText(language, "Post operations", "عملیات انتشار"), "admin_posts");
   const body = result.rows.map(post =>
     "#" + post.id + " — " + post.title + "\n" +
     adminText(language, "Status: ", "وضعیت: ") + postStatusLabel(post.status, language) + "\n" +
@@ -194,9 +199,8 @@ export function registerPostHistory(bot) {
     const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.reply(adminText(language, "Access denied.", "دسترسی غیرمجاز است."));
     const requestedStatus = ctx.match?.trim().toLowerCase() || "all";
-    const validStatuses = ["all", "scheduled", "preview_sending", "preview_sent", "preview_unknown", "approved", "publishing", "publish_unknown", "published", "rejected", "cancelled", "failed"];
     if (!validStatuses.includes(requestedStatus)) {
-      return ctx.reply(adminText(language, "Invalid status. Use /posthistory followed by: all, scheduled, preview_sent, published, rejected, cancelled, or failed.", "وضعیت نامعتبر است. پس از /posthistory یکی از این موارد را وارد کنید: all, scheduled, preview_sent, published, rejected, cancelled, failed."));
+      return ctx.reply(adminText(language, "Invalid status. Use /posthistory followed by: " + validStatuses.join(", ") + ".", "وضعیت نامعتبر است. پس از /posthistory یکی از این موارد را وارد کنید: " + validStatuses.join("، ") + "."));
     }
     try { await showHistory(ctx, 0, requestedStatus); }
     catch (error) {
@@ -217,28 +221,29 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^posthist_filter:(all|scheduled|preview_sent|published|rejected|cancelled)$/, async (ctx) => {
+  bot.callbackQuery(/^(?:admin_posthistory|posthist_filter:(all|scheduled|preview_sent|published|rejected|cancelled))$/, async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: adminText(language, "Unauthorized.", "دسترسی غیرمجاز است."), show_alert: true });
     try {
       await ctx.answerCallbackQuery();
-      await showHistory(ctx, 0, ctx.callbackQuery.data.split(":")[1], true);
+      await showHistory(ctx, 0, ctx.match[1] || "all", true);
     } catch (error) {
       console.error("[post-history] filter failed:", safeDiagnosticCode(error));
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to apply this filter.", "اعمال این فیلتر ممکن نشد."), show_alert: true });
+      await ctx.reply(adminText(language, "Unable to apply this filter.", "اعمال این فیلتر ممکن نشد."));
     }
   });
 
-  bot.callbackQuery(/^posthist_page:(all|scheduled|preview_sent|published|rejected|cancelled):\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_page:([a-z_]+):\d+$/, async (ctx) => {
     const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const [, status, pageText] = ctx.callbackQuery.data.split(":");
+    if (!validStatuses.includes(status)) return ctx.answerCallbackQuery({ text: adminText(language, "Invalid status.", "وضعیت نامعتبر است."), show_alert: true });
     try {
       await ctx.answerCallbackQuery();
       await showHistory(ctx, Number(pageText), status, true);
     } catch (error) {
       console.error("[post-history] pagination failed:", safeDiagnosticCode(error));
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load this page.", "بارگذاری این صفحه ممکن نشد."), show_alert: true });
+      await ctx.reply(adminText(language, "Unable to load this page.", "بارگذاری این صفحه ممکن نشد."));
     }
   });
 

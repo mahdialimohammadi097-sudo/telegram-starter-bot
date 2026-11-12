@@ -17,7 +17,7 @@ test("private admin language survives new updates and handles unavailable prefer
       CREATE TEMP TABLE admin_users (user_id bigint, role text, status text);
       CREATE TEMP TABLE admin_preferences (user_id bigint PRIMARY KEY, language text, updated_at timestamptz);
       CREATE TEMP TABLE scheduled_posts (
-        id bigserial PRIMARY KEY, title varchar(255), content text, scheduled_at timestamptz, status text
+        id bigserial PRIMARY KEY, title varchar(255), content text, scheduled_at timestamptz, updated_at timestamptz DEFAULT now(), status text
       );
       SET LOCAL search_path TO pg_temp
     `);
@@ -116,6 +116,21 @@ test("private admin language survives new updates and handles unavailable prefer
     await update("/newpost");
     await update("/cancelpost");
     assert.match(calls[0].payload.text, /لغو شد/);
+    const buttons = () => calls.at(-1).payload.reply_markup.inline_keyboard.flat();
+    await update("admin_posts");
+    assert.match(calls.at(-1).payload.text, /زمان‌بندی‌شده: 20/);
+    const history = buttons().find(button => button.text === "تاریخچه انتشار").callback_data;
+    assert.deepEqual(await update(history), ["answerCallbackQuery", "editMessageText"]);
+    assert.match(calls.at(-1).payload.text, /تاریخچه پست‌ها/);
+    await update("posthist_filter:published");
+    assert.equal(buttons().find(button => button.text === "همه پست‌ها").callback_data, "posthist_filter:all");
+    await client.query("UPDATE scheduled_posts SET status = 'failed'");
+    await update("/posthistory failed");
+    const next = buttons().find(button => button.callback_data === "posthist_page:failed:1");
+    assert.deepEqual(await update(next.callback_data), ["answerCallbackQuery", "editMessageText"]);
+    assert.match(calls.at(-1).payload.text, /9–16/);
+    assert.deepEqual(await update(history, admin, "group"), ["answerCallbackQuery"]);
+    assert.equal(calls[0].payload.text, "Unauthorized.");
     editError = "Bad Request: message is not modified";
     assert.deepEqual(await update("admin_language_set:fa"), ["answerCallbackQuery", "editMessageText"]);
     editError = "Bad Request: message can't be edited";

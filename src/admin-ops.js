@@ -1,3 +1,4 @@
+import { postStatusLabel } from "./post-schedule.js";
 import { previewSettlement } from "./plan-preview.js";
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
@@ -285,9 +286,7 @@ async function showPosts(ctx, edit = false) {
     ORDER BY status
   `);
   const lines = result.rows.map(row =>
-    language === "fa"
-      ? row.status.toUpperCase() + ": " + row.total
-      : row.status.toUpperCase() + ": " + row.total
+    postStatusLabel(row.status, language) + ": " + row.total
   );
   const message = language === "fa"
     ? [
@@ -912,13 +911,6 @@ export function registerAdminOps(bot) {
       console.error("[admin-ops] post overview failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post overview.", "بارگذاری نمای کلی پست‌ها ممکن نشد."), show_alert: true });
     }
-  });
-
-  bot.callbackQuery(/^admin_posthistory$/, async (ctx) => {
-    if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const language = await getAdminLanguage(ctx);
-    await ctx.answerCallbackQuery();
-    return ctx.reply(adminText(language, "Use /posthistory to open the complete post history.", "برای مشاهده تاریخچه کامل پست‌ها، دستور /posthistory را ارسال کنید."));
   });
 
   bot.callbackQuery(/^admin_logs$/, async (ctx) => {
