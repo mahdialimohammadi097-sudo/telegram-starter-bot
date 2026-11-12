@@ -8,7 +8,7 @@ import { readTestnetTransfer } from "../test-support/bsc-testnet-receipt.js";
 import { findSettlementDiscrepancies } from "../test-support/reconcile-simulated-settlements.js";
 import { findSimulationDiscrepancies } from "../test-support/reconcile-simulated-deposits.js";
 import { formatUsdt } from "./ledger-safety.js";
-import { getWalletBalances, getRecentWalletEntries } from "./wallet-balances.js";
+import { getWalletBalances, getRecentWalletEntries, getDailySimulatedProfits } from "./wallet-balances.js";
 import { postLedgerTransaction, postJournalInTransaction, withLedgerTransaction } from "./ledger-posting.js";
 
 const enabled = Boolean(process.env.DATABASE_URL);
@@ -1314,4 +1314,36 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
     "AVAILABLE · +25.00000000 USDT · Simulated deposit"
   ]);
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+test("daily simulated profits isolate owners and group complete posted settlements at UTC midnight", { skip: !enabled }, async () => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`
+      SET LOCAL TIME ZONE 'Asia/Tehran';
+      CREATE TEMP TABLE ledger_accounts (id int, user_id int, account_type text, currency text);
+      CREATE TEMP TABLE ledger_transactions (id int, created_at timestamptz, transaction_type text, status text);
+      CREATE TEMP TABLE ledger_entries (transaction_id int, account_id int, currency text, entry_type text, amount numeric);
+      INSERT INTO ledger_accounts VALUES (1, 1, 'AVAILABLE', 'USDT'), (2, 1, 'INVESTED', 'USDT'),
+        (3, 2, 'AVAILABLE', 'USDT'), (4, 2, 'INVESTED', 'USDT')
+    `);
+    async function entry(id, at, owner, payout, status = "posted") {
+      await client.query("INSERT INTO ledger_transactions VALUES ($1, $2, 'simulated-investment-settle', $3)", [id, at, status]);
+      await client.query(`INSERT INTO ledger_entries VALUES ($1, $2, 'USDT', 'debit', 25),
+        ($1, $3, 'USDT', 'credit', $4)`, [id, owner * 2, owner * 2 - 1, payout]);
+    }
+    await entry(1, "2026-01-01T22:00:00Z", 1, "27.36");
+    await entry(2, "2026-01-01T23:59:59Z", 1, "27.36");
+    await entry(3, "2026-01-02T00:00:00Z", 1, "24.75");
+    await entry(4, "2026-01-02T00:00:00Z", 2, "50");
+    await entry(5, "2026-01-02T00:00:00Z", 1, "100", "pending");
+    const rows = await getDailySimulatedProfits(client, 1);
+    assert.deepEqual(rows.map(row => [row.day, row.settlements, formatUsdt(row.net_profit)]), [
+      ["2026-01-02", 1, "-0.25000000"], ["2026-01-01", 2, "4.72000000"]
+    ]);
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
 });
