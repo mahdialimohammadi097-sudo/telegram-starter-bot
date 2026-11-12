@@ -1269,12 +1269,12 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
     const lines = (await screen("My Wallet")).split("\n");
     assert.ok(lines.includes("Available Balance: " + formatUsdt(available) + " USDT"));
     assert.ok(lines.includes("Invested Balance: " + formatUsdt(invested) + " USDT"));
-    assert.ok(lines.includes("Reserved for Withdrawal: " + formatUsdt(held) + " USDT"));
+    if (held === null) assert.ok(!lines.some(line => line.startsWith("Reserved for Withdrawal:")));
+    else assert.ok(lines.includes("Reserved for Withdrawal: " + formatUsdt(held) + " USDT"));
   }
   assert.match(await screen("/start"), /Your account is ready/);
   const { rows: [{ id: owner }] } = await pool.query("SELECT id FROM users WHERE telegram_id = $1", [telegramId]);
-  await pool.query("INSERT INTO ledger_accounts (user_id, account_code, account_type) VALUES ($1, 'journey-hold', 'WITHDRAWAL_HOLD')", [owner]);
-  await wallet("0", "0", "0");
+  await wallet("0", "0", null);
   assert.match(await screen("My Investments"), /No simulated investment activity yet/);
   assert.match(await screen("Deposit"), /No posted simulation activity yet/);
   assert.match(await screen("Withdraw"), /No posted simulation activity yet/);
@@ -1283,7 +1283,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
     "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, $2) RETURNING id", [owner, event]
   );
   await approveSimulatedClaim(claim.id, new Map([[event, { userId: owner, amount: "25" }]]));
-  await wallet("25", "0", "0");
+  await wallet("25", "0", null);
   assert.ok((await screen("Deposit")).includes("Simulated deposit · #" + claim.id + " · 25.00000000 test USDT"));
   await screen("Preview SMART");
   const button = replies[0].reply_markup.inline_keyboard.flat().find(item => item.text === "Open with 25 test USDT");
@@ -1302,7 +1302,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const confirmation = await tap();
   const [, investment] = confirmation.match(/Simulation confirmed · Investment #(\d+)/);
   assert.equal(await tap(), confirmation);
-  await wallet("0", "25", "0");
+  await wallet("0", "25", null);
   assert.match(await screen("Daily Profits"), /No simulated settlements yet/);
   const opened = await screen("My Investments");
   assert.ok(opened.includes("Investment #" + investment + " opened"));
@@ -1322,7 +1322,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.equal(posted.length, 1);
   const [settlement] = posted;
   assert.equal(await runWorker(), null);
-  await wallet("27.36", "0", "0");
+  await wallet("27.36", "0", null);
   const daily = await screen("Daily Profits");
   assert.ok(daily.includes("UTC · 2.36000000 test USDT · 1 settlement"));
   const settled = await screen("My Investments");
@@ -1344,7 +1344,8 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.match(await screen("/testwithdraw 27.36"), /Reserve 27\.36000000 test USDT/);
   const reserveButton = confirmButton();
   const reserveMessage = sequence;
-  await wallet("27.36", "0", "0");
+  assert.equal(await tap(reserveButton.callback_data, 32555, reserveMessage), "Send /start first.");
+  await wallet("27.36", "0", null);
   const reserved = await tap(reserveButton.callback_data, telegramId, reserveMessage);
   const [, withdrawalId] = reserved.match(/Simulated withdrawal #(\d+) is reserved/);
   assert.equal(await tap(reserveButton.callback_data, telegramId, reserveMessage), reserved);

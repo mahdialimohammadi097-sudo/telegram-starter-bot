@@ -26,6 +26,12 @@ export async function reserveWithdrawal(pool, userId, key, amount) {
       if (formatUsdt(prior.rows[0].amount) !== normalized) throw new Error("Request amount mismatch");
       return prior.rows[0];
     }
+    // First-use setup shares the reservation transaction so a failed hold leaves no account behind.
+    await client.query(
+      `INSERT INTO ledger_accounts (user_id, account_code, account_type, currency)
+       VALUES ($1, 'simulation:hold:' || $1::bigint::text, 'WITHDRAWAL_HOLD', 'USDT')
+       ON CONFLICT (user_id, account_type, currency) DO NOTHING`, [userId]
+    );
     const result = await client.query(
       `INSERT INTO simulation_withdrawals (user_id, request_key, amount, available_id, held_id)
        SELECT a.user_id, $2, $3, a.id, h.id FROM ledger_accounts a JOIN ledger_accounts h ON h.user_id = a.user_id
