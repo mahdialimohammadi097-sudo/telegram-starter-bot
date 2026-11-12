@@ -204,7 +204,7 @@ export function registerCommands(bot) {
   });
 
   bot.command("help", async ctx => {
-    if (!isAdmin(ctx) || !isPrivateChat(ctx)) return ctx.reply("Use the menu buttons to navigate PROFINO.");
+    if (!isAdmin(ctx) || !isPrivateChat(ctx)) return ctx.reply("Use the menu buttons to navigate PROFINO.", { reply_markup: mainMenu });
     const language = await getAdminLanguage(ctx);
     const commands = [
       ["/admin", "Open the admin dashboard", "باز کردن داشبورد مدیریت"],
@@ -480,7 +480,7 @@ export function registerCommands(bot) {
           `Username: ${account.username ? "@" + account.username : "Not set"}\n` +
           `Name: ${account.first_name ?? ""} ${account.last_name ?? ""}\n` +
           `Status: ${account.status.toUpperCase()}\n` +
-          `Referral Code: ${account.referral_code}\n` +
+          `Referral Code: ${account.referral_code?.trim() || "Send /start to generate a code."}\n` +
           `Joined: ${new Date(account.created_at).toLocaleDateString("en-GB")}`,
           { reply_markup: backMenu }
         );
@@ -594,13 +594,19 @@ export function registerCommands(bot) {
 
 
       "Support":
-        "SUPPORT\n\nPlease contact our support team."
+        "SUPPORT\n\nSend /start to create or reopen your account.\n" +
+        "Choose My Wallet to check your balance, or Transaction History to see recent entries.\n" +
+        "To find your invite link, choose Referral Program from the main menu."
     };
 
     if (sections[choice]) {
       return ctx.reply(sections[choice], {
         reply_markup: backMenu
       });
+    }
+
+    if (!choice.startsWith("/") && !isAdmin(ctx)) {
+      return ctx.reply("Choose an option from the main menu below.", { reply_markup: mainMenu });
     }
   });
                               }

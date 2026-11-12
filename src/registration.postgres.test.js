@@ -30,13 +30,22 @@ test("Telegram registration preserves identity and invite codes across repeated 
       replies.length = 0;
       const message = { message_id: ++sequence, date: 0, text, from: { id, first_name: name, is_bot: false },
         chat: { id, type: "private" } };
-      if (text.startsWith("/start")) message.entities = [{ type: "bot_command", offset: 0, length: 6 }];
+      if (text.startsWith("/")) message.entities = [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }];
       await bot.handleUpdate({ update_id: sequence, message });
       assert.equal(replies.length, 1);
       assert.equal(replies[0].chat_id, id);
       return replies[0].text;
     }
     assert.match(await send(8001, "/start"), /Your account is ready/);
+    const menu = replies[0].reply_markup.keyboard;
+    assert.match(await send(8001, "Support"), /Transaction History/);
+    assert.equal(replies[0].reply_markup.keyboard[0][0].text, "⬅ Main Menu");
+    assert.equal(await send(8001, "⬅ Main Menu"), "Main Menu");
+    assert.deepEqual(replies[0].reply_markup.keyboard, menu);
+    for (const input of ["/help", "Where is my wallet?"]) {
+      await send(8001, input);
+      assert.deepEqual(replies[0].reply_markup.keyboard, menu);
+    }
     const invitation = await send(8001, "Referral Program");
     const [, payload] = invitation.match(/https:\/\/t\.me\/PROFINO1bot\?start=(ref_[0-9a-f]{16})/);
     assert.match(await send(8002, "/start " + payload), /Your account is ready/);
@@ -51,6 +60,7 @@ test("Telegram registration preserves identity and invite codes across repeated 
     assert.deepEqual(await account(8002), { ...original, first_name: "Updated" });
     assert.equal((await client.query("SELECT count(*)::int AS n FROM users")).rows[0].n, 2);
     await client.query("UPDATE users SET referral_code = NULL WHERE telegram_id = 8002");
+    assert.match(await send(8002, "My Account"), /Referral Code: Send \\/start/);
     assert.match(await send(8002, "Referral Program"), /Send \/start to generate/);
     await send(8002, "/start");
     const repaired = await account(8002);
