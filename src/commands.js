@@ -531,6 +531,9 @@ export function registerCommands(bot) {
     }
 
     if (choice === "My Wallet" || choice === "Transaction History") {
+      const walletMenu = new Keyboard()
+        .text(choice === "My Wallet" ? "Transaction History" : "My Wallet")
+        .row().text("⬅ Main Menu").resized();
       try {
         const userResult = await pool.query(
           `SELECT id FROM users WHERE telegram_id = $1`,
@@ -551,7 +554,7 @@ export function registerCommands(bot) {
             return utc + " UTC · " + entry.account_type + " · " + sign + formatUsdt(entry.amount) + " USDT";
           });
           const summary = lines.length ? "Latest posted wallet entries (up to 10)\n" + lines.join("\n") : "No posted wallet entries yet.";
-          return ctx.reply("TRANSACTION HISTORY\n\n" + summary, { reply_markup: backMenu });
+          return ctx.reply("TRANSACTION HISTORY\n\n" + summary, { reply_markup: walletMenu });
         }
 
         const balances = await getWalletBalances(pool, userResult.rows[0].id);
@@ -564,14 +567,14 @@ export function registerCommands(bot) {
           `Invested Balance: ${format(balances.INVESTED)} USDT\n` +
           `Recorded Profit: ${format(balances.PROFIT)} USDT\n\n` +
           "Balances reflect posted ledger transactions only.",
-          { reply_markup: backMenu }
+          { reply_markup: walletMenu }
         );
       } catch (error) {
         console.error("[wallet] Failed:", safeDiagnosticCode(error));
 
         return ctx.reply(
           choice === "Transaction History" ? "Unable to load transaction history. Please try again later." : "Unable to load wallet balances. Please try again later.",
-          { reply_markup: backMenu }
+          { reply_markup: new Keyboard().text(choice).row().text("⬅ Main Menu").resized() }
         );
       }
     }

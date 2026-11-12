@@ -893,11 +893,30 @@ test("private Telegram wallet and history resolve the sender's posted USDT entri
       return replies.map(reply => reply.text);
     }
     assert.match((await select(10514, "My Wallet"))[0], /Available Balance: 25\.00000000 USDT/);
-    const [history] = await select(10514, "Transaction History");
+    const visibleButtons = () => replies[0].reply_markup.keyboard.flat().map(button => button.text);
+    assert.deepEqual(visibleButtons(), ["Transaction History", "⬅ Main Menu"]);
+    const [history] = await select(10514, visibleButtons()[0]);
+    assert.deepEqual(visibleButtons(), ["My Wallet", "⬅ Main Menu"]);
     assert.match(history, /UTC · AVAILABLE · \+25\.00000000 USDT/);
     assert.doesNotMatch(history, /90\.00000000/);
+    assert.match((await select(10514, visibleButtons()[0]))[0], /Available Balance: 25/);
+    assert.deepEqual(await select(10514, visibleButtons()[1]), ["Main Menu"]);
+    assert.ok(visibleButtons().includes("My Account"));
     assert.match((await select(10515, "My Wallet"))[0], /Available Balance: 0\.00000000 USDT/);
     assert.deepEqual(await select(10515, "Transaction History"), ["TRANSACTION HISTORY\n\nNo posted wallet entries yet."]);
+    assert.deepEqual(visibleButtons(), ["My Wallet", "⬅ Main Menu"]);
+    const originalQuery = appPool.query;
+    appPool.query = async (sql, ...args) => {
+      if (sql.includes("SELECT t.created_at")) throw new Error("synthetic history failure");
+      return originalQuery(sql, ...args);
+    };
+    try {
+      assert.deepEqual(await select(10514, "Transaction History"), ["Unable to load transaction history. Please try again later."]);
+      assert.deepEqual(visibleButtons(), ["Transaction History", "⬅ Main Menu"]);
+    } finally {
+      appPool.query = originalQuery;
+    }
+    assert.match((await select(10514, visibleButtons()[0]))[0], /AVAILABLE/);
     assert.deepEqual(await select(10514, "Transaction History", "group"), []);
     assert.deepEqual(await select(10516, "My Wallet"), ["Please send /start to register first."]);
     await client.query("UPDATE users SET status = 'blocked' WHERE id = $1", [owner]);
