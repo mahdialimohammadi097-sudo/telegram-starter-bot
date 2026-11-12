@@ -609,7 +609,7 @@ test("independent reconciliation detects a missing credit, an orphan journal and
     await client.query("BEGIN");
     const discrepancies = () => findSimulationDiscrepancies(client, simulationClearing);
     assert.deepEqual(await discrepancies(), []);
-    // Corrupt one detail at a time; every probe starts from the valid journal.
+    // Posted entries and their journal must reject edits even inside a review transaction.
     for (const change of [
       "UPDATE ledger_entries SET amount = 24 WHERE transaction_id = $1 AND entry_type = 'credit'",
       "UPDATE ledger_entries SET account_id = (SELECT id FROM ledger_accounts WHERE user_id = 505 AND account_type = 'INVESTED') WHERE transaction_id = $1 AND entry_type = 'credit'",
@@ -617,11 +617,14 @@ test("independent reconciliation detects a missing credit, an orphan journal and
       "UPDATE ledger_transactions SET idempotency_key = 'simulation:wrong-event' WHERE id = $1"
     ]) {
       await client.query("SAVEPOINT valid_journal");
-      assert.equal((await client.query(change, [journal.transactionId])).rowCount, 1);
-      assert.deepEqual(await discrepancies(), [{ request_id: request.id, journal_id: journal.transactionId }]);
+      await assert.rejects(client.query(change, [journal.transactionId]), /cannot be changed|immutable/i);
       await client.query("ROLLBACK TO SAVEPOINT valid_journal");
       await client.query("RELEASE SAVEPOINT valid_journal");
     }
+    assert.deepEqual(await discrepancies(), []);
+    await client.query("UPDATE deposit_requests SET transfer_event = 'test-chain:wrong:0' WHERE id = $1", [request.id]);
+    assert.deepEqual(await discrepancies(), [{ request_id: request.id, journal_id: journal.transactionId }]);
+    await client.query("UPDATE deposit_requests SET transfer_event = $2 WHERE id = $1", [request.id, event]);
     await client.query("UPDATE deposit_requests SET amount = 30 WHERE id = $1", [request.id]);
     assert.deepEqual(await discrepancies(), [{ request_id: request.id, journal_id: journal.transactionId }]);
     await client.query("UPDATE deposit_requests SET status = 'pending' WHERE id = $1", [request.id]);
