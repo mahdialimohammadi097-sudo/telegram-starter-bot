@@ -130,6 +130,8 @@ test("private admin language survives new updates and handles unavailable prefer
     assert.deepEqual(await update(next.callback_data), ["answerCallbackQuery", "editMessageText"]);
     assert.match(calls.at(-1).payload.text, /9–16/);
     assert.deepEqual(await update(history, admin, "group"), ["answerCallbackQuery"]);
+    assert.equal(calls[0].payload.text, "Please use the bot in a private chat.");
+    assert.deepEqual(await update(history, 99), ["answerCallbackQuery"]);
     assert.equal(calls[0].payload.text, "Unauthorized.");
     editError = "Bad Request: message is not modified";
     assert.deepEqual(await update("admin_language_set:fa"), ["answerCallbackQuery", "editMessageText"]);
