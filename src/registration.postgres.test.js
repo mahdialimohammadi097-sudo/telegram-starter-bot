@@ -83,6 +83,20 @@ test("Telegram registration preserves identity and invite codes across repeated 
     assert.match(await send(8002, "/start", "Blocked update"), /account is not active/);
     assert.deepEqual(await account(8002), repaired);
     assert.equal((await walletRows()).rowCount, 2);
+
+    // A failed account insert must also undo the user insert in that statement.
+    await client.query("ALTER TABLE ledger_accounts ADD CONSTRAINT simulate_setup_failure CHECK (account_type <> 'PROFIT') NOT VALID");
+    await client.query("SAVEPOINT before_failed_start");
+    assert.match(await send(8003, "/start"), /Unable to load your account/);
+    await client.query("ROLLBACK TO SAVEPOINT before_failed_start");
+    assert.equal(await account(8003), undefined);
+    await client.query("ALTER TABLE ledger_accounts DROP CONSTRAINT simulate_setup_failure");
+    assert.match(await send(8003, "/start"), /Your account is ready/);
+    const recovered = await account(8003);
+    const { rows: recoveredAccounts } = await client.query(
+      "SELECT account_type FROM ledger_accounts WHERE user_id = $1 ORDER BY account_type", [recovered.id]
+    );
+    assert.deepEqual(recoveredAccounts.map(row => row.account_type), ["AVAILABLE", "INVESTED", "PROFIT"]);
   } finally {
     await client.query("ROLLBACK");
     client.release();
