@@ -1,3 +1,4 @@
+import { findWithdrawalDiscrepancies } from "../test-support/reconcile-simulated-withdrawals.js";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -1114,6 +1115,7 @@ test("withdrawal recovery reconciles request state, held funds and available bal
 
   const reserve = worker => reserveWithdrawal(worker, owner, "recovery", "7.25");
   async function check(expectedStatus, availableAmount, heldAmount, movementCount) {
+    assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
     const requests = await pool.query("SELECT status FROM simulation_withdrawals WHERE user_id = $1", [owner]);
     assert.deepEqual(requests.rows.map(row => row.status), expectedStatus ? [expectedStatus] : []);
     const displayed = await getWalletBalances(pool, owner);
@@ -1144,4 +1146,33 @@ test("withdrawal recovery reconciles request state, held funds and available bal
   assert.equal(release, replay);
   assert.equal((await reserve(pool)).status, "cancelled");
   await check("cancelled", "25.00000000", "0.00000000", 2);
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    async function verifyChange(sql, params, operations) {
+      await client.query("SAVEPOINT consistent");
+      await client.query(sql, params);
+      const findings = await findWithdrawalDiscrepancies(client);
+      assert.deepEqual(findings.map(row => row.operation).sort(), operations);
+      assert.ok(findings.every(row => row.withdrawal_id === request.id));
+      await client.query("ROLLBACK TO SAVEPOINT consistent");
+      await client.query("RELEASE SAVEPOINT consistent");
+    }
+    await verifyChange("UPDATE simulation_withdrawals SET amount = amount + 0.00000001 WHERE id = $1",
+      [request.id], ["release", "reserve"]);
+    await verifyChange("UPDATE simulation_withdrawals SET release_id = NULL WHERE id = $1",
+      [request.id], ["release"]);
+    await verifyChange("UPDATE simulation_withdrawals SET status = 'reserved' WHERE id = $1",
+      [request.id], ["release"]);
+    await verifyChange("UPDATE simulation_withdrawals SET held_id = available_id WHERE id = $1",
+      [request.id], ["release", "reserve"]);
+    await client.query("DELETE FROM simulation_withdrawals WHERE id = $1", [request.id]);
+    const orphaned = await findWithdrawalDiscrepancies(client);
+    assert.deepEqual(orphaned.map(row => row.operation).sort(), ["release", "reserve"]);
+    assert.ok(orphaned.every(row => row.withdrawal_id === null && row.journal_id !== null));
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
 });
