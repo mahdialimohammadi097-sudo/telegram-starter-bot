@@ -99,3 +99,24 @@ export async function getSimulatedInvestmentActivity(pool, userId) {
   );
   return result.rows;
 }
+
+export async function getDailySimulatedProfits(pool, userId) {
+  const { rows } = await pool.query(
+    `WITH settlements AS (
+       SELECT t.id, (t.created_at AT TIME ZONE 'UTC')::date AS day,
+              sum(e.amount) FILTER (WHERE a.account_type = 'AVAILABLE' AND e.entry_type = 'credit') AS payout,
+              sum(e.amount) FILTER (WHERE a.account_type = 'INVESTED' AND e.entry_type = 'debit') AS principal
+       FROM ledger_accounts a
+       JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
+       JOIN ledger_transactions t ON t.id = e.transaction_id
+       WHERE a.user_id = $1 AND a.currency = 'USDT' AND a.account_type IN ('AVAILABLE', 'INVESTED')
+         AND t.transaction_type = 'simulated-investment-settle' AND t.status = 'posted'
+       GROUP BY t.id, t.created_at
+     )
+     SELECT to_char(day, 'YYYY-MM-DD') AS day, count(*)::int AS settlements,
+            sum(payout - principal) AS net_profit
+     FROM settlements WHERE principal IS NOT NULL AND payout IS NOT NULL
+     GROUP BY day ORDER BY day DESC LIMIT 10`, [userId]
+  );
+  return rows;
+}

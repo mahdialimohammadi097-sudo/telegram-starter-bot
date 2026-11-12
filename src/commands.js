@@ -4,7 +4,7 @@ import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
-import { getWalletBalances, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
+import { getWalletBalances, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
@@ -551,7 +551,7 @@ export function registerCommands(bot) {
     if (olderPage && BigInt(olderPage[1]) > 9223372036854775807n) {
       return ctx.reply("Open Transaction History to see your latest entries.", { reply_markup: mainMenu });
     }
-    if (choice === "My Wallet" || choice === "Transaction History" || choice === "My Investments" || olderPage) {
+    if (choice === "My Wallet" || choice === "Transaction History" || choice === "My Investments" || choice === "Daily Profits" || olderPage) {
       const walletMenu = new Keyboard()
         .text(choice === "My Wallet" ? "Transaction History" : "My Wallet")
         .row().text("⬅ Main Menu").resized();
@@ -565,6 +565,17 @@ export function registerCommands(bot) {
           return ctx.reply(
             "Please send /start to register first."
           );
+        }
+
+        if (choice === "Daily Profits") {
+          const days = await getDailySimulatedProfits(pool, userResult.rows[0].id);
+          const lines = days.map(day => day.day + " UTC · " + formatUsdt(day.net_profit) + " test USDT · " +
+            day.settlements + (day.settlements === 1 ? " settlement" : " settlements"));
+          const body = lines.length ? "Net profit after fees, by settlement date (latest 10 dates)\n" + lines.join("\n")
+            : "No simulated settlements yet.";
+          return ctx.reply("DAILY PROFITS · SIMULATION\n\n" + body, {
+            reply_markup: new Keyboard().text("My Investments").text("My Wallet").row().text("⬅ Main Menu").resized()
+          });
         }
 
         if (choice === "My Investments") {
@@ -620,7 +631,8 @@ export function registerCommands(bot) {
           });
         }
         console.error("[wallet] Failed:", safeDiagnosticCode(error));
-        if (choice === "My Investments") return ctx.reply("Unable to load investment activity. Please try again later.", {
+        if (choice === "Daily Profits" || choice === "My Investments") return ctx.reply(
+          choice === "Daily Profits" ? "Unable to load daily profits. Please try again later." : "Unable to load investment activity. Please try again later.", {
           reply_markup: new Keyboard().text(choice).row().text("⬅ Main Menu").resized()
         });
 
@@ -668,8 +680,6 @@ export function registerCommands(bot) {
       "Withdraw":
         "WITHDRAW\n\nWithdrawal services are not enabled yet.",
 
-      "Daily Profits":
-        "DAILY PROFITS\n\nVerified profit records will appear here when available.",
 
 
       "Support":

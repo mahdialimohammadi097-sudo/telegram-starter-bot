@@ -1273,6 +1273,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   await wallet("25", "0", "0");
   const investment = await openSimulatedInvestment(pool, owner, "journey-plan", "SMART 25");
   await wallet("0", "25", "0");
+  assert.match(await screen("Daily Profits"), /No simulated settlements yet/);
   const opened = await screen("My Investments");
   assert.ok(opened.includes("Investment #" + investment + " opened"));
   assert.ok(opened.includes("Principal: 25.00000000 test USDT"));
@@ -1283,6 +1284,8 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   await pool.query("UPDATE simulation_investments SET matures_at = now() WHERE id = $1", [investment]);
   const settlement = await settleSimulatedInvestment(pool, owner, investment, reserve, fees);
   await wallet("27.36", "0", "0");
+  const daily = await screen("Daily Profits");
+  assert.ok(daily.includes("UTC · 2.36000000 test USDT · 1 settlement"));
   const settled = await screen("My Investments");
   assert.ok(settled.includes("Investment #" + investment + " settled"));
   assert.ok(settled.includes("Credited to wallet: 27.36000000 test USDT"));
@@ -1295,6 +1298,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const withdrawal = await reserveWithdrawal(pool, owner, "journey-hold", "27.36");
   await wallet("0", "0", "27.36");
   await cancelWithdrawal(pool, owner, withdrawal.id);
+  assert.equal(await screen("Daily Profits"), daily);
   await wallet("27.36", "0", "0");
   const history = await screen("Transaction History");
   const amounts = history.split("\n").filter(line => line.includes(" UTC · ")).map(line => line.split(" UTC · ")[1]);
