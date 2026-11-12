@@ -609,6 +609,19 @@ test("independent reconciliation detects a missing credit, an orphan journal and
     await client.query("BEGIN");
     const discrepancies = () => findSimulationDiscrepancies(client, simulationClearing);
     assert.deepEqual(await discrepancies(), []);
+    // Corrupt one detail at a time; every probe starts from the valid journal.
+    for (const change of [
+      "UPDATE ledger_entries SET amount = 24 WHERE transaction_id = $1 AND entry_type = 'credit'",
+      "UPDATE ledger_entries SET account_id = (SELECT id FROM ledger_accounts WHERE user_id = 505 AND account_type = 'INVESTED') WHERE transaction_id = $1 AND entry_type = 'credit'",
+      "DELETE FROM ledger_entries WHERE transaction_id = $1 AND entry_type = 'debit'",
+      "UPDATE ledger_transactions SET idempotency_key = 'simulation:wrong-event' WHERE id = $1"
+    ]) {
+      await client.query("SAVEPOINT valid_journal");
+      assert.equal((await client.query(change, [journal.transactionId])).rowCount, 1);
+      assert.deepEqual(await discrepancies(), [{ request_id: request.id, journal_id: journal.transactionId }]);
+      await client.query("ROLLBACK TO SAVEPOINT valid_journal");
+      await client.query("RELEASE SAVEPOINT valid_journal");
+    }
     await client.query("UPDATE deposit_requests SET amount = 30 WHERE id = $1", [request.id]);
     assert.deepEqual(await discrepancies(), [{ request_id: request.id, journal_id: journal.transactionId }]);
     await client.query("UPDATE deposit_requests SET status = 'pending' WHERE id = $1", [request.id]);
@@ -666,3 +679,52 @@ test("disconnect before commit rolls back the simulated approval and allows reco
   assert.equal(review.status, "approved");
   assert.deepEqual(await displayedBalances(owner), ["25.00000000", "0.00000000", "0.00000000"]);
 });
+
+for (const finish of ["disconnect", "commit"]) {
+  test(`waiting simulated worker recovers after first worker's ${finish}`, { skip: !enabled }, async () => {
+    const owner = await createSimulationWallet(finish === "commit" ? 507 : 508);
+    const event = `test-chain:waiting-worker:${finish}`;
+    const observed = new Map([[event, { userId: owner, amount: "25" }]]);
+    const { rows: [request] } = await pool.query(
+      "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, $2) RETURNING id",
+      [owner, event]
+    );
+    const first = await pool.connect();
+    let waiting;
+    let journal;
+    try {
+      await first.query("BEGIN");
+      journal = await reviewSimulatedClaim(first, request.id, observed);
+      let waiterPid;
+      waiting = withLedgerTransaction(pool, async second => {
+        waiterPid = second.processID;
+        return reviewSimulatedClaim(second, request.id, observed);
+      });
+      // Observe the actual lock dependency before releasing the first worker.
+      // Install a rejection handler immediately in case the second connection fails.
+      const blocked = async () => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          if (waiterPid) {
+            const { rows: [row] } = await pool.query(
+              "SELECT $1::int = ANY(pg_blocking_pids($2)) AS blocked", [first.processID, waiterPid]
+            );
+            if (row.blocked) return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        assert.fail("Second worker did not block on the first worker");
+      };
+      await Promise.race([waiting.then(() => assert.fail("Second worker finished before lock release")), blocked()]);
+      if (finish === "commit") await first.query("COMMIT");
+    } finally {
+      first.release(true);
+      if (waiting) await waiting;
+    }
+    const recovered = await waiting;
+    assert.equal(recovered.idempotent, finish === "commit");
+    assert.equal(recovered.transactionId === journal.transactionId, finish === "commit");
+    assert.deepEqual(await displayedBalances(owner), ["25.00000000", "0.00000000", "0.00000000"]);
+    assert.deepEqual(await findSimulationDiscrepancies(pool, simulationClearing), []);
+  });
+}
