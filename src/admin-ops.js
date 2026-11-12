@@ -1,8 +1,9 @@
+import { previewSettlement } from "./plan-preview.js";
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
 import { isConfirmationCurrent } from "./admin-status-guard.js";
 import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
-import { adminText } from "./admin-language.js";
+import { adminText, getAdminLanguage as getPreferredLanguage } from "./admin-language.js";
 import { rollbackTransaction } from "./transaction-safety.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
@@ -551,6 +552,32 @@ async function showAdminLanguage(ctx, edit = false) {
 }
 
 export function registerAdminOps(bot) {
+  bot.command("planpreview", async ctx => {
+    if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getPreferredLanguage(ctx);
+    const plan = previewSettlement(ctx.match);
+    if (!plan) return ctx.reply(adminText(language,
+      "Example: /planpreview SMART 25\nPlans: STARTER, SMART, PRO\nAmounts: 10, 25, 50, 75, 100 USDT",
+      "نمونه: /planpreview SMART 25\nپلن‌ها: STARTER، SMART، PRO\nمبالغ: 10، 25، 50، 75، 100 USDT"));
+    return ctx.reply(adminText(language, [
+      "Settlement simulation · v1.0 · USDT",
+      plan.name + " · " + plan.days + " days",
+      "Principal: " + plan.amount,
+      "Modelled profit (" + plan.profitPercent + "%): " + plan.profit,
+      "Gross settlement: " + plan.gross,
+      "Fee (" + plan.feePercent + "% of gross): " + plan.fee,
+      "Net settlement: " + plan.payout
+    ].join("\n"), [
+      "شبیه‌سازی تسویه · نسخه ۱٫۰ · USDT",
+      plan.name + " · " + plan.days + " روز",
+      "اصل سرمایه: " + plan.amount,
+      "سود محاسباتی (" + plan.profitPercent + "٪): " + plan.profit,
+      "مبلغ ناخالص: " + plan.gross,
+      "کارمزد (" + plan.feePercent + "٪ از ناخالص): " + plan.fee,
+      "مبلغ خالص تسویه: " + plan.payout
+    ].join("\n")));
+  });
+
   bot.command("adminlanguage", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);

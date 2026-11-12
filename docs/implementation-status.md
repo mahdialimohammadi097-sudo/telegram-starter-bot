@@ -61,7 +61,7 @@ Percentages below describe implementation completeness in the audited source. A 
 | Deposits | 0% | Bot explicitly says automatic deposit verification is not enabled. |
 | Withdrawals | 0% | Withdrawal service is explicitly disabled. |
 | Profit calculation and posting | 5% | Profit records are referenced by diagnostics, but no verified accrual/distribution workflow was found in the reviewed user flows. |
-| Referral program | 5% | Referral code is generated at registration; referral details and reward processing remain placeholders. |
+| Referral program | 10% | Referral code is generated at registration and the customer menu now displays a validated Telegram invite link. Referral attribution, reporting, anti-self-referral controls, and any rewards remain unimplemented. |
 | Admin operations | 75% | Owner-only dashboard, user lookup/status operations, audit logging, persisted language preference and bilingual publishing/history workflows exist; some diagnostic/error screens still need localization and production verification. |
 | Scheduled channel publishing | 90% | Drafting, preview, approval, scheduling, history and interrupted-operation recovery exist; admin-facing preview, approval, scheduling and history messages now support English/Persian. Production end-to-end testing remains necessary. |
 | Internal and external monitoring | 95% (code and workflow evidence) | Internal Telegram/database checks and an independent five-minute `/healthz` workflow exist. GitHub Actions run history confirms successful Telegram `sendMessage` steps on status transitions, a down check, a later successful recovery check, and a subsequent healthy `/healthz` check. Receipt on the owner's device and alert behavior during a future outage remain unverified. |
