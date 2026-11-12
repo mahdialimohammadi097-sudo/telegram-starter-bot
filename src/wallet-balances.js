@@ -126,7 +126,7 @@ export async function getSimulatedTransferActivity(pool, userId, section) {
   if (!deposit && section !== "Withdraw") throw new TypeError("Unknown transfer section");
   const types = deposit ? ["simulated-deposit"] : ["sim-withdraw-reserve", "sim-withdraw-release"];
   const { rows } = await pool.query(
-    `SELECT t.created_at, t.transaction_type, t.reference_id, e.amount
+    `SELECT t.id AS journal_id, t.created_at, t.transaction_type, t.reference_id, e.amount
      FROM ledger_accounts a
      JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
      JOIN ledger_transactions t ON t.id = e.transaction_id
@@ -137,4 +137,28 @@ export async function getSimulatedTransferActivity(pool, userId, section) {
     [userId, deposit ? "AVAILABLE" : "WITHDRAWAL_HOLD", types]
   );
   return rows;
+}
+
+export async function getSimulationReceipt(pool, telegramId, journalId) {
+  const { rows } = await pool.query(
+    `SELECT t.id, t.created_at, t.transaction_type, t.reference_id, e.amount
+     FROM users u
+     JOIN ledger_accounts a ON a.user_id = u.id AND a.currency = 'USDT'
+     JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
+     JOIN ledger_transactions t ON t.id = e.transaction_id
+     WHERE u.telegram_id = $1 AND u.status = 'active' AND t.id = $2 AND t.status = 'posted'
+       AND ((t.transaction_type = 'simulated-deposit' AND a.account_type = 'AVAILABLE' AND e.entry_type = 'credit')
+         OR (t.transaction_type = 'sim-withdraw-reserve' AND a.account_type = 'WITHDRAWAL_HOLD' AND e.entry_type = 'credit')
+         OR (t.transaction_type = 'sim-withdraw-release' AND a.account_type = 'AVAILABLE' AND e.entry_type = 'credit'))
+       AND (SELECT count(*) FROM ledger_entries WHERE transaction_id = t.id) = 2
+       AND EXISTS (
+         SELECT 1 FROM ledger_entries other JOIN ledger_accounts source ON source.id = other.account_id
+         WHERE other.transaction_id = t.id AND other.entry_type = 'debit' AND other.amount = e.amount
+           AND other.currency = 'USDT' AND source.currency = 'USDT'
+           AND ((t.transaction_type = 'simulated-deposit' AND source.user_id IS NULL AND source.account_type = 'CLEARING')
+             OR (t.transaction_type = 'sim-withdraw-reserve' AND source.user_id = u.id AND source.account_type = 'AVAILABLE')
+             OR (t.transaction_type = 'sim-withdraw-release' AND source.user_id = u.id AND source.account_type = 'WITHDRAWAL_HOLD'))
+       )`, [telegramId, journalId]
+  );
+  return rows[0];
 }

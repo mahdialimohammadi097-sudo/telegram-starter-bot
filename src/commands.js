@@ -4,7 +4,7 @@ import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { InlineKeyboard, Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
-import { getWalletBalances, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
+import { getWalletBalances, getSimulationReceipt, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt, toUsdtUnitsExact } from "./ledger-safety.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
@@ -267,6 +267,26 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       }
     });
   }
+
+  bot.command("receipt", async ctx => {
+    const id = ctx.match.trim();
+    if (!/^[1-9]\d{0,18}$/.test(id) || BigInt(id) > 9223372036854775807n) {
+      return ctx.reply("Use /receipt followed by the journal number shown in Deposit or Withdraw.");
+    }
+    try {
+      const receipt = await getSimulationReceipt(pool, ctx.from.id, id);
+      if (!receipt) return ctx.reply("No matching simulation receipt is available.");
+      return ctx.reply([
+        "SIMULATION RECEIPT · " + simulationHistoryLabels.get(receipt.transaction_type),
+        "Request #" + receipt.reference_id + " · Journal #" + receipt.id,
+        "Amount: " + formatUsdt(receipt.amount) + " test USDT",
+        "Posted: " + receipt.created_at.toISOString()
+      ].join("\n"), { reply_markup: new Keyboard().text("Deposit").text("Withdraw").row().text("⬅ Main Menu").resized() });
+    } catch (error) {
+      console.error("[receipt] lookup failed:", safeDiagnosticCode(error));
+      return ctx.reply("Unable to load your receipt. Please try again later.");
+    }
+  });
 
   registerPostManagement(bot);
   registerPostHistory(bot);
@@ -650,7 +670,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
           const lines = activity.map(row => {
             const time = row.created_at.toISOString().slice(0, 16).replace("T", " ");
             const action = simulationHistoryLabels.get(row.transaction_type);
-            return time + " UTC · " + action + " · #" + row.reference_id + " · " + formatUsdt(row.amount) + " test USDT";
+            return time + " UTC · " + action + " · #" + row.reference_id + " · " + formatUsdt(row.amount) + " test USDT · /receipt " + row.journal_id;
           });
           const availability = choice === "Deposit" ? "Real deposits are disabled. Do not send funds." : "Real withdrawals are disabled.";
           const summary = lines.length ? "Latest posted activity (up to 10)\n" + lines.join("\n") : "No posted simulation activity yet.";

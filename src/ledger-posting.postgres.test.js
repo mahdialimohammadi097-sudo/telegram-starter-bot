@@ -1369,6 +1369,17 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.ok(replies[0].reply_markup.keyboard);
   assert.ok(cancelled.includes("Simulated withdrawal cancelled · #" + withdrawalId + " · 27.36000000 test USDT"));
   assert.doesNotMatch(cancelled, /Simulated deposit/);
+  const receiptCommand = text => text.match(/\/receipt \d+/)[0];
+  const releasedReceipt = receiptCommand(cancelled);
+  const receipt = await screen(releasedReceipt);
+  assert.ok(receipt.includes("Simulated withdrawal cancelled"));
+  assert.ok(receipt.includes("Request #" + withdrawalId + " · Journal #" + releasedReceipt.split(" ")[1]));
+  assert.ok(receipt.includes("Amount: 27.36000000 test USDT"));
+  assert.equal(await screen(releasedReceipt, secondUser), "No matching simulation receipt is available.");
+  await screen(releasedReceipt, secondUser, "group");
+  const creditedReceipt = await screen(receiptCommand(await screen("Deposit")));
+  assert.ok(creditedReceipt.includes("Amount: 25.00000000 test USDT") && creditedReceipt.includes("Simulated deposit"));
+  assert.match(await screen("/receipt 9999999999999999999"), /Use \/receipt/);
   assert.equal(await screen("Daily Profits"), daily);
   await wallet("27.36", "0", "0");
   const history = await screen("Transaction History");
