@@ -8,7 +8,7 @@ import { readTestnetTransfer } from "../test-support/bsc-testnet-receipt.js";
 import { findSettlementDiscrepancies } from "../test-support/reconcile-simulated-settlements.js";
 import { findSimulationDiscrepancies } from "../test-support/reconcile-simulated-deposits.js";
 import { formatUsdt } from "./ledger-safety.js";
-import { getWalletBalances, getRecentWalletEntries, getDailySimulatedProfits } from "./wallet-balances.js";
+import { getWalletBalances, getRecentWalletEntries, getDailySimulatedProfits, getSimulationReceipt } from "./wallet-balances.js";
 import { postLedgerTransaction, postJournalInTransaction, withLedgerTransaction } from "./ledger-posting.js";
 
 const enabled = Boolean(process.env.DATABASE_URL);
@@ -1353,10 +1353,13 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const [, withdrawalId] = reserved.match(/Simulated withdrawal #(\d+) is reserved/);
   assert.equal(await tap(reserveButton.callback_data, telegramId, reserveMessage), reserved);
   await wallet("0", "0", "27.36");
-  assert.ok((await screen("Withdraw")).includes("Simulated withdrawal reserved · #" + withdrawalId + " · 27.36000000 test USDT"));
+  const receiptCommand = text => text.match(/\/receipt_\d+/)[0];
+  const heldPage = await screen("Withdraw");
+  assert.ok(heldPage.includes("Simulated withdrawal reserved · #" + withdrawalId + " · 27.36000000 test USDT"));
   const cancelButton = replies[0].reply_markup.inline_keyboard.flat().find(item => item.callback_data === "sim_cancel_hold:" + withdrawalId);
   assert.ok(cancelButton);
   const withdrawalMessage = sequence;
+  assert.ok((await screen(receiptCommand(heldPage))).includes("Simulated withdrawal reserved"));
   const secondUser = 32026;
   await screen("/start", secondUser);
   assert.match(await tap(cancelButton.callback_data, secondUser, withdrawalMessage), /Unable to cancel/);
@@ -1369,11 +1372,11 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   assert.ok(replies[0].reply_markup.keyboard);
   assert.ok(cancelled.includes("Simulated withdrawal cancelled · #" + withdrawalId + " · 27.36000000 test USDT"));
   assert.doesNotMatch(cancelled, /Simulated deposit/);
-  const receiptCommand = text => text.match(/\/receipt \d+/)[0];
+
   const releasedReceipt = receiptCommand(cancelled);
   const receipt = await screen(releasedReceipt);
   assert.ok(receipt.includes("Simulated withdrawal cancelled"));
-  assert.ok(receipt.includes("Request #" + withdrawalId + " · Journal #" + releasedReceipt.split(" ")[1]));
+  assert.ok(receipt.includes("Request #" + withdrawalId + " · Journal #" + releasedReceipt.split("_")[1]));
   assert.ok(receipt.includes("Amount: 27.36000000 test USDT"));
   assert.equal(await screen(releasedReceipt, secondUser), "No matching simulation receipt is available.");
   await screen(releasedReceipt, secondUser, "group");
@@ -1719,4 +1722,32 @@ test("reviewer and customer cancellations share one release and preserve the ori
   assert.equal(formatUsdt(balances.AVAILABLE), "15.00000000");
   assert.equal(formatUsdt(balances.WITHDRAWAL_HOLD), "0.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+test("transfer receipts reject a balanced release journal that debits another user's hold", { skip: !enabled }, async () => {
+  const owner = await createSimulationWallet(674);
+  const other = await createSimulationWallet(675);
+  await pool.query("UPDATE users SET telegram_id = 32674, status = 'active' WHERE id = $1", [owner]);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  const { rows: [wrongHold] } = await pool.query(
+    "INSERT INTO ledger_accounts (user_id, account_code, account_type) VALUES ($1, 'wrong-source-675', 'WITHDRAWAL_HOLD') RETURNING id",
+    [other]
+  );
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const journal = await postJournalInTransaction(client, {
+      transactionType: "sim-withdraw-release", referenceId: "674", idempotencyKey: "receipt-wrong-source",
+      entries: [
+        { account_id: wrongHold.id, entry_type: "debit", amount: "10", currency: "USDT" },
+        { account_id: available.id, entry_type: "credit", amount: "10", currency: "USDT" }
+      ]
+    });
+    assert.equal(await getSimulationReceipt(client, 32674, journal.transactionId), undefined);
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
 });

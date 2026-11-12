@@ -268,8 +268,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
     });
   }
 
-  bot.command("receipt", async ctx => {
-    const id = ctx.match.trim();
+  async function showSimulationReceipt(ctx, id) {
     if (!/^[1-9]\d{0,18}$/.test(id) || BigInt(id) > 9223372036854775807n) {
       return ctx.reply("Use /receipt followed by the journal number shown in Deposit or Withdraw.");
     }
@@ -286,7 +285,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       console.error("[receipt] lookup failed:", safeDiagnosticCode(error));
       return ctx.reply("Unable to load your receipt. Please try again later.");
     }
-  });
+  }
+  bot.command("receipt", ctx => showSimulationReceipt(ctx, ctx.match.trim()));
+  bot.hears(/^\/receipt_([1-9]\d{0,18})$/, ctx => showSimulationReceipt(ctx, ctx.match[1]));
 
   registerPostManagement(bot);
   registerPostHistory(bot);
@@ -670,7 +671,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
           const lines = activity.map(row => {
             const time = row.created_at.toISOString().slice(0, 16).replace("T", " ");
             const action = simulationHistoryLabels.get(row.transaction_type);
-            return time + " UTC · " + action + " · #" + row.reference_id + " · " + formatUsdt(row.amount) + " test USDT · /receipt " + row.journal_id;
+            return time + " UTC · " + action + " · #" + row.reference_id + " · " + formatUsdt(row.amount) + " test USDT · /receipt_" + row.journal_id;
           });
           const availability = choice === "Deposit" ? "Real deposits are disabled. Do not send funds." : "Real withdrawals are disabled.";
           const summary = lines.length ? "Latest posted activity (up to 10)\n" + lines.join("\n") : "No posted simulation activity yet.";
