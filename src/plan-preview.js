@@ -28,3 +28,12 @@ export function settlementAmounts(amount, profitPercent, feePercent) {
   return { profit: decimal(profit), gross: decimal(gross),
     fee: decimal(fee), payout: decimal(gross - fee) };
 }
+
+export function listPreviewPlans() {
+  return Array.from(plans, ([name, terms]) => ({ name, ...terms }));
+}
+
+export function settlementExamples(name) {
+  if (!plans.has(name)) return [];
+  return Array.from(amounts, amount => previewSettlement(name + " " + amount));
+}

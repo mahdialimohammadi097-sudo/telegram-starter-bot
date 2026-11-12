@@ -1,3 +1,4 @@
+import { listPreviewPlans, settlementExamples } from "./plan-preview.js";
 import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 
 import { Keyboard } from "grammy";
@@ -612,9 +613,36 @@ export function registerCommands(bot) {
       }
     }
 
+    if (choice === "Investment Plans") {
+      const keyboard = new Keyboard();
+      const terms = listPreviewPlans().map(plan => {
+        keyboard.text("Preview " + plan.name).row();
+        return plan.name + " · " + plan.days + " days";
+      });
+      keyboard.text("⬅ Main Menu").resized();
+      return ctx.reply(["INVESTMENT PLANS · SIMULATION", ...terms,
+        "Select a plan to see example settlements using test USDT."].join("\n\n"), { reply_markup: keyboard });
+    }
+
+    if (choice.startsWith("Preview ")) {
+      const examples = settlementExamples(choice.slice("Preview ".length));
+      if (examples.length) {
+        const plan = examples[0];
+        const lines = examples.map(row =>
+          row.amount + " → " + row.gross + " − " + row.fee + " = " + row.payout
+        );
+        return ctx.reply([
+          plan.name + " · SIMULATION ONLY",
+          "Term: " + plan.days + " days. Example profit: " + plan.profitPercent + "%.",
+          "Settlement fee: " + plan.feePercent + "% of principal plus profit.",
+          "Test USDT: principal → gross − fee = net settlement",
+          ...lines,
+          "Viewing examples does not open an investment or move funds."
+        ].join("\n"), { reply_markup: new Keyboard().text("Investment Plans").row().text("⬅ Main Menu").resized() });
+      }
+    }
+
     const sections = {
-      "Investment Plans":
-        "INVESTMENT PLANS\n\nAvailable plans will appear here after configuration and verification.",
 
       "My Investments":
         "MY INVESTMENTS\n\nYour active investments will appear here.",

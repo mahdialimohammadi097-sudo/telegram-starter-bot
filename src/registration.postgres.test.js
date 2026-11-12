@@ -50,6 +50,25 @@ test("Telegram registration preserves identity and invite codes across repeated 
       await send(8001, input);
       assert.deepEqual(replies[0].reply_markup.keyboard, menu);
     }
+    const statements = t.mock.method(client, "query", client.query.bind(client));
+    // Capture the queries used by normal bot updates, including private access checks.
+    pool.query = (...args) => client.query(...args);
+    await send(8001, "Investment Plans");
+    const previews = replies[0].reply_markup.keyboard.flat().map(button => button.text);
+    assert.deepEqual(previews, ["Preview STARTER", "Preview SMART", "Preview PRO", "⬅ Main Menu"]);
+    for (const [button, expected] of [
+      [previews[0], "25 → 26 − 0.52 = 25.48"],
+      [previews[1], "25 → 28.5 − 1.14 = 27.36"],
+      [previews[2], "25 → 35 − 2.1 = 32.9"]
+    ]) {
+      const message = await send(8001, button);
+      assert.ok(message.includes("SIMULATION ONLY") && message.includes(expected));
+      assert.equal(message.split("\n").filter(line => /^\d+ →/.test(line)).length, 5);
+      assert.equal(replies[0].reply_markup.keyboard[0][0].text, "Investment Plans");
+    }
+    assert.ok(statements.mock.calls.length >= 4);
+    assert.ok(statements.mock.calls.every(call => /^\s*SELECT\s/i.test(call.arguments[0])));
+    statements.mock.restore();
     const invitation = await send(8001, "Referral Program");
     const [, payload] = invitation.match(/https:\/\/t\.me\/PROFINO1bot\?start=(ref_[0-9a-f]{16})/);
     assert.match(await send(8002, "/start " + payload), /Your account is ready/);
