@@ -35,11 +35,11 @@ function formatDate(value, language = "en") {
   }) + (language === "fa" ? " (UTC)" : " UTC");
 }
 
-function dashboardKeyboard(language = "en") {
+function dashboardKeyboard(language = "en", showQueue = false) {
   const labels = language === "fa"
     ? { overview: "نمای کلی", users: "کاربران", posts: "پست‌ها", activity: "فعالیت‌ها", language: "زبان", refresh: "بروزرسانی" }
     : { overview: "Overview", users: "Users", posts: "Posts", activity: "Activity", language: "Language", refresh: "Refresh" };
-  return new InlineKeyboard()
+  const keyboard = new InlineKeyboard()
     .text(labels.overview, "admin_home")
     .row()
     .text(labels.users, "admin_users:0")
@@ -48,6 +48,8 @@ function dashboardKeyboard(language = "en") {
     .text(labels.activity, "admin_logs")
     .text(labels.language, "admin_language")
     .text(labels.refresh, "admin_refresh");
+  if (showQueue) keyboard.row().text(adminText(language, "Settlement queue", "صف تسویه"), "admin_simqueue");
+  return keyboard;
 }
 
 async function recordAdminActivity(ctx, action, targetUserIdInput = null, details = {}) {
@@ -91,7 +93,7 @@ async function recordAdminActivity(ctx, action, targetUserIdInput = null, detail
   }
 }
 
-async function showDashboard(ctx, edit = false) {
+async function showDashboard(ctx, edit = false, showQueue = false) {
   const language = await getAdminLanguage(ctx);
   const [users, posts] = await Promise.all([
     pool.query(`
@@ -549,8 +551,12 @@ async function showAdminLanguage(ctx, language, edit = false) {
 
 export function registerAdminOps(bot, { inspectTestQueue } = {}) {
   if (inspectTestQueue) {
-    bot.command("simqueue", async ctx => {
-      if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    async function showQueue(ctx) {
+      if (!isSuperAdminPrivate(ctx)) {
+        if (ctx.callbackQuery) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+        return ctx.reply("Access denied.");
+      }
+      if (ctx.callbackQuery) await ctx.answerCallbackQuery();
       const language = await getAdminLanguage(ctx);
       let queue;
       try {
@@ -570,8 +576,12 @@ export function registerAdminOps(bot, { inspectTestQueue } = {}) {
           label("First settlement shortfall: ", "کسری اولین تسویه: ") + queue.first_shortfall,
           label("Total shortfall: ", "کسری کل صف: ") + queue.total_shortfall);
       }
-      return ctx.reply(lines.join("\n"));
-    });
+      const options = { reply_markup: new InlineKeyboard().text(label("Dashboard", "داشبورد"), "admin_home") };
+      if (ctx.callbackQuery) return ctx.editMessageText(lines.join("\n"), options);
+      return ctx.reply(lines.join("\n"), options);
+    }
+    bot.command("simqueue", showQueue);
+    bot.callbackQuery("admin_simqueue", showQueue);
   }
 
   bot.command("planpreview", async ctx => {
@@ -651,7 +661,7 @@ export function registerAdminOps(bot, { inspectTestQueue } = {}) {
     const language = await getAdminLanguage(ctx);
     await recordAdminActivity(ctx, "admin_dashboard_opened");
     try {
-      await showDashboard(ctx);
+      await showDashboard(ctx, false, Boolean(inspectTestQueue));
     } catch (error) {
       console.error("[admin-ops] dashboard failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load the admin dashboard. Please try again.", "بارگذاری داشبورد مدیریت ممکن نشد. دوباره تلاش کنید."));
@@ -661,7 +671,7 @@ export function registerAdminOps(bot, { inspectTestQueue } = {}) {
   bot.command("adminstats", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    try { await showDashboard(ctx); }
+    try { await showDashboard(ctx, false, Boolean(inspectTestQueue)); }
     catch (error) {
       console.error("[admin-ops] stats failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load admin statistics.", "بارگذاری آمار مدیریت ممکن نشد."));
@@ -867,7 +877,7 @@ export function registerAdminOps(bot, { inspectTestQueue } = {}) {
     const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
-      await showDashboard(ctx, true);
+      await showDashboard(ctx, true, Boolean(inspectTestQueue));
     } catch (error) {
       console.error("[admin-ops] dashboard refresh failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to refresh.", "به‌روزرسانی ممکن نشد."), show_alert: true });

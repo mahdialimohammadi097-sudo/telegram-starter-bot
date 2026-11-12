@@ -1440,6 +1440,7 @@ test("offline queue reports the reserve shortage and drains overdue investments 
     await client.query("INSERT INTO admin_preferences SELECT id, 'fa' FROM users WHERE telegram_id = $1", [admin]);
     t.mock.method(appPool, "query", client.query.bind(client));
     const bot = new Bot("offline", { botInfo: { id: 7, is_bot: true, first_name: "Test", username: "offline_bot" } });
+    await client.query("CREATE TEMP TABLE scheduled_posts (status text); CREATE TEMP TABLE admin_users (user_id bigint, role text, status text)");
     let reads = 0;
     registerCommands(bot, { inspectTestQueue: () => {
       reads++;
@@ -1447,20 +1448,19 @@ test("offline queue reports the reserve shortage and drains overdue investments 
     } });
     const replies = [];
     bot.api.config.use(async (_next, method, payload) => {
-      assert.equal(method, "sendMessage");
-      replies.push(payload.text);
+      replies.push({ method, payload });
       return { ok: true, result: true };
     });
     let sequence = 0;
-    const readQueue = async (sender = admin, type = "private") => {
+    const readQueue = async (sender = admin, type = "private", command = "/simqueue") => {
       replies.length = 0;
       await bot.handleUpdate({ update_id: ++sequence, message: {
-        message_id: sequence, date: 0, text: "/simqueue",
-        entities: [{ type: "bot_command", offset: 0, length: 9 }],
+        message_id: sequence, date: 0, text: command,
+        entities: [{ type: "bot_command", offset: 0, length: command.length }],
         chat: { type, id: type === "private" ? sender : -7 },
         from: { id: sender, first_name: "Fixture", is_bot: false }
       } });
-      return replies.join("\n");
+      return replies.map(reply => reply.payload.text).join("\n");
     };
     assert.equal(await readQueue(admin, "group"), "");
     assert.equal(await readQueue(99), "Access denied.");
@@ -1471,6 +1471,35 @@ test("offline queue reports the reserve shortage and drains overdue investments 
     const english = await readQueue();
     assert.ok(english.includes("Due investments: 2") && english.includes("Reserve balance: 3.5"));
     assert.equal(reads, 2);
+    const tap = async (data, sender = admin) => {
+      replies.length = 0;
+      const from = { id: sender, is_bot: false, first_name: "Fixture" };
+      await bot.handleUpdate({ update_id: ++sequence, callback_query: {
+        id: String(sequence), chat_instance: "offline", from, data,
+        message: { message_id: 10, date: 0, chat: { type: "private", id: sender } }
+      } });
+    };
+    await readQueue(admin, "private", "/admin");
+    const findButton = label => replies.at(-1).payload.reply_markup.inline_keyboard.flat().find(item => item.text === label);
+    const button = findButton("Settlement queue");
+    assert.ok(button);
+    await tap(button.callback_data, 99);
+    assert.equal(replies[0].payload.show_alert, true);
+    assert.equal(reads, 2);
+    await tap(button.callback_data);
+    assert.deepEqual(replies.map(reply => reply.method), ["answerCallbackQuery", "editMessageText"]);
+    assert.equal(replies[1].payload.text, english);
+    const back = findButton("Dashboard");
+    await client.query("UPDATE admin_preferences SET language = 'fa'");
+    await tap(back.callback_data);
+    const persianButton = findButton("صف تسویه");
+    assert.ok(persianButton);
+    // The test transaction rolls this change back before the worker runs.
+    await client.query("UPDATE simulation_investments SET matures_at = now() + interval '1 day' WHERE id IN ($1, $2)", [first, second]);
+    await tap(persianButton.callback_data);
+    assert.ok(replies.at(-1).payload.text.includes("سرمایه‌گذاری‌های سررسیدشده: 0"));
+    assert.ok(!replies.at(-1).payload.text.includes("اولین سرمایه‌گذاری"));
+    assert.ok(findButton("داشبورد"));
   } finally {
     await client.query("ROLLBACK");
     client.release();
