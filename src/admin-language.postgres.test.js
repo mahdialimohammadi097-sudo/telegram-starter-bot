@@ -23,8 +23,12 @@ test("private admin language survives new updates and handles unavailable prefer
     registerCommands(bot);
     let calls = [];
     let editError;
+    let canPost = true;
     bot.api.config.use(async (_prev, method, payload) => {
       calls.push({ method, payload });
+      if (method === "getChat") return { ok: true, result: { id: -700 } };
+      if (method === "getMe") return { ok: true, result: { id: 7 } };
+      if (method === "getChatMember") return { ok: true, result: { status: "administrator", can_post_messages: canPost } };
       if (method === "editMessageText" && editError) {
         return { ok: false, error_code: 400, description: editError };
       }
@@ -52,6 +56,19 @@ test("private admin language survives new updates and handles unavailable prefer
     assert.match(calls[1].payload.text, /تنظیم زبان پنل مدیریت/);
     await update("/planpreview SMART 25");
     assert.match(calls[0].payload.text, /مبلغ خالص تسویه: 27\.36/);
+
+    await update("/help");
+    assert.match(calls[0].payload.text, /دستورهای مدیریت/);
+    assert.match(calls[0].payload.text, /\/planpreview/);
+    await update("/help", 99);
+    assert.equal(calls[0].payload.text, "Use the menu buttons to navigate PROFINO.");
+    await update("/channelcheck");
+    assert.match(calls.at(-1).payload.text, /مجوز انتشار پست تأیید شد/);
+    canPost = false;
+    await update("/channelcheck");
+    assert.match(calls.at(-1).payload.text, /مجوز انتشار پست تأیید نشده/);
+    assert.deepEqual(await update("/channelcheck", 99), ["sendMessage"]);
+    assert.equal(calls[0].payload.text, "Access denied.");
 
     editError = "Bad Request: message is not modified";
     assert.deepEqual(await update("admin_language_set:fa"), ["answerCallbackQuery", "editMessageText"]);

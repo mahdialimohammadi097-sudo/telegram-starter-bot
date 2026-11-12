@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
 import { getWalletBalances, getRecentWalletEntries } from "./wallet-balances.js";
 import { formatUsdt } from "./ledger-safety.js";
+import { adminText, getAdminLanguage } from "./admin-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
 import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
@@ -211,30 +212,28 @@ export function registerCommands(bot) {
     }
   });
 
-  bot.command("help", (ctx) => {
-    const userHelp =
-      "Use the menu buttons to navigate PROFINO.";
-
-    const adminHelp =
-      "\n\nADMIN COMMANDS\n" +
-      "/admin - Open the admin dashboard\n" +
-      "/adminlanguage - Choose the admin panel language (English/Persian)\n" +
-      "/planpreview <plan> <amount> - Simulate a settlement in USDT\n" +
-      "/adminstats - View operations overview\n" +
-      "/user <telegram_id> - Inspect a user\n" +
-      "/adminlogs - View admin activity\n" +
-      "/dbschema - Inspect core database tables (read-only)\n" +
-      "/adminschema - Inspect admin membership and audit schema (read-only)\n" +
-      "/newpost - Create a scheduled post\n" +
-      "/scheduledposts - View pending posts\n" +
-      "/cancelpost - Cancel the current draft\n" +
-      "/channelcheck - Verify channel permissions\n" +
-      "/posthistory - View all posts and history\n" +
-      "/postdetails <id> - View post details";
-
-    return ctx.reply(
-      userHelp + (isAdmin(ctx) && isPrivateChat(ctx) ? adminHelp : "")
-    );
+  bot.command("help", async ctx => {
+    if (!isAdmin(ctx) || !isPrivateChat(ctx)) return ctx.reply("Use the menu buttons to navigate PROFINO.");
+    const language = await getAdminLanguage(ctx);
+    const commands = [
+      ["/admin", "Open the admin dashboard", "باز کردن داشبورد مدیریت"],
+      ["/adminlanguage", "Choose the admin panel language (English/Persian)", "انتخاب زبان پنل مدیریت"],
+      ["/planpreview <plan> <amount>", "Simulate a settlement in USDT", "شبیه‌سازی تسویه به USDT"],
+      ["/adminstats", "View operations overview", "نمای کلی عملیات"],
+      ["/user <telegram_id>", "Inspect a user", "مشاهده مشخصات کاربر"],
+      ["/adminlogs", "View admin activity", "مشاهده فعالیت مدیر"],
+      ["/dbschema", "Inspect core database tables (read-only)", "مشاهده ساختار جداول اصلی"],
+      ["/adminschema", "Inspect admin membership and audit schema (read-only)", "مشاهده ساختار عضویت مدیر و ثبت فعالیت‌ها"],
+      ["/newpost", "Create a scheduled post", "ساخت پست زمان‌بندی‌شده"],
+      ["/scheduledposts", "View pending posts", "مشاهده پست‌های در انتظار"],
+      ["/cancelpost", "Cancel the current draft", "لغو پیش‌نویس فعلی"],
+      ["/channelcheck", "Verify channel permissions", "بررسی مجوزهای کانال"],
+      ["/posthistory", "View all posts and history", "مشاهده تاریخچه پست‌ها"],
+      ["/postdetails <id>", "View post details", "مشاهده جزئیات پست"],
+    ];
+    const heading = adminText(language, "ADMIN COMMANDS", "دستورهای مدیریت");
+    const lines = commands.map(([command, en, fa]) => command + " - " + adminText(language, en, fa));
+    return ctx.reply([heading, ...lines].join("\n"));
   });
 
   bot.command("id", (ctx) =>
@@ -246,6 +245,7 @@ export function registerCommands(bot) {
       return ctx.reply("Access denied.");
     }
 
+    const language = await getAdminLanguage(ctx);
     try {
       const chat = await ctx.api.getChat(CHANNEL_USERNAME);
       const me = await ctx.api.getMe();
@@ -260,22 +260,22 @@ export function registerCommands(bot) {
 
       if (!isChannelAdmin) {
         return ctx.reply(
-          "Channel access found, but posting permission is not confirmed."
+          adminText(language, "Channel access found, but posting permission is not confirmed.", "کانال در دسترس است. مجوز انتشار پست تأیید نشده است.")
         );
       }
 
       return ctx.reply(
-        "PROFINO CHANNEL CONNECTION\n\n" +
+        adminText(language, "PROFINO CHANNEL CONNECTION\n\n" +
         "Channel: @PROFINO1\n" +
         "Bot status: Administrator\n" +
         "Posting permission: Confirmed\n\n" +
-        "Connection test successful."
+        "Connection test successful.", "اتصال به کانال PROFINO\n\nکانال: @PROFINO1\nمجوز انتشار پست تأیید شد.")
       );
     } catch (error) {
       console.error("[channel] Check failed:", safeDiagnosticCode(error));
 
       return ctx.reply(
-        "Channel connection failed. Please check the bot permissions."
+        adminText(language, "Channel connection failed. Please check the bot permissions.", "بررسی اتصال کانال ممکن نشد. مجوزهای ربات را بررسی کنید.")
       );
     }
   });
