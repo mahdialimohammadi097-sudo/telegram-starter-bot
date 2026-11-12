@@ -108,8 +108,12 @@ export function simulationWithdrawalReview(pool) {
     },
     async inspect(telegramId, id) {
       const { rows } = await pool.query(
-        `SELECT trim_scale(w.amount)::text AS amount FROM simulation_withdrawals w
-         WHERE w.id = $1 AND w.status = 'reserved' AND EXISTS (
+        `SELECT trim_scale(w.amount)::text AS amount, w.status, w.cancelled_by_reviewer,
+                j.id AS journal_id, j.created_at AS released_at
+         FROM simulation_withdrawals w
+         LEFT JOIN ledger_transactions j ON j.id = w.release_id AND j.status = 'posted'
+           AND j.transaction_type = 'sim-withdraw-release' AND j.reference_id = w.id::text
+         WHERE w.id = $1 AND EXISTS (
            SELECT 1 FROM simulation_reviewers r JOIN users u ON u.id = r.user_id
            WHERE r.active AND u.telegram_id = $2 AND u.status = 'active'
          )`, [id, telegramId]

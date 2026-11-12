@@ -579,11 +579,27 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
         }
         if (!/^[1-9]\d{0,18}$/.test(id)) return ctx.reply(label("Usage: /reviewhold [id]", "روش استفاده: /reviewhold [id]"));
         const hold = await testWithdrawalReview.inspect(ctx.from.id, id);
-        if (hold) keyboard.text(label("Confirm release", "تأیید آزادسازی"), "admin_sim_release:" + id).row();
+        let message;
+        if (!hold) {
+          message = label("No reviewable test withdrawal found.", "برداشت آزمایشی قابل بازبینی پیدا نشد.");
+        } else if (hold.status === "reserved") {
+          keyboard.text(label("Confirm release", "تأیید آزادسازی"), "admin_sim_release:" + id).row();
+          message = label("Release test withdrawal #", "آزادسازی برداشت آزمایشی شماره ") + id + "\n" +
+            label("Amount returned to the customer's wallet: ", "مبلغ بازگشتی به کیف پول کاربر: ") + hold.amount + " USDT";
+        } else if (hold.status === "cancelled" && hold.journal_id) {
+          const actor = hold.cancelled_by_reviewer === null ? label("Customer", "صاحب حساب") :
+            label("Reviewer #", "بازبین شماره ") + hold.cancelled_by_reviewer;
+          message = [
+            label("Closed test withdrawal #", "برداشت آزمایشی بسته‌شده شماره ") + id,
+            label("Request amount: ", "مبلغ درخواست: ") + hold.amount + " USDT",
+            label("Cancelled by: ", "لغوکننده: ") + actor,
+            label("Release journal #", "سند آزادسازی شماره ") + hold.journal_id,
+            label("Journal time: ", "زمان ثبت سند: ") + hold.released_at.toISOString()
+          ].join("\n");
+        } else {
+          message = label("Release record unavailable. Check reconciliation.", "سند آزادسازی در دسترس نیست. تطبیق دفترکل را بررسی کنید.");
+        }
         keyboard.text(label("Open requests", "درخواست‌های باز"), "admin_sim_holds:0");
-        const message = hold ? label("Release test withdrawal #", "آزادسازی برداشت آزمایشی شماره ") + id + "\n" +
-          label("Amount returned to the customer's wallet: ", "مبلغ بازگشتی به کیف پول کاربر: ") + hold.amount + " USDT"
-          : label("No reviewable test withdrawal found.", "برداشت آزمایشی قابل بازبینی پیدا نشد.");
         return sendAdminScreen(ctx, message, keyboard, edit);
       } catch (error) {
         console.error("[admin-ops] simulated withdrawal review failed:", safeDiagnosticCode(error));
@@ -607,7 +623,8 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
       }
       return sendAdminScreen(ctx, adminText(language, "Test withdrawal #", "برداشت آزمایشی شماره ") + id +
         adminText(language, " · release journal #", " · سند آزادسازی شماره ") + journal,
-        new InlineKeyboard().text(adminText(language, "Open requests", "درخواست‌های باز"), "admin_sim_holds:0"), true);
+        new InlineKeyboard().text(adminText(language, "View receipt", "مشاهده رسید"), "admin_sim_inspect:" + id)
+          .row().text(adminText(language, "Open requests", "درخواست‌های باز"), "admin_sim_holds:0"), true);
     });
   }
 

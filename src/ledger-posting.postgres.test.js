@@ -1648,7 +1648,7 @@ test("reviewer and customer cancellations share one release and preserve the ori
     const stale = buttons().find(button => button.text === "#" + last.id + " · 0.1 USDT").callback_data;
     await cancelWithdrawal(pool, customer, last.id);
     await update(stale);
-    assert.match(calls.at(-1).payload.text, /قابل بازبینی پیدا نشد/);
+    assert.match(calls.at(-1).payload.text, /لغوکننده: صاحب حساب/);
     assert.ok(buttons().every(button => !button.callback_data.startsWith("admin_sim_release:")));
     for (const hold of extra.slice(0, -1)) await cancelWithdrawal(pool, customer, hold.id);
     await update(buttons()[0].callback_data);
@@ -1673,7 +1673,20 @@ test("reviewer and customer cancellations share one release and preserve the ori
     assert.match(calls.at(-1).payload.text, /سند آزادسازی شماره/);
     await client.query("UPDATE admin_preferences SET language = 'en'");
     await update(command);
+    const receipt = calls[0].payload.text;
+    const { rows: [posted] } = await pool.query(
+      "SELECT j.id, j.created_at FROM ledger_transactions j JOIN simulation_withdrawals w ON w.release_id = j.id WHERE w.id = $1",
+      [first.id]
+    );
+    assert.ok(receipt.includes("Closed test withdrawal #" + first.id));
+    assert.ok(receipt.includes("Cancelled by: Reviewer #" + reviewer));
+    assert.ok(receipt.includes("Release journal #" + posted.id));
+    assert.ok(receipt.includes("Journal time: " + posted.created_at.toISOString()));
+    assert.ok(buttons().every(button => !button.callback_data.startsWith("admin_sim_release:")));
+    await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+    await update(command);
     assert.equal(calls[0].payload.text, "No reviewable test withdrawal found.");
+    await pool.query("UPDATE simulation_reviewers SET active = true WHERE user_id = $1", [reviewer]);
   } finally {
     await client.query("ROLLBACK");
     client.release();
