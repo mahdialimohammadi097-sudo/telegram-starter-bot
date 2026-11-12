@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { readFile } from "node:fs/promises";
 import { readTestnetTransfer } from "../test-support/bsc-testnet-receipt.js";
+import { findSettlementDiscrepancies } from "../test-support/reconcile-simulated-settlements.js";
 import { findSimulationDiscrepancies } from "../test-support/reconcile-simulated-deposits.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { getWalletBalances, getRecentWalletEntries } from "./wallet-balances.js";
@@ -968,5 +969,32 @@ test("simulated investments enforce five per owner and move each principal exact
   assert.equal(await settle(owner), paid);
   await assert.rejects(open("sixth-after-reinvestment"), /Five active/);
   assert.deepEqual(await displayedBalances(owner), ["31.60000000", "500.00000000", "0.00000000"]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const check = () => findSettlementDiscrepancies(client, reserve, feeAccount);
+    const mismatch = [{ investment_id: ids[0], journal_id: paid }];
+    assert.deepEqual(await check(), []);
+    assert.deepEqual(await findSettlementDiscrepancies(client, feeAccount, reserve), mismatch);
+    for (const change of [
+      "fee_percent = fee_percent + 1", "profit_percent = profit_percent - 1",
+      "matures_at = now() + interval '1 day'", "settlement_id = NULL", "status = 'active'"
+    ]) {
+      await client.query("SAVEPOINT consistent");
+      await client.query(`UPDATE simulation_investments SET ${change} WHERE id = $1`, [ids[0]]);
+      assert.deepEqual(await check(), mismatch);
+      await client.query("ROLLBACK TO SAVEPOINT consistent");
+      await client.query("RELEASE SAVEPOINT consistent");
+    }
+    await client.query("UPDATE simulation_investments SET status = 'active', settlement_id = NULL WHERE id = $1", [ids[0]]);
+    assert.deepEqual(await check(), [{ investment_id: null, journal_id: paid }]);
+    const { rows: [second] } = await client.query("SELECT id FROM simulation_investments WHERE user_id = $1 AND request_id = 'two'", [owner]);
+    const missingId = second.id;
+    await client.query("UPDATE simulation_investments SET status = 'settled' WHERE id = $1", [missingId]);
+    assert.deepEqual(await check(), [{ investment_id: missingId, journal_id: null }, { investment_id: null, journal_id: paid }]);
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
 
 });
