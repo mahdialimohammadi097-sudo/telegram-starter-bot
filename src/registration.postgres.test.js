@@ -20,7 +20,7 @@ test("Telegram registration preserves identity and invite codes across repeated 
       UNIQUE (user_id, account_type, currency)
     ) ON COMMIT DROP`);
     await client.query("SET LOCAL search_path TO pg_temp");
-    t.mock.method(pool, "query", client.query.bind(client));
+    const queries = t.mock.method(pool, "query", client.query.bind(client));
     const bot = new Bot("offline", { botInfo: { id: 700, is_bot: true, first_name: "Test", username: "PROFINO1bot" } });
     registerCommands(bot);
     const replies = [];
@@ -50,9 +50,7 @@ test("Telegram registration preserves identity and invite codes across repeated 
       await send(8001, input);
       assert.deepEqual(replies[0].reply_markup.keyboard, menu);
     }
-    const statements = t.mock.method(client, "query", client.query.bind(client));
-    // Capture the queries used by normal bot updates, including private access checks.
-    pool.query = (...args) => client.query(...args);
+    const firstPreviewQuery = queries.mock.callCount();
     await send(8001, "Investment Plans");
     const previews = replies[0].reply_markup.keyboard.flat().map(button => button.text);
     assert.deepEqual(previews, ["Preview STARTER", "Preview SMART", "Preview PRO", "⬅ Main Menu"]);
@@ -66,9 +64,9 @@ test("Telegram registration preserves identity and invite codes across repeated 
       assert.equal(message.split("\n").filter(line => /^\d+ →/.test(line)).length, 5);
       assert.equal(replies[0].reply_markup.keyboard[0][0].text, "Investment Plans");
     }
-    assert.ok(statements.mock.calls.length >= 4);
-    assert.ok(statements.mock.calls.every(call => /^\s*SELECT\s/i.test(call.arguments[0])));
-    statements.mock.restore();
+    const previewQueries = queries.mock.calls.slice(firstPreviewQuery);
+    assert.ok(previewQueries.length >= 4);
+    assert.ok(previewQueries.every(call => /^\s*SELECT\s/i.test(call.arguments[0])));
     const invitation = await send(8001, "Referral Program");
     const [, payload] = invitation.match(/https:\/\/t\.me\/PROFINO1bot\?start=(ref_[0-9a-f]{16})/);
     assert.match(await send(8002, "/start " + payload), /Your account is ready/);
