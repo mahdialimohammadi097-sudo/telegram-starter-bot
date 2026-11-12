@@ -17,7 +17,12 @@ test("private admin language survives new updates and handles unavailable prefer
       CREATE TEMP TABLE admin_users (user_id bigint, role text, status text);
       CREATE TEMP TABLE admin_preferences (user_id bigint PRIMARY KEY, language text, updated_at timestamptz);
       CREATE TEMP TABLE scheduled_posts (
-        id bigserial PRIMARY KEY, title varchar(255), content text, scheduled_at timestamptz, updated_at timestamptz DEFAULT now(), status text
+        id bigserial PRIMARY KEY, title varchar(255), content text, scheduled_at timestamptz, updated_at timestamptz DEFAULT now(), status text,
+        created_at timestamptz DEFAULT now(), published_at timestamptz, cancelled_at timestamptz,
+        cancellation_reason text, published_message_id bigint
+      );
+      CREATE TEMP TABLE scheduled_post_history (
+        post_id bigint, event_type text, old_status text, new_status text, details jsonb, changed_at timestamptz DEFAULT now()
       );
       SET LOCAL search_path TO pg_temp
     `);
@@ -129,6 +134,23 @@ test("private admin language survives new updates and handles unavailable prefer
     const next = buttons().find(button => button.callback_data === "posthist_page:failed:1");
     assert.deepEqual(await update(next.callback_data), ["answerCallbackQuery", "editMessageText"]);
     assert.match(calls.at(-1).payload.text, /9–16/);
+    const detail = buttons().find(button => button.callback_data.startsWith("posthist_detail:")).callback_data;
+    const postId = detail.split(":")[1];
+    const content = "🌱".repeat(1750);
+    await client.query("UPDATE scheduled_posts SET content = $2 WHERE id = $1", [postId, content]);
+    await client.query(`INSERT INTO scheduled_post_history (post_id, event_type, old_status, new_status)
+      SELECT $1, 'status_changed', 'scheduled', 'failed' FROM generate_series(1, 10)`, [postId]);
+    assert.deepEqual(await update(detail), ["editMessageText", "sendMessage", "answerCallbackQuery"]);
+    const parts = calls.slice(0, 2).map(call => call.payload.text);
+    assert.ok(parts.every(part => part.length <= 4096 && part.isWellFormed()));
+    assert.ok(parts.join("").includes(content));
+    assert.match(parts.join(""), /زمان‌بندی‌شده → ناموفق/);
+    const back = calls[1].payload.reply_markup.inline_keyboard[0][0].callback_data;
+    assert.equal(back, "posthist_page:failed:1");
+    await update(back);
+    assert.match(calls.at(-1).payload.text, /9–16/);
+    await update("posthist_detail:" + postId);
+    assert.equal(calls[1].payload.reply_markup.inline_keyboard[0][0].callback_data, "posthist_filter:all");
     assert.deepEqual(await update(history, admin, "group"), ["answerCallbackQuery"]);
     assert.equal(calls[0].payload.text, "Please use the bot in a private chat.");
     assert.deepEqual(await update(history, 99), ["answerCallbackQuery"]);

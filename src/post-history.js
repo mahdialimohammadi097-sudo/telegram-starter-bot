@@ -125,7 +125,7 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   }
   keyboard.row();
   for (const post of result.rows) {
-    keyboard.text("#" + post.id + " · " + postStatusLabel(post.status, language), "posthist_detail:" + post.id).row();
+    keyboard.text("#" + post.id + " · " + postStatusLabel(post.status, language), `posthist_detail:${post.id}:${status}:${page}`).row();
   }
   if (page > 0) keyboard.text(adminText(language, "← Previous", "← قبلی"), "posthist_page:" + status + ":" + (page - 1));
   if (offset + result.rowCount < total) keyboard.text(adminText(language, "Next →", "بعدی →"), "posthist_page:" + status + ":" + (page + 1));
@@ -140,7 +140,7 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
-async function showDetails(ctx, postId, edit = false) {
+async function showDetails(ctx, postId, edit = false, back = "posthist_filter:all") {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     "SELECT id, title, content, scheduled_at, status, created_at, updated_at, published_at, cancelled_at, cancellation_reason, published_message_id FROM scheduled_posts WHERE id = $1",
@@ -161,7 +161,7 @@ async function showDetails(ctx, postId, edit = false) {
   );
   const historyText = history.rows.map(item =>
     formatUtc(item.changed_at, language) + " — " + (language === "fa" ? ({ created: "ایجاد شد", status_changed: "تغییر وضعیت", rescheduled: "تغییر زمان", content_edited: "ویرایش محتوا", tracking_started: "شروع ثبت تاریخچه" }[item.event_type] || item.event_type) : item.event_type.toUpperCase()) +
-    (item.old_status || item.new_status ? " (" + (item.old_status || "—") + " → " + (item.new_status || "—") + ")" : "")
+    (item.old_status || item.new_status ? " (" + (item.old_status ? postStatusLabel(item.old_status, language) : "—") + " → " + (item.new_status ? postStatusLabel(item.new_status, language) : "—") + ")" : "")
   ).join("\n");
   const text = [
     adminText(language, "PROFINO — POST #", "پروفینو — پست شماره ") + post.id,
@@ -182,16 +182,27 @@ async function showDetails(ctx, postId, edit = false) {
     historyText || adminText(language, "No history recorded.", "تاریخچه‌ای ثبت نشده است.")
   ].filter(value => value !== null).join("\n");
 
-  const keyboard = new InlineKeyboard().text(adminText(language, "Back to History", "بازگشت به تاریخچه"), "posthist_filter:all");
+  const keyboard = new InlineKeyboard().text(adminText(language, "Back to History", "بازگشت به تاریخچه"), back);
   if (post.status === "rejected") {
     keyboard.row().text(adminText(language, "Restore to Schedule", "بازگردانی به زمان‌بندی"), "posthist_restore:" + post.id);
   }
-  if (edit) {
-    await ctx.editMessageText(text, { reply_markup: keyboard });
-    await ctx.answerCallbackQuery();
-  } else {
-    await ctx.reply(text, { reply_markup: keyboard });
+  // Keep whole Unicode characters and put navigation after the final section.
+  const pages = [];
+  let page = "";
+  for (const character of text) {
+    if (page.length + character.length > 4096) {
+      pages.push(page);
+      page = "";
+    }
+    page += character;
   }
+  pages.push(page);
+  for (const [index, part] of pages.entries()) {
+    const options = index === pages.length - 1 ? { reply_markup: keyboard } : {};
+    if (edit && index === 0) await ctx.editMessageText(part, options);
+    else await ctx.reply(part, options);
+  }
+  if (edit) await ctx.answerCallbackQuery();
 }
 
 export function registerPostHistory(bot) {
@@ -247,10 +258,12 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^posthist_detail:\d+$/, async (ctx) => {
+  bot.callbackQuery(/^posthist_detail:(\d+)(?::([a-z_]+):(\d+))?$/, async (ctx) => {
     const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    try { await showDetails(ctx, ctx.callbackQuery.data.split(":")[1], true); }
+    const [, id, status, page] = ctx.match;
+    const back = validStatuses.includes(status) ? `posthist_page:${status}:${page}` : "posthist_filter:all";
+    try { await showDetails(ctx, id, true, back); }
     catch (error) {
       console.error("[post-history] detail callback failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post details.", "بارگذاری جزئیات پست ممکن نشد."), show_alert: true });
