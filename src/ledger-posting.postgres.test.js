@@ -1264,6 +1264,7 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const { rows: [{ id: owner }] } = await pool.query("SELECT id FROM users WHERE telegram_id = $1", [telegramId]);
   await pool.query("INSERT INTO ledger_accounts (user_id, account_code, account_type) VALUES ($1, 'journey-hold', 'WITHDRAWAL_HOLD')", [owner]);
   await wallet("0", "0", "0");
+  assert.match(await screen("My Investments"), /No simulated investment activity yet/);
   const event = "test-chain:wallet-journey:0";
   const { rows: [claim] } = await pool.query(
     "INSERT INTO deposit_requests (user_id, amount, transfer_event) VALUES ($1, 25, $2) RETURNING id", [owner, event]
@@ -1272,12 +1273,20 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   await wallet("25", "0", "0");
   const investment = await openSimulatedInvestment(pool, owner, "journey-plan", "SMART 25");
   await wallet("0", "25", "0");
+  const opened = await screen("My Investments");
+  assert.ok(opened.includes("Investment #" + investment + " opened"));
+  assert.ok(opened.includes("Principal: 25.00000000 test USDT"));
+  assert.doesNotMatch(opened, /Credited to wallet/);
   const reserve = await createAccount("AVAILABLE");
   const fees = await createAccount("CLEARING");
   await seedAvailableBalance(reserve, "3.50");
   await pool.query("UPDATE simulation_investments SET matures_at = now() WHERE id = $1", [investment]);
   const settlement = await settleSimulatedInvestment(pool, owner, investment, reserve, fees);
   await wallet("27.36", "0", "0");
+  const settled = await screen("My Investments");
+  assert.ok(settled.includes("Investment #" + investment + " settled"));
+  assert.ok(settled.includes("Credited to wallet: 27.36000000 test USDT"));
+  assert.equal(settled.split("UTC · Investment #").length - 1, 2);
   const { rows: feeEntries } = await pool.query(
     "SELECT trim_scale(amount)::text AS fee FROM ledger_entries WHERE transaction_id = $1 AND account_id = $2 AND entry_type = 'credit'",
     [settlement, fees]

@@ -79,3 +79,23 @@ export async function getWalletHistoryPage(pool, userId, beforeId = null) {
   const entries = result.rows.slice(0, 10);
   return { entries, next: result.rows.length > 10 ? entries[9].entry_id : null };
 }
+
+export async function getSimulatedInvestmentActivity(pool, userId) {
+  const result = await pool.query(
+    `SELECT t.transaction_type, t.reference_id, t.created_at, e.amount AS principal,
+            (SELECT sum(p.amount) FROM ledger_entries p
+             JOIN ledger_accounts dest ON dest.id = p.account_id
+             WHERE p.transaction_id = t.id AND dest.user_id = a.user_id
+               AND dest.account_type = 'AVAILABLE' AND dest.currency = 'USDT'
+               AND p.currency = 'USDT' AND p.entry_type = 'credit') AS payout
+     FROM ledger_accounts a
+     JOIN ledger_entries e ON e.account_id = a.id AND e.currency = a.currency
+     JOIN ledger_transactions t ON t.id = e.transaction_id
+     WHERE a.user_id = $1 AND a.account_type = 'INVESTED' AND a.currency = 'USDT'
+       AND t.status = 'posted'
+       AND ((t.transaction_type = 'simulated-investment-open' AND e.entry_type = 'credit')
+         OR (t.transaction_type = 'simulated-investment-settle' AND e.entry_type = 'debit'))
+     ORDER BY t.created_at DESC, t.id DESC, e.id DESC LIMIT 10`, [userId]
+  );
+  return result.rows;
+}

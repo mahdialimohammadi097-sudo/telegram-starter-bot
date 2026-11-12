@@ -4,7 +4,7 @@ import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
-import { getWalletBalances, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
+import { getWalletBalances, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
@@ -551,7 +551,7 @@ export function registerCommands(bot) {
     if (olderPage && BigInt(olderPage[1]) > 9223372036854775807n) {
       return ctx.reply("Open Transaction History to see your latest entries.", { reply_markup: mainMenu });
     }
-    if (choice === "My Wallet" || choice === "Transaction History" || olderPage) {
+    if (choice === "My Wallet" || choice === "Transaction History" || choice === "My Investments" || olderPage) {
       const walletMenu = new Keyboard()
         .text(choice === "My Wallet" ? "Transaction History" : "My Wallet")
         .row().text("⬅ Main Menu").resized();
@@ -567,6 +567,21 @@ export function registerCommands(bot) {
           );
         }
 
+        if (choice === "My Investments") {
+          const activity = await getSimulatedInvestmentActivity(pool, userResult.rows[0].id);
+          const lines = activity.map(row => {
+            const opened = row.transaction_type === "simulated-investment-open";
+            const date = row.created_at.toISOString().slice(0, 16).replace("T", " ");
+            const heading = date + " UTC · Investment #" + row.reference_id + (opened ? " opened" : " settled");
+            const principal = "Principal: " + formatUsdt(row.principal) + " test USDT";
+            const payout = row.payout === null ? "" : "\nCredited to wallet: " + formatUsdt(row.payout) + " test USDT";
+            return heading + "\n" + principal + payout;
+          });
+          const body = lines.length ? "Latest posted activity (up to 10)\n\n" + lines.join("\n\n") : "No simulated investment activity yet.";
+          return ctx.reply("MY INVESTMENTS · SIMULATION\n\n" + body, {
+            reply_markup: new Keyboard().text("Investment Plans").text("My Wallet").row().text("⬅ Main Menu").resized()
+          });
+        }
         if (choice !== "My Wallet") {
           const { entries, next } = await getWalletHistoryPage(pool, userResult.rows[0].id, olderPage?.[1]);
           if (next) walletMenu.row().text("Older entries · #" + next);
@@ -605,6 +620,9 @@ export function registerCommands(bot) {
           });
         }
         console.error("[wallet] Failed:", safeDiagnosticCode(error));
+        if (choice === "My Investments") return ctx.reply("Unable to load investment activity. Please try again later.", {
+          reply_markup: new Keyboard().text(choice).row().text("⬅ Main Menu").resized()
+        });
 
         return ctx.reply(
           choice !== "My Wallet" ? "Unable to load transaction history. Please try again later." : "Unable to load wallet balances. Please try again later.",
@@ -643,9 +661,6 @@ export function registerCommands(bot) {
     }
 
     const sections = {
-
-      "My Investments":
-        "MY INVESTMENTS\n\nYour active investments will appear here.",
 
       "Deposit":
         "DEPOSIT\n\nAutomatic deposit verification is not enabled yet. Do not send funds until an official deposit address is displayed.",
