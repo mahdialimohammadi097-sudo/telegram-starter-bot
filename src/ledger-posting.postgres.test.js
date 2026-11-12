@@ -840,3 +840,71 @@ test("wallet history returns only the owner's ten latest posted USDT entries", {
     client.release();
   }
 });
+
+test("private Telegram wallet and history resolve the sender's posted USDT entries", { skip: !enabled }, async t => {
+  const { Bot } = await import("grammy");
+  const { registerCommands } = await import("./commands.js");
+  const { pool: appPool } = await import("./database.js");
+  const owner = await createSimulationWallet(514);
+  const other = await createSimulationWallet(515);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("ALTER TABLE users ADD COLUMN telegram_id bigint UNIQUE, ADD COLUMN status text");
+    await client.query("UPDATE users SET telegram_id = id + 10000, status = 'active' WHERE id IN ($1, $2)", [owner, other]);
+    const { rows: [wallet] } = await client.query(
+      "SELECT id FROM ledger_accounts WHERE account_type = 'AVAILABLE' AND user_id = $1", [owner]
+    );
+    await postJournalInTransaction(client, {
+      transactionType: "telegram-view-test", idempotencyKey: "telegram-view-opening",
+      entries: [
+        { account_id: simulationClearing, entry_type: "debit", amount: "25", currency: "USDT" },
+        { account_id: wallet.id, entry_type: "credit", amount: "25", currency: "USDT" }
+      ]
+    });
+    // Model a legacy journal whose entry currency disagrees with its account.
+    const { rows: [legacy] } = await client.query(
+      "INSERT INTO ledger_transactions (transaction_type) VALUES ('legacy-test') RETURNING id"
+    );
+    await client.query(
+      `INSERT INTO ledger_entries (transaction_id, account_id, entry_type, amount, currency)
+       VALUES ($1, $2, 'credit', 90, 'USD'), ($1, $3, 'debit', 90, 'USD')`, [legacy.id, wallet.id, simulationClearing]
+    );
+    await client.query("UPDATE ledger_transactions SET status = 'posted' WHERE id = $1", [legacy.id]);
+    t.mock.method(appPool, "query", client.query.bind(client));
+    const bot = new Bot("offline", { botInfo: { id: 700, is_bot: true, first_name: "Test", username: "offline_bot" } });
+    registerCommands(bot);
+    const replies = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      assert.equal(method, "sendMessage");
+      replies.push(payload);
+      return { ok: true, result: true };
+    });
+    let sequence = 0;
+    async function select(id, text, type = "private") {
+      replies.length = 0;
+      const chatId = type === "group" ? -700 : id;
+      await bot.handleUpdate({ update_id: ++sequence, message: {
+        message_id: sequence, date: 0, text, from: { id, is_bot: false, first_name: "Fixture" },
+        chat: { id: chatId, type }
+      } });
+      assert.ok(replies.every(reply => reply.chat_id === chatId));
+      return replies.map(reply => reply.text);
+    }
+    assert.match((await select(10514, "My Wallet"))[0], /Available Balance: 25\.00000000 USDT/);
+    const [history] = await select(10514, "Transaction History");
+    assert.match(history, /UTC · AVAILABLE · \+25\.00000000 USDT/);
+    assert.doesNotMatch(history, /90\.00000000/);
+    assert.match((await select(10515, "My Wallet"))[0], /Available Balance: 0\.00000000 USDT/);
+    assert.deepEqual(await select(10515, "Transaction History"), ["TRANSACTION HISTORY\n\nNo posted wallet entries yet."]);
+    assert.deepEqual(await select(10514, "Transaction History", "group"), []);
+    assert.deepEqual(await select(10516, "My Wallet"), ["Please send /start to register first."]);
+    await client.query("UPDATE users SET status = 'blocked' WHERE id = $1", [owner]);
+    for (const screen of ["My Wallet", "Transaction History"]) {
+      assert.deepEqual(await select(10514, screen), ["Your account is not active. Please contact support."]);
+    }
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
+});

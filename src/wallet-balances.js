@@ -14,6 +14,7 @@ export async function getWalletBalances(pool, userId) {
      FROM ledger_accounts la
      LEFT JOIN ledger_entries le
        ON le.account_id = la.id
+      AND le.currency = la.currency
       AND le.transaction_id IN (
         SELECT id
         FROM ledger_transactions
