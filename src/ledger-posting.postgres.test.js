@@ -1234,15 +1234,20 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const { reserveWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
   const queries = t.mock.method(appPool, "query", pool.query.bind(pool));
   const bot = new Bot("offline", { botInfo: { id: 700, is_bot: true, first_name: "Test", username: "offline_bot" } });
-  registerCommands(bot);
+  registerCommands(bot, {
+    openTestInvestment: (user, key, plan) => openSimulatedInvestment(pool, user, key, plan)
+  });
   const telegramId = 32025;
   let sequence = 0;
   const replies = [];
   bot.api.config.use(async (_prev, method, payload) => {
+    if (method === "answerCallbackQuery") return { ok: true, result: true };
     assert.equal(method, "sendMessage");
     replies.push(payload);
     return { ok: true, result: true };
   });
+  const initialTime = Date.now();
+  t.mock.method(Date, "now", () => initialTime + sequence * 1000);
   async function screen(text, sender = telegramId, type = "private") {
     replies.length = 0;
     await bot.handleUpdate({ update_id: ++sequence, message: {
@@ -1278,7 +1283,23 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   await approveSimulatedClaim(claim.id, new Map([[event, { userId: owner, amount: "25" }]]));
   await wallet("25", "0", "0");
   assert.ok((await screen("Deposit")).includes("Simulated deposit · #" + claim.id + " · 25.00000000 test USDT"));
-  const investment = await openSimulatedInvestment(pool, owner, "journey-plan", "SMART 25");
+  await screen("Preview SMART");
+  const button = replies[0].reply_markup.inline_keyboard.flat().find(item => item.text === "Open with 25 test USDT");
+  assert.ok(button);
+  const previewMessageId = sequence;
+  async function tap() {
+    replies.length = 0;
+    const from = { id: telegramId, is_bot: false, first_name: "Fixture" };
+    await bot.handleUpdate({ update_id: ++sequence, callback_query: {
+      id: String(sequence), chat_instance: "offline", from, data: button.callback_data,
+      message: { message_id: previewMessageId, date: 0, chat: { type: "private", id: telegramId } }
+    } });
+    assert.equal(replies.length, 1);
+    return replies[0].text;
+  }
+  const confirmation = await tap();
+  const [, investment] = confirmation.match(/Simulation confirmed · Investment #(\d+)/);
+  assert.equal(await tap(), confirmation);
   await wallet("0", "25", "0");
   assert.match(await screen("Daily Profits"), /No simulated settlements yet/);
   const opened = await screen("My Investments");

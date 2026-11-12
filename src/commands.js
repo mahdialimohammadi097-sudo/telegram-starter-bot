@@ -1,7 +1,7 @@
 import { listPreviewPlans, settlementExamples } from "./plan-preview.js";
 import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 
-import { Keyboard } from "grammy";
+import { InlineKeyboard, Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
 import { getWalletBalances, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
@@ -130,7 +130,7 @@ async function showScheduledPosts(ctx, language) {
   return ctx.reply(page);
 }
 
-export function registerCommands(bot) {
+export function registerCommands(bot, { openTestInvestment } = {}) {
   const rateLimiter = createRateLimiter();
   // Keep all bot interactions private. This prevents group-based access-control
   // bypasses and avoids exposing account or administrative information in groups.
@@ -192,6 +192,31 @@ export function registerCommands(bot) {
 
     return next();
   });
+
+  // Only the offline test harness supplies a simulation writer.
+  if (openTestInvestment) {
+    bot.callbackQuery(/^sim_open:([A-Z]+):(\d+)$/, async ctx => {
+      const [, name, amount] = ctx.match;
+      if (!settlementExamples(name).some(example => example.amount === amount) || !ctx.callbackQuery.message) {
+        return ctx.answerCallbackQuery({ text: "Invalid simulation selection.", show_alert: true });
+      }
+      const { rows: [user] } = await pool.query(
+        "SELECT id FROM users WHERE telegram_id = $1 AND status = 'active'", [ctx.from.id]
+      );
+      if (!user) return ctx.answerCallbackQuery({ text: "Send /start first.", show_alert: true });
+      const key = "telegram-preview:" + ctx.callbackQuery.message.message_id;
+      await ctx.answerCallbackQuery();
+      try {
+        const id = await openTestInvestment(user.id, key, name + " " + amount);
+        return ctx.reply("Simulation confirmed · Investment #" + id + "\nOpen My Investments to see the posted entry.", {
+          reply_markup: new Keyboard().text("My Investments").text("My Wallet").row().text("⬅ Main Menu").resized()
+        });
+      } catch (error) {
+        console.error("[simulation] opening failed:", safeDiagnosticCode(error));
+        return ctx.reply("Unable to open this simulation. Check My Investments and your test balance before trying again.");
+      }
+    });
+  }
 
   registerPostManagement(bot);
   registerPostHistory(bot);
@@ -676,6 +701,13 @@ export function registerCommands(bot) {
         const lines = examples.map(row =>
           row.amount + " → " + row.gross + " − " + row.fee + " = " + row.payout
         );
+        let keyboard = new Keyboard().text("Investment Plans").row().text("⬅ Main Menu").resized();
+        if (openTestInvestment) {
+          keyboard = new InlineKeyboard();
+          for (const example of examples) {
+            keyboard.text("Open with " + example.amount + " test USDT", "sim_open:" + plan.name + ":" + example.amount).row();
+          }
+        }
         return ctx.reply([
           plan.name + " · SIMULATION ONLY",
           "Term: " + plan.days + " days. Example profit: " + plan.profitPercent + "%.",
@@ -683,7 +715,7 @@ export function registerCommands(bot) {
           "Test USDT: principal → gross − fee = net settlement",
           ...lines,
           "Viewing examples does not open an investment or move funds."
-        ].join("\n"), { reply_markup: new Keyboard().text("Investment Plans").row().text("⬅ Main Menu").resized() });
+        ].join("\n"), { reply_markup: keyboard });
       }
     }
 
