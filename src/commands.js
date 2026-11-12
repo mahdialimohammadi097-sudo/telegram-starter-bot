@@ -38,7 +38,10 @@ async function getOrCreateUser(ctx) {
      DO UPDATE SET
        username = EXCLUDED.username,
        first_name = EXCLUDED.first_name,
-       last_name = EXCLUDED.last_name
+       last_name = EXCLUDED.last_name,
+       referral_code = CASE WHEN NULLIF(btrim(users.referral_code), '') IS NULL
+                            THEN EXCLUDED.referral_code ELSE users.referral_code END
+     WHERE users.status = 'active'
      RETURNING id, telegram_id, username, first_name,
                last_name, referral_code, status, created_at`,
     [
@@ -188,7 +191,7 @@ export function registerCommands(bot) {
     try {
       const user = await getOrCreateUser(ctx);
 
-      if (user.status !== "active") {
+      if (!user || user.status !== "active") {
         return ctx.reply(
           "Your account is not active. Please contact support."
         );
@@ -502,6 +505,11 @@ export function registerCommands(bot) {
         }
 
         const referralCode = result.rows[0].referral_code;
+        if (!referralCode?.trim()) {
+          return ctx.reply("Send /start to generate your invite link, then open Referral Program again.", {
+            reply_markup: backMenu
+          });
+        }
         const inviteLink = buildReferralInviteLink(referralCode);
 
         return ctx.reply(
