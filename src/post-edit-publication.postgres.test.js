@@ -34,7 +34,7 @@ test("only the replacement preview can publish the saved post after an edit", {
       }
       return { ok: true, result: message };
     }
-    if (method === "editMessageText" && payload.message_id === 70) {
+    if (method === "editMessageText" && String(payload.message_id) === "70") {
       staleButtonVisible = true;
       throw new Error("Simulated failure to invalidate the old Telegram preview");
     }
