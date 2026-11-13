@@ -485,7 +485,7 @@ async function commitUserStatus(telegramId, newStatus, expectedStatus, version) 
        FROM admin_users au
        JOIN users u ON u.id = au.user_id
        WHERE u.telegram_id = $1 AND au.role = 'owner' AND au.status = 'active'
-       LIMIT 1`,
+       LIMIT 1 FOR SHARE OF au, u`,
       [SUPER_ADMIN_ID]
     );
     if (!admin.rowCount) {

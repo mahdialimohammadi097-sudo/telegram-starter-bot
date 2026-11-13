@@ -161,6 +161,17 @@ test("private status confirmations commit once with their audit row and survive 
     assert.match(calls[0].payload.text, /outdated/);
     assert.equal(await status(), "active");
     assert.equal((await audit()).length, beforeReplay);
+    async function waitForLocks(sessions) {
+      const deadline = Date.now() + 10000;
+      for (;;) {
+        const result = await setup.query(
+          "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND wait_event_type = 'Lock'", [sessions]
+        );
+        if (result.rows[0].waiting === sessions.length) break;
+        assert.ok(Date.now() < deadline, "confirmations reached the locked row");
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    }
     // Queue both independent database sessions behind the same row lock.
     await click("admin_user_action:" + target + ":blocked:1");
     const fresh = button("Confirm");
@@ -181,21 +192,32 @@ test("private status confirmations commit once with their audit row and survive 
       // Session reads, including language lookup, run on the fixture connection.
       await Promise.race([ready, pending.then(() => { throw new Error("Missing confirmation sessions"); })]);
       assert.equal(new Set(acquired).size, 2);
-      const deadline = Date.now() + 10000;
-      for (;;) {
-        const result = await setup.query(
-          "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND wait_event_type = 'Lock'", [acquired]
-        );
-        if (result.rows[0].waiting === 2) break;
-        assert.ok(Date.now() < deadline, "both confirmations reached the locked row");
-        await new Promise(resolve => setTimeout(resolve, 20));
-      }
+      await waitForLocks(acquired);
     } finally {
       await client.query("ROLLBACK");
       await pending;
     }
     const notices = calls.filter(call => call.method === "answerCallbackQuery").map(call => call.payload.text);
     assert.deepEqual(notices.sort(), ["This confirmation is outdated.", "User status updated."].sort());
+    assert.equal(await status(), "blocked");
+    assert.equal((await audit()).length, beforeReplay + 1);
+    await click("admin_user_action:" + target + ":active");
+    const activation = button("Confirm");
+    await client.query("BEGIN");
+    await client.query("UPDATE admin_users SET status = 'revoked' WHERE user_id = 1");
+    const revocationPending = dispatch(activation, owner, "private");
+    try {
+      const deadline = Date.now() + 10000;
+      while (acquired.length < 3) {
+        assert.ok(Date.now() < deadline, "confirmation started during revocation");
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      await waitForLocks([acquired[2]]);
+    } finally {
+      await client.query("COMMIT");
+      await revocationPending;
+    }
+    assert.equal(calls.at(-1).payload.text, "Unable to update user status.");
     assert.equal(await status(), "blocked");
     assert.equal((await audit()).length, beforeReplay + 1);
     await client.query("DELETE FROM users WHERE id = 2");
