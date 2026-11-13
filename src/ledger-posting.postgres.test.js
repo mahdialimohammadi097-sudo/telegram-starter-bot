@@ -1368,6 +1368,8 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
 
   const releasedReceipt = receiptCommand(cancelled);
   const receipt = await screen(releasedReceipt);
+  assert.equal(await screen(releasedReceipt + "@OFFLINE_BOT"), receipt);
+  assert.equal(await screen(releasedReceipt + "@offline_bot", secondUser), "No matching simulation receipt is available.");
   assert.ok(receipt.includes("Simulated withdrawal cancelled"));
   assert.ok(receipt.includes("Request #" + withdrawalId + " · Journal #" + releasedReceipt.split("_")[1]));
   assert.ok(receipt.includes("Amount: 27.36000000 test USDT"));

@@ -148,6 +148,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       return;
     }
 
+    const addressedBot = /^\/\w+@(\w+)(?=\s|$)/.exec(ctx.message?.text ?? "")?.[1];
+    if (addressedBot && addressedBot.toLowerCase() !== ctx.me.username.toLowerCase()) return;
+
     const rate = rateLimiter.consume({
       userId: ctx.from.id,
       isAdmin: ctx.from.id === ADMIN_ID
@@ -293,7 +296,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
   bot.hears(/^Receipt #([1-9]\d{0,18}) · history #([1-9]\d{0,18})$/, ctx =>
     showSimulationReceipt(ctx, ctx.match[1], ctx.match[2]));
   bot.command("receipt", ctx => showSimulationReceipt(ctx, ctx.match.trim()));
-  bot.hears(/^\/receipt_([^\s@]*)$/, ctx => showSimulationReceipt(ctx, ctx.match[1]));
+  bot.hears(/^\/receipt_([^\s@]*)(?:@\w+)?$/, ctx => showSimulationReceipt(ctx, ctx.match[1]));
 
   registerPostManagement(bot);
   registerPostHistory(bot);
@@ -827,8 +830,6 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
     if (!isAdmin(ctx)) {
       if (choice.startsWith("/")) {
-        const addressedBot = /^\/\w+@(\w+)/.exec(choice)?.[1];
-        if (addressedBot && addressedBot.toLowerCase() !== ctx.me.username.toLowerCase()) return;
         return ctx.reply("Unknown command. Use /help or choose an option below.", { reply_markup: mainMenu });
       }
       return ctx.reply("Choose an option from the main menu below.", { reply_markup: mainMenu });

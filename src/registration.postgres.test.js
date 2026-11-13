@@ -54,7 +54,18 @@ test("Telegram registration preserves identity and invite codes across repeated 
       await send(8001, input);
       assert.deepEqual(replies[0].reply_markup.keyboard, menu);
     }
-    assert.match(await send(8004, "/unknown"), /Unknown command/);
+    const beforeForeignCommands = queries.mock.callCount();
+    for (const text of ["/start@other_bot ref_fixture", "/receipt_123@other_bot", "/unknown@other_bot"]) {
+      replies.length = 0;
+      const from = { id: 8004, first_name: "Guest", is_bot: false };
+      await bot.handleUpdate({ update_id: ++sequence, message: {
+        message_id: sequence, date: 0, text, from, chat: { id: from.id, type: "private" },
+        entities: [{ type: "bot_command", offset: 0, length: text.split(" ")[0].length }]
+      } });
+      assert.deepEqual(replies, []);
+    }
+    assert.equal(queries.mock.callCount(), beforeForeignCommands);
+    assert.match(await send(8004, "/unknown@PROFINO1bot"), /Unknown command/);
     assert.deepEqual(replies[0].reply_markup.keyboard, menu);
     for (const command of ["/receipt_0", "/receipt_wrong", "/receipt_99999999999999999999", "/receipt"]) {
       assert.match(await send(8004, command), /Use \/receipt followed by the journal number/);
