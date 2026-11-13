@@ -1526,6 +1526,8 @@ test("offline queue reports the reserve shortage and drains overdue investments 
     t.mock.method(appPool, "query", client.query.bind(client));
     const bot = new Bot("offline", { botInfo: { id: 7, is_bot: true, first_name: "Test", username: "offline_bot" } });
     await client.query("CREATE TEMP TABLE scheduled_posts (status text); CREATE TEMP TABLE admin_users (user_id bigint, role text, status text)");
+    await client.query(`CREATE TEMP TABLE admin_audit_logs (id bigserial PRIMARY KEY, admin_user_id bigint,
+      actor_telegram_id bigint, action text, target_user_id bigint, currency text, metadata jsonb, details jsonb)`);
     let reads = 0;
     let readFailure = false;
     let editFailure;
