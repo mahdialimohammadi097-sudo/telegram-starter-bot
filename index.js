@@ -214,6 +214,7 @@ async function main() {
     port,
     runtimeHealth,
     getBotUsername: () => botUsername,
+    webhookPath: webhook && new URL(webhook.url).pathname,
     getWebhookHandler: () => webhookHandler
   });
 
