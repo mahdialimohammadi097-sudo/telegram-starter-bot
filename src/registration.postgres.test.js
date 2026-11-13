@@ -54,6 +54,13 @@ test("Telegram registration preserves identity and invite codes across repeated 
       await send(8001, input);
       assert.deepEqual(replies[0].reply_markup.keyboard, menu);
     }
+    assert.match(await send(8004, "/unknown"), /Unknown command/);
+    assert.deepEqual(replies[0].reply_markup.keyboard, menu);
+    for (const command of ["/receipt_0", "/receipt_wrong", "/receipt_99999999999999999999", "/receipt"]) {
+      assert.match(await send(8004, command), /Use \/receipt followed by the journal number/);
+      const buttons = replies[0].reply_markup.keyboard.flat().map(button => button.text);
+      assert.ok(buttons.includes("Transaction History") && buttons.includes("⬅ Main Menu"));
+    }
     const firstPreviewQuery = queries.mock.callCount();
     await send(8001, "Investment Plans");
     const previews = replies[0].reply_markup.keyboard.flat().map(button => button.text);
