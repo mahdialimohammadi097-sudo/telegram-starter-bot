@@ -227,6 +227,28 @@ test("private status confirmations commit once with their audit row and survive 
     assert.equal(calls.at(-1).payload.text, "User not found.");
     assert.equal(button("Users"), "admin_users:1");
     failEdit = false;
+    async function openAudit() {
+      calls.length = 0;
+      await bot.handleUpdate({ update_id: ++seq, message: { message_id: seq, date: 0, text: "/adminlogs",
+        entities: [{ type: "bot_command", offset: 0, length: 10 }],
+        from: { id: owner, first_name: "Fixture", is_bot: false }, chat: { type: "private", id: owner } } });
+    }
+    await openAudit();
+    assert.match(calls[0].payload.text, /Check the active owner membership/);
+    assert.equal((await audit()).length, beforeReplay + 1);
+    await client.query("UPDATE admin_users SET status = 'active'");
+    await openAudit();
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].payload.text, /Activity viewed/);
+    assert.equal((await audit()).length, beforeReplay + 2);
+    await client.query("UPDATE admin_preferences SET language = 'fa'");
+    await client.query("ALTER TABLE admin_audit_logs ADD CONSTRAINT private_fixture_marker CHECK (action <> 'admin_activity_viewed') NOT VALID");
+    await openAudit();
+    assert.match(calls[0].payload.text, /ثبت این فعالیت ممکن نشد.*23514/);
+    assert.doesNotMatch(JSON.stringify(calls), /private_fixture_marker/);
+    assert.match(calls[1].payload.text, /گزارش فعالیت مدیر/);
+    assert.equal((await audit()).length, beforeReplay + 2);
+    await client.query("UPDATE admin_preferences SET language = 'en'");
     await click("au:999999:0");
     assert.match(calls.at(-1).payload.text, /No user status changes recorded yet/);
   } finally {

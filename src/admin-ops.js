@@ -52,44 +52,26 @@ function dashboardKeyboard(language = "en", showQueue = false) {
   return keyboard;
 }
 
-async function recordAdminActivity(ctx, action, targetUserIdInput = null, details = {}) {
-  if (!isSuperAdminPrivate(ctx)) {
-    return { ok: false, error: "Super Admin private-chat check did not pass." };
-  }
+async function recordAdminActivity(ctx, action, targetTelegramId = null, details = {}) {
+  if (!isSuperAdminPrivate(ctx)) return { ok: false };
   try {
-    const admin = await pool.query(
-      `SELECT au.user_id
-       FROM admin_users au
-       JOIN users u ON u.id = au.user_id
-       WHERE u.telegram_id = $1 AND au.role = 'owner' AND au.status = 'active'
-       LIMIT 1`,
-      [ctx.from.id]
-    );
-    if (!admin.rowCount) {
-      return { ok: false, error: "No active admin_users record is linked to this Telegram account." };
-    }
-
-    let targetUserId = null;
-    if (targetUserIdInput !== null && targetUserIdInput !== undefined) {
-      const target = await pool.query(
-        "SELECT id FROM users WHERE telegram_id = $1 LIMIT 1",
-        [targetUserIdInput]
-      );
-      targetUserId = target.rows[0]?.id ?? null;
-    }
-
     const result = await pool.query(
       `INSERT INTO admin_audit_logs
-        (admin_user_id, actor_telegram_id, action, target_user_id,
-         currency, metadata, details)
-       VALUES ($1, $2, $3, $4, 'USDT', $5::jsonb, $5::jsonb)
-       RETURNING id, created_at`,
-      [admin.rows[0].user_id, ctx.from.id, action, targetUserId, JSON.stringify(details)]
+         (admin_user_id, actor_telegram_id, action, target_user_id, currency, metadata, details)
+       SELECT au.user_id, owner.telegram_id, $2, target.id, 'USDT', $4::jsonb, $4::jsonb
+       FROM admin_users au
+       JOIN users owner ON owner.id = au.user_id
+       LEFT JOIN users target ON target.telegram_id = $3
+       WHERE owner.telegram_id = $1 AND au.role = 'owner' AND au.status = 'active'
+       LIMIT 1 FOR SHARE OF au, owner
+       RETURNING id`,
+      [ctx.from.id, action, targetTelegramId, JSON.stringify(details)]
     );
-    return { ok: result.rowCount === 1, id: result.rows[0]?.id };
+    return { ok: result.rowCount === 1 };
   } catch (error) {
-    console.error("[admin-ops] activity recording failed:", safeDiagnosticCode(error));
-    return { ok: false, error: "Database operation failed (" + safeDiagnosticCode(error) + ")." };
+    const code = safeDiagnosticCode(error);
+    console.error("[admin-ops] activity recording failed:", code);
+    return { ok: false, code };
   }
 }
 
@@ -987,8 +969,10 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     const auditWrite = await recordAdminActivity(ctx, "admin_activity_viewed");
     if (!auditWrite.ok) {
       await ctx.reply(
-        adminText(language, "AUDIT WRITE FAILED\nDiagnostic: ", "ثبت رویداد ممیزی ناموفق بود\nجزئیات: ") +
-        String(auditWrite.error || "No audit row returned").slice(0, 500)
+        auditWrite.code
+          ? adminText(language, "Could not record this activity. Diagnostic: ", "ثبت این فعالیت ممکن نشد. کد خطا: ") + auditWrite.code
+          : adminText(language, "Could not record this activity. Check the active owner membership.",
+            "ثبت این فعالیت ممکن نشد. دسترسی فعال مالک را بررسی کنید.")
       );
     }
     try { await showAuditLog(ctx); }
