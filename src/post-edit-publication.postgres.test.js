@@ -59,7 +59,7 @@ test("only the replacement preview can publish the saved post after an edit", {
       CREATE TABLE scheduled_posts (id bigint PRIMARY KEY, title text, content text, status text,
         preview_message_id bigint, preview_chat_id bigint, approved_by bigint, edit_version int,
         scheduled_at timestamptz, last_edited_at timestamptz, updated_at timestamptz,
-        published_at timestamptz, published_message_id bigint);
+        published_at timestamptz, published_message_id bigint, cancelled_at timestamptz, cancellation_reason text);
     `);
     await db.query(`INSERT INTO scheduled_posts
       (id,title,content,status,preview_message_id,preview_chat_id,edit_version,scheduled_at)
@@ -112,6 +112,24 @@ test("only the replacement preview can publish the saved post after an edit", {
       assert.fail("Timed out waiting for " + sqlPrefix);
     }
 
+    async function raceWrites(id, first, firstSql, second, secondSql) {
+      const locker = await db.connect();
+      const pending = [];
+      try {
+        await locker.query("BEGIN");
+        await locker.query("SELECT id FROM scheduled_posts WHERE id=$1 FOR UPDATE", [id]);
+        pending.push(first());
+        await waitForBlockedWrite(firstSql);
+        pending.push(second());
+        await waitForBlockedWrite(secondSql);
+      } finally {
+        try { await locker.query("ROLLBACK"); }
+        finally { locker.release(); }
+        await Promise.all(pending);
+      }
+    }
+
+    const approveSql = "%UPDATE scheduled_posts%SET status = 'publishing'%";
     for (const editFirst of [true, false]) {
       const id = editFirst ? 2 : 3;
       const previewId = 80 + id;
@@ -124,23 +142,10 @@ test("only the replacement preview can publish the saved post after an edit", {
         chat, from, message_id: 90 + id, date: 0, text: "Changed"
       } });
       const editSql = "UPDATE scheduled_posts SET content =%";
-      const approveSql = "%UPDATE scheduled_posts%SET status = 'publishing'%";
-      const locker = await db.connect();
-      const pending = [];
       const sentBefore = published.length;
       notices.length = 0;
-      try {
-        await locker.query("BEGIN");
-        await locker.query("SELECT id FROM scheduled_posts WHERE id=$1 FOR UPDATE", [id]);
-        pending.push((editFirst ? edit : publish)());
-        await waitForBlockedWrite(editFirst ? editSql : approveSql);
-        pending.push((editFirst ? publish : edit)());
-        await waitForBlockedWrite(editFirst ? approveSql : editSql);
-      } finally {
-        try { await locker.query("ROLLBACK"); }
-        finally { locker.release(); }
-        await Promise.all(pending);
-      }
+      if (editFirst) await raceWrites(id, edit, editSql, publish, approveSql);
+      else await raceWrites(id, publish, approveSql, edit, editSql);
       const { rows: [post] } = await db.query("SELECT * FROM scheduled_posts WHERE id=$1", [id]);
       if (editFirst) {
         assert.equal(post.status, "scheduled");
@@ -155,6 +160,49 @@ test("only the replacement preview can publish the saved post after an edit", {
         assert.ok(post.published_message_id);
         assert.deepEqual(published.slice(sentBefore), ["Race\n\nOriginal"]);
         assert.ok(notices.some(text => text.includes("No changes were saved.")));
+      }
+    }
+
+    for (const cancelFirst of [true, false]) {
+      const id = cancelFirst ? 4 : 5;
+      const previewId = 80 + id;
+      await db.query(`INSERT INTO scheduled_posts
+        (id,title,content,status,preview_message_id,preview_chat_id,edit_version,scheduled_at)
+        VALUES ($1,'Cancellation','Original','preview_sent',$2,$3,1,now())`, [id, previewId, owner]);
+      await click("post_cancel:" + id, previewId);
+      const cancel = () => click("post_cancel_confirm:" + id, previewId);
+      const publish = () => click("post_approve:" + id, previewId);
+      const cancelSql = "UPDATE scheduled_posts SET status = 'cancelled'%";
+      const sentBefore = published.length;
+      notices.length = 0;
+      if (cancelFirst) await raceWrites(id, cancel, cancelSql, publish, approveSql);
+      else await raceWrites(id, publish, approveSql, cancel, cancelSql);
+      if (cancelFirst) {
+        assert.ok(notices.includes("Post cancelled."));
+        assert.ok(notices.includes("Post is no longer available."));
+      } else {
+        assert.ok(notices.includes("Post changed or is no longer available."));
+        assert.ok(!notices.includes("Post cancelled."));
+      }
+
+      // Replay both callbacks after the winning transition has committed.
+      await cancel();
+      await publish();
+      const { rows: [post] } = await db.query("SELECT * FROM scheduled_posts WHERE id=$1", [id]);
+      if (cancelFirst) {
+        assert.equal(post.status, "cancelled");
+        assert.ok(post.cancelled_at);
+        assert.equal(post.cancellation_reason, "Cancelled by administrator");
+        assert.equal(post.published_message_id, null);
+        assert.equal(post.published_at, null);
+        assert.deepEqual(published.slice(sentBefore), []);
+      } else {
+        assert.equal(post.status, "published");
+        assert.equal(post.published_message_id, String(messageId));
+        assert.ok(post.published_at);
+        assert.equal(post.cancelled_at, null);
+        assert.equal(post.cancellation_reason, null);
+        assert.deepEqual(published.slice(sentBefore), ["Cancellation\n\nOriginal"]);
       }
     }
   } finally {
