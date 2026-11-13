@@ -102,7 +102,7 @@ async function shutdown(signal = "shutdown") {
     healthMonitor?.stop();
 
     try {
-      bot.stop();
+      await bot.stop();
     } catch (error) {
       console.error("[shutdown] Telegram bot stop warning:", safeDiagnosticCode(error));
     }
