@@ -29,3 +29,7 @@
 - GitHub Actions runs syntax checks and the complete Node.js unit test suite.
 - A successful CI run does not prove FadeHost deployment, Telegram delivery, database credentials, webhook routing, or polling exclusivity.
 - Production acceptance requires a supervised deployment, `/healthz` returning HTTP 200, a real test message round-trip in the private bot chat, a restart test, and a shutdown/restart check. Do not use customer funds or enable financial execution for these tests.
+
+### Scheduled preview shutdown
+
+Shutdown stops new scheduler ticks and waits for startup recovery and the claimed preview batch before closing PostgreSQL. A completed preview can therefore record its Telegram message and chat IDs. The PG17 drill blocks a synthetic delivery during shutdown and verifies its history after restarting. A separate fixture represents a hard interruption: startup marks the pending result unknown and does not resend it. Actual host termination grace time and Telegram delivery still require staging verification.
