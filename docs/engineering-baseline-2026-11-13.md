@@ -149,17 +149,19 @@ Fractions below count named engineering gates for this assessment. Each phase ha
 | --- | --- | --- | --- |
 | Audit | Repository/branches/PR inventory; runtime and module inventory; fixture/test inventory | Independent target environment contract | 3/4 |
 | Dependencies | Base/head graph; ancestry comparison; declared-base mergeability and CI | Combined release-to-main rehearsal | 3/4 |
-| Integration | Stacked financial/CI candidate; operational restore integrated | Residual branch dispositions; target migration rehearsal | 2/4 |
+| Integration | Stacked financial/CI candidate; operational restore integrated; residual branch dispositions recorded | Target migration rehearsal | 3/4 |
 | Financial correctness | Exact/balanced journals; concurrency and rollback; fixture reconciliation | Target-contract verification; reversal/ledger immutability acceptance | 3/5 |
 | Application | Customer registration/navigation; bilingual private admin; offline plan and transfer flows | Full Telegram acceptance; remaining agreed referral/notification scope | 3/5 |
 | Security/reliability | Private access and rate limits; authenticated HTTP regression | Dependency/DB privilege review; staging outages and alert delivery | 2/4 |
 | Comprehensive validation | Unit + PG matrix; concurrency/rollback; synthetic recovery | Representative migration; staging acceptance | 3/5 |
 | Release preparation | Blocker register and rollback procedure | Staging rehearsal; independent financial/operational sign-off; owner release decision | 1/4 |
 
-The weighted mean with equal phase weights is 56.875%. Update only when gate evidence changes. No changes to main, FadeHost, production PostgreSQL or Telegram service are required by this report.
+The weighted mean with equal phase weights is 60%. Update only when gate evidence changes. No changes to main, FadeHost, production PostgreSQL or Telegram service are required by this report.
 
 ## Reconciliation of residual branches
 
 After the initial inventory, the disabled-by-default operator workflow from #47, TLS review from #38, environment documentation from #43, and formatter plus regression tests from #39 were integrated with their original commits as parents. Only template guidance was edited for the stricter webhook contract. #47's push trigger selects its own verification branch; the credentialed workflow was not dispatched. #35's two residual commits update historical proof in the November 11 documents (46 tests in [run 42975463597](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/42975463597)). The candidate keeps its later versions of those documents and includes #35's head as a parent. This preserves later evidence while recording the disposition of both overlapping edits. All 17 open heads at the initial snapshot are now accounted for on the integration line. Existing PRs remain independently reviewable.
 
 The operational drill runs on every push to the isolated integration branch so that the reported matrix and both recovery checks can be attached to the same commit. Runtime tests use offline bot identity and dummy input. Before release the owner must select and approve a production change set, stage the migrations and verify the host checks above.
+
+The validation workflow also runs npm audit on the lockfile. The monitor now retains the latest undelivered status per service until a send succeeds. In the previous implementation a failed send advanced the observed state and an ongoing outage produced no retry. The regression injects an initial send failure, checks one successful retry and one recovery, and verifies diagnostic redaction. A lost delivery acknowledgement can still cause a duplicate; Telegram delivery has no exactly-once contract.
