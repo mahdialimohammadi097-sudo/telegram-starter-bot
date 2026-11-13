@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/postgres-restore.yml
       - scripts/test-postgres-restore.sh
+      - scripts/check-rollback-audit.mjs
       - src/admin-ops.js
       - src/post-history.js
       - src/database.js
@@ -24,6 +25,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Check out pinned rollback reference
+        uses: actions/checkout@v4
+        with:
+          ref: aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f
+          path: rollback-reference
+          persist-credentials: false
+      - name: Verify matching dependency locks
+        run: cmp package-lock.json rollback-reference/package-lock.json
       - uses: actions/setup-node@v4
         with:
           node-version: 24

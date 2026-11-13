@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run from a checkout with npm ci and PostgreSQL 17 server/client tools on PATH.
+# Requires the pinned rollback-reference checkout and matching dependency lock from postgres-restore.yml.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -35,9 +35,11 @@ sql() { psql -X -v ON_ERROR_STOP=1 -d "$1"; }
 
 # Minimal parent tables for the two production schema initializers.
 sql drill_source <<'SQL'
-CREATE TABLE users (id bigint PRIMARY KEY);
+CREATE TABLE users (id bigint PRIMARY KEY, telegram_id bigint UNIQUE);
+CREATE TABLE admin_users (user_id bigint PRIMARY KEY REFERENCES users(id), role text, status text);
 CREATE TABLE scheduled_posts (id bigint PRIMARY KEY, title text, status text, content text, scheduled_at timestamptz);
-INSERT INTO users VALUES (1);
+INSERT INTO users VALUES (1, 8810232463);
+INSERT INTO admin_users VALUES (1, 'owner', 'active');
 CREATE TABLE admin_audit_logs (
   id bigserial PRIMARY KEY, action varchar(60) NOT NULL, target_user_id bigint,
   admin_user_id bigint NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
@@ -74,7 +76,7 @@ initialize_schema drill_restored
 initialize_schema drill_restored
 
 # Compare the full seeded rows, including generated IDs, JSON and timestamps.
-for table in users scheduled_posts scheduled_post_history admin_preferences admin_audit_logs; do
+for table in users admin_users scheduled_posts scheduled_post_history admin_preferences admin_audit_logs; do
   for db in drill_source drill_restored; do
     psql -XAt -v ON_ERROR_STOP=1 -d "$db" -c "SELECT row_to_json(t) FROM $table AS t ORDER BY row_to_json(t)::text" > "$workdir/$db.rows"
   done
@@ -117,4 +119,7 @@ BEGIN
   END;
 END $$;
 SQL
-echo "Synthetic restore passed (pg_restore: ${restore_seconds}s, five tables)."
+for revision in rollback-reference candidate; do
+  DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node scripts/check-rollback-audit.mjs "$revision"
+done
+echo "Synthetic restore passed (pg_restore: ${restore_seconds}s, six tables). Rollback and forward audit checks passed."
