@@ -80,3 +80,18 @@ jobs:
             docker exec -i "$PG_CONTAINER" pg_restore -U postgres --single-transaction --exit-on-error -d wallet_drill_restored
           node scripts/check-wallet-restore.js verify > "$RUNNER_TEMP/wallet-restored.json"
           cmp "$RUNNER_TEMP/wallet-source.json" "$RUNNER_TEMP/wallet-restored.json"
+          for db in wallet_drill_source wallet_drill_restored; do
+            docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d "$db" \
+              < scripts/ledger-catalog.sql > "$RUNNER_TEMP/$db.catalog"
+          done
+          test "$(grep -c '^\["table",' "$RUNNER_TEMP/wallet_drill_source.catalog")" -eq 3
+          diff -u "$RUNNER_TEMP/wallet_drill_source.catalog" "$RUNNER_TEMP/wallet_drill_restored.catalog"
+          docker exec "$PG_CONTAINER" psql -Xq -v ON_ERROR_STOP=1 -U postgres -d wallet_drill_restored \
+            -c 'ALTER TABLE ledger_entries DISABLE TRIGGER protect_posted_ledger_entries'
+          docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d wallet_drill_restored \
+            < scripts/ledger-catalog.sql > "$RUNNER_TEMP/disabled.catalog"
+          if cmp -s "$RUNNER_TEMP/wallet_drill_source.catalog" "$RUNNER_TEMP/disabled.catalog"; then
+            echo "Disabled ledger trigger went undetected" >&2
+            exit 1
+          fi
+          echo "Ledger catalog matches after restore and detects a disabled trigger."
