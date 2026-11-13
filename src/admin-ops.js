@@ -387,7 +387,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus, page) {
         "",
         "شناسه تلگرام: " + telegramId,
         "وضعیت فعلی: " + userStatusLabel(current.status, language),
-        "وضعیت جدید: " + newStatus.toUpperCase(),
+        "وضعیت جدید: " + userStatusLabel(newStatus, language),
         "",
         "این عملیات هیچ وجهی را جابه‌جا یا تغییر نمی‌دهد."
       ].join("\n")
@@ -400,7 +400,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus, page) {
         "",
         "This does not move or alter funds."
       ].join("\n");
-  await ctx.editMessageText(message, { reply_markup: keyboard });
+  await sendAdminScreen(ctx, message, keyboard, true);
 }
 
 async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page) {
@@ -412,6 +412,32 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page)
     });
   }
 
+  const changed = await commitUserStatus(telegramId, newStatus, expectedStatus);
+  if (!changed) {
+    return ctx.answerCallbackQuery({
+      text: adminText(language, "This confirmation is outdated. Reopen the user details and try again.",
+        "این تأیید منقضی شده است. جزئیات کاربر را دوباره باز کنید و تلاش کنید."),
+      show_alert: true
+    });
+  }
+
+  try {
+    await ctx.answerCallbackQuery({ text: adminText(language, "User status updated.", "وضعیت کاربر به‌روزرسانی شد.") });
+  } catch (error) {
+    console.error("[admin-ops] status acknowledgement failed:", safeDiagnosticCode(error));
+  }
+  try {
+    await showUser(ctx, telegramId, true, page);
+  } catch (error) {
+    console.error("[admin-ops] updated user details unavailable:", safeDiagnosticCode(error));
+    await ctx.reply(adminText(language, "Status updated. Reopen the user details to refresh.",
+      "وضعیت به‌روزرسانی شد. برای مشاهدهٔ نتیجه، جزئیات کاربر را دوباره باز کنید.")).catch(error => {
+      console.error("[admin-ops] status notification failed:", safeDiagnosticCode(error));
+    });
+  }
+}
+
+async function commitUserStatus(telegramId, newStatus, expectedStatus) {
   const client = await pool.connect();
   let transactionOpen = false;
   let releaseError = null;
@@ -427,13 +453,7 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page)
         !isConfirmationCurrent(locked.rows[0].status, expectedStatus, newStatus)) {
       await client.query("ROLLBACK");
       transactionOpen = false;
-      await ctx.answerCallbackQuery({
-        text: language === "fa"
-          ? "این تأیید منقضی شده است. جزئیات کاربر را دوباره باز کنید و تلاش کنید."
-          : "This confirmation is outdated. Reopen the user details and try again.",
-        show_alert: true
-      });
-      return;
+      return false;
     }
 
     const admin = await client.query(
@@ -473,10 +493,7 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page)
     );
     await client.query("COMMIT");
     transactionOpen = false;
-    await ctx.answerCallbackQuery({
-      text: language === "fa" ? "وضعیت کاربر به‌روزرسانی شد." : "User status updated."
-    });
-    await showUser(ctx, telegramId, true, page);
+    return true;
   } catch (error) {
     if (transactionOpen) {
       releaseError = await rollbackTransaction(client, error);
