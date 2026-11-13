@@ -49,6 +49,9 @@ test("private admin language survives new updates and handles unavailable prefer
       return { ok: true, result: true };
     });
     let sequence = 0;
+    const startTime = Date.now();
+    // Model a human-paced interaction without sleeping or disabling the limiter.
+    t.mock.method(Date, "now", () => startTime + sequence * 1000);
     async function update(text, sender = admin, type = "private", plainText = false) {
       calls = [];
       const from = { id: sender, is_bot: false, first_name: "Fixture" };
