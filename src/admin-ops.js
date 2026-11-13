@@ -331,7 +331,7 @@ function auditActionLabel(action, language) {
   return Object.hasOwn(labels, action) ? adminText(language, ...labels[action]) : action.toUpperCase();
 }
 
-async function showAuditLog(ctx, beforeId = null) {
+async function showAuditLog(ctx, beforeId = null, statusOnly = false) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     `SELECT a.id, a.action, a.target_user_id, u.telegram_id AS target_telegram_id,
@@ -339,8 +339,9 @@ async function showAuditLog(ctx, beforeId = null) {
      FROM admin_audit_logs a
      LEFT JOIN users u ON u.id = a.target_user_id
      WHERE ($1::numeric IS NULL OR a.id < least($1::numeric, 9223372036854775807)::bigint)
+       AND (NOT $2::boolean OR a.action IN ('user_blocked', 'user_activated'))
      ORDER BY a.id DESC
-     LIMIT 11`, [beforeId]
+     LIMIT 11`, [beforeId, statusOnly]
   );
   const rows = result.rows.slice(0, 10);
   const lines = rows.map(row =>
@@ -357,22 +358,25 @@ async function showAuditLog(ctx, beforeId = null) {
   );
   const message = language === "fa"
     ? [
-        "پروفینو — گزارش فعالیت مدیر",
+        statusOnly ? "پروفینو — تغییرات وضعیت کاربران" : "پروفینو — گزارش فعالیت مدیر",
         "",
-        lines.length ? lines.join("\n\n") : beforeId ? "رویداد قدیمی‌تری پیدا نشد." : "هنوز فعالیت مدیریتی ثبت نشده است."
+        lines.length ? lines.join("\n\n") : beforeId ? "رویداد قدیمی‌تری پیدا نشد." : statusOnly ? "هنوز تغییر وضعیتی ثبت نشده است." : "هنوز فعالیت مدیریتی ثبت نشده است."
       ].join("\n")
     : [
-        "PROFINO — ADMIN ACTIVITY AUDIT",
+        statusOnly ? "PROFINO — USER STATUS CHANGES" : "PROFINO — ADMIN ACTIVITY AUDIT",
         "",
-        lines.length ? lines.join("\n\n") : beforeId ? "No older activity found." : "No admin activity recorded yet."
+        lines.length ? lines.join("\n\n") : beforeId ? "No older activity found." : statusOnly ? "No user status changes recorded yet." : "No admin activity recorded yet."
       ].join("\n");
   const keyboard = new InlineKeyboard();
+  const feed = statusOnly ? "admin_logs_status" : "admin_logs";
   if (result.rows.length > rows.length) {
-    keyboard.text(adminText(language, "Older activity", "فعالیت‌های قدیمی‌تر"), "admin_logs:" + rows.at(-1).id).row();
+    keyboard.text(adminText(language, "Older activity", "فعالیت‌های قدیمی‌تر"), feed + ":" + rows.at(-1).id).row();
   }
-  if (beforeId) keyboard.text(adminText(language, "Latest activity", "آخرین فعالیت‌ها"), "admin_logs_latest").row();
+  if (beforeId) keyboard.text(adminText(language, "Latest activity", "آخرین فعالیت‌ها"), feed + "_latest").row();
+  if (statusOnly) keyboard.text(adminText(language, "All activity", "همه فعالیت‌ها"), "admin_logs_latest").row();
+  else keyboard.text(adminText(language, "User status changes", "تغییرات وضعیت کاربران"), "admin_logs_status").row();
   keyboard.text(language === "fa" ? "بازگشت" : "Back", "admin_home");
-  return sendAdminScreen(ctx, message, keyboard, Boolean(beforeId) || ctx.callbackQuery?.data === "admin_logs_latest");
+  return sendAdminScreen(ctx, message, keyboard, Boolean(ctx.callbackQuery && ctx.callbackQuery.data !== "admin_logs"));
 }
 
 async function confirmUserStatus(ctx, telegramId, newStatus, page) {
@@ -1075,7 +1079,7 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     }
   });
 
-  bot.callbackQuery(/^admin_logs(?:_latest|:([1-9]\d{0,18}))?$/, async (ctx) => {
+  bot.callbackQuery(/^admin_logs(_status)?(?:_latest|:([1-9]\d{0,18}))?$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) {
       return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     }
@@ -1087,7 +1091,7 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     await ctx.answerCallbackQuery();
 
     try {
-      await showAuditLog(ctx, ctx.match[1]);
+      await showAuditLog(ctx, ctx.match[2], Boolean(ctx.match[1]));
     } catch (error) {
       console.error("[admin-ops] activity view failed:", safeDiagnosticCode(error));
 

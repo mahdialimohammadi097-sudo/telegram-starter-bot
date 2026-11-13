@@ -105,6 +105,25 @@ test("private status confirmations commit once with their audit row and survive 
     assert.match(calls.at(-1).payload.text, /User search/);
     await click(older);
     assert.match(calls.at(-1).payload.text, /User suspended.*ACTIVE → BLOCKED/);
+    const button = label => calls.at(-1).payload.reply_markup.inline_keyboard.flat().find(b => b.text === label).callback_data;
+    const filter = button("User status changes");
+    await client.query("INSERT INTO admin_audit_logs (action) SELECT 'user_blocked' FROM generate_series(1, 10)");
+    await click(filter);
+    assert.equal(calls.at(-1).payload.text.match(/User suspended/g).length, 10);
+    assert.doesNotMatch(calls.at(-1).payload.text, /ARCHIVE|User search/);
+    const olderChanges = button("Older activity");
+    for (const [sender, type] of [[target, "private"], [owner, "group"]]) {
+      assert.deepEqual(await click(olderChanges, sender, type), ["answerCallbackQuery"]);
+      assert.equal(calls[0].payload.text, "Unauthorized.");
+    }
+    await client.query("UPDATE admin_preferences SET language = 'fa'");
+    await click(olderChanges);
+    assert.match(calls.at(-1).payload.text, /فعال → مسدود/);
+    assert.doesNotMatch(calls.at(-1).payload.text, /ARCHIVE/);
+    await click(button("آخرین فعالیت‌ها"));
+    assert.match(calls.at(-1).payload.text, /پروفینو — تغییرات وضعیت کاربران/);
+    await click(button("همه فعالیت‌ها"));
+    assert.match(calls.at(-1).payload.text, /پروفینو — گزارش فعالیت مدیر/);
   } finally {
     client.release(true);
     await pool.end();
