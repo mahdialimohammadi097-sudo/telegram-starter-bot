@@ -123,7 +123,7 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
     keyboard.text(filter === "all" ? adminText(language, "All", "همه") : (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده" }[filter] || filter) : filter.replaceAll("_", " ").toUpperCase()),
       "posthist_filter:" + filter);
   }
-  keyboard.row();
+  keyboard.row().text(adminText(language, "Uncertain publications", "انتشارهای نامشخص"), "posthist_filter:publish_unknown").row();
   for (const post of result.rows) {
     keyboard.text("#" + post.id + " · " + postStatusLabel(post.status, language), `posthist_detail:${post.id}:${status}:${page}`).row();
   }
@@ -171,6 +171,10 @@ async function showDetails(ctx, postId, edit = false, back = "posthist_filter:al
     adminText(language, "Scheduled: ", "زمان‌بندی: ") + formatUtc(post.scheduled_at, language),
     adminText(language, "Created: ", "ایجاد: ") + formatUtc(post.created_at, language),
     adminText(language, "Updated: ", "به‌روزرسانی: ") + formatUtc(post.updated_at, language),
+    post.published_message_id ? adminText(language, "Channel message ID: ", "شناسه پیام کانال: ") + post.published_message_id : null,
+    post.status === "publish_unknown" ? adminText(language,
+      "Check @PROFINO1 against the title, content and UTC history below. If the private delivery notice contains a message ID, use it to locate the post.",
+      "عنوان، متن و زمان‌های UTC در تاریخچه را با @PROFINO1 تطبیق دهید. اگر اعلان خصوصی ارسال، شناسه پیام دارد، پست را با همان شناسه پیدا کنید.") : null,
     post.published_at ? adminText(language, "Published: ", "انتشار: ") + formatUtc(post.published_at, language) : null,
     post.cancelled_at ? adminText(language, "Cancelled: ", "لغو: ") + formatUtc(post.cancelled_at, language) : null,
     post.cancellation_reason ? adminText(language, "Cancellation reason: ", "دلیل لغو: ") + post.cancellation_reason : null,
@@ -232,7 +236,7 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^(?:admin_posthistory|posthist_filter:(all|scheduled|preview_sent|published|rejected|cancelled))$/, async (ctx) => {
+  bot.callbackQuery(/^(?:admin_posthistory|posthist_filter:(all|scheduled|preview_sent|publish_unknown|published|rejected|cancelled))$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     try {
