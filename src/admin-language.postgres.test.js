@@ -82,6 +82,24 @@ test("private admin language survives new updates and handles unavailable prefer
     await update("/usersearch qa", 99);
     assert.equal(calls[0].payload.text, "Access denied.");
 
+    await client.query(`INSERT INTO users (id, telegram_id, status, created_at)
+      SELECT i, 800000 + i, 'active', now() FROM generate_series(10, 17) i`);
+    await update("admin_users:0");
+    assert.match(calls.at(-1).payload.text, /نمایش 1 تا 8 از 11/);
+    const nextUsers = calls.at(-1).payload.reply_markup.inline_keyboard.flat()
+      .find(button => button.text === "بعدی →").callback_data;
+    await update(nextUsers);
+    assert.match(calls.at(-1).payload.text, /نمایش 9 تا 11 از 11/);
+    await client.query("DELETE FROM users WHERE id BETWEEN 10 AND 17");
+    editError = "Bad Request: message can't be edited";
+    assert.deepEqual(await update(nextUsers), ["answerCallbackQuery", "editMessageText", "sendMessage"]);
+    assert.match(calls.at(-1).payload.text, /نمایش 1 تا 3 از 3/);
+    assert.ok(!calls.at(-1).payload.reply_markup.inline_keyboard.flat()
+      .some(button => button.callback_data.startsWith("admin_users:")));
+    editError = "Bad Request: message is not modified";
+    assert.deepEqual(await update("admin_users:99999999999999999999"), ["answerCallbackQuery", "editMessageText"]);
+    editError = undefined;
+
     await update("/help");
     assert.match(calls[0].payload.text, /دستورهای مدیریت/);
     assert.match(calls[0].payload.text, /\/planpreview/);

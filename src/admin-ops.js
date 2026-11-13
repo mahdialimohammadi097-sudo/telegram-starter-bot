@@ -158,8 +158,11 @@ async function showDashboard(ctx, edit = false, showQueue = false) {
   return ctx.reply(message, { reply_markup: dashboardKeyboard(language, showQueue) });
 }
 
-async function showUsers(ctx, page = 0, edit = false) {
-  const language = await getAdminLanguage(ctx);
+async function showUsers(ctx, requestedPage, language) {
+  const count = await pool.query("SELECT COUNT(*)::int AS total FROM users");
+  const total = count.rows[0].total;
+  const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
+  const page = Math.min(requestedPage, lastPage);
   const offset = page * PAGE_SIZE;
   const result = await pool.query(
     `SELECT telegram_id, username, first_name, status
@@ -168,8 +171,6 @@ async function showUsers(ctx, page = 0, edit = false) {
      LIMIT $1 OFFSET $2`,
     [PAGE_SIZE, offset]
   );
-  const count = await pool.query("SELECT COUNT(*)::int AS total FROM users");
-  const total = count.rows[0].total;
   const keyboard = new InlineKeyboard();
 
   for (const user of result.rows) {
@@ -215,8 +216,7 @@ async function showUsers(ctx, page = 0, edit = false) {
         "Search by Telegram ID: /user <telegram_id>"
       ].join("\n");
 
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
-  return ctx.reply(message, { reply_markup: keyboard });
+  return sendAdminScreen(ctx, message, keyboard, true);
 }
 
 async function showUser(ctx, telegramId, edit = false) {
@@ -972,10 +972,10 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     try {
       const page = Number(ctx.callbackQuery.data.split(":")[1]);
       await ctx.answerCallbackQuery();
-      await showUsers(ctx, page, true);
+      await showUsers(ctx, page, language);
     } catch (error) {
       console.error("[admin-ops] users list failed:", safeDiagnosticCode(error));
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load users.", "بارگذاری کاربران ممکن نشد."), show_alert: true });
+      await ctx.reply(adminText(language, "Unable to load users.", "بارگذاری کاربران ممکن نشد."));
     }
   });
 
