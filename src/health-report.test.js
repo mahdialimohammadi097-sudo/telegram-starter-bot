@@ -57,3 +57,54 @@ test("reports a schema inspection failure safely", () => {
   assert.match(report, /Diagnostic code: 42P01/);
   assert.doesNotMatch(report, /DATABASE_URL|password|postgres:\/\//i);
 });
+
+test("does not leak arbitrary database driver error text in startup reports", () => {
+  const report = formatStartupHealthReport({
+    botUsername: "PROFINO1bot",
+    mode: "polling",
+    nodeVersion: "v26.0.0",
+    databaseConnected: true,
+    schemaError: "connection failed: postgres://admin:super-secret@db.internal/prod"
+  });
+
+  assert.match(report, /Diagnostic code: UNAVAILABLE/);
+  assert.doesNotMatch(report, /super-secret|db\.internal|postgres:\/\//i);
+});
+
+test("accepts only a five-character PostgreSQL SQLSTATE diagnostic code", () => {
+  const valid = formatStartupHealthReport({
+    databaseConnected: true,
+    schemaError: "42P01"
+  });
+  const invalid = formatStartupHealthReport({
+    databaseConnected: true,
+    schemaError: "42P01 leaked-detail"
+  });
+
+  assert.match(valid, /Diagnostic code: 42P01/);
+  assert.match(invalid, /Diagnostic code: UNAVAILABLE/);
+});
+
+test("does not claim schema health when PostgreSQL is disconnected", () => {
+  const report = formatStartupHealthReport({
+    databaseConnected: false,
+    schemaSnapshot: {
+      expectedTables: ["users"],
+      existingTables: ["users"],
+      tableInventory: ["users"],
+      indexes: [],
+      triggers: []
+    }
+  });
+  assert.match(report, /PostgreSQL: NOT VERIFIED/);
+  assert.match(report, /Database schema inspection: FAILED/);
+  assert.doesNotMatch(report, /CORE TABLES PRESENT/);
+});
+
+test("does not accept malformed or missing diagnostic codes", () => {
+  for (const schemaError of [null, undefined, "42p01", "42P01 extra", "postgres://secret@host/db", 12345]) {
+    const report = formatStartupHealthReport({ databaseConnected: false, schemaError });
+    assert.match(report, /Diagnostic code: UNAVAILABLE/);
+    assert.doesNotMatch(report, /postgres:\/\/|secret@host/);
+  }
+});

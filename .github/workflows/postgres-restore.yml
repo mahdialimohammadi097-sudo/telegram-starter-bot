@@ -3,11 +3,6 @@ name: PostgreSQL 17 restore drill
 on:
   push:
     branches: [feature/integrated-postgres-matrix]
-    paths:
-      - .github/workflows/postgres-restore.yml
-      - scripts/test-postgres-restore.sh
-      - src/admin-ops.js
-      - src/post-history.js
   pull_request:
     paths:
       - .github/workflows/postgres-restore.yml

@@ -157,3 +157,9 @@ Fractions below count named engineering gates for this assessment. Each phase ha
 | Release preparation | Blocker register and rollback procedure | Staging rehearsal; independent financial/operational sign-off; owner release decision | 1/4 |
 
 The weighted mean with equal phase weights is 56.875%. Update only when gate evidence changes. No changes to main, FadeHost, production PostgreSQL or Telegram service are required by this report.
+
+## Reconciliation of residual branches
+
+After the initial inventory, the disabled-by-default operator workflow from #47, TLS review from #38, environment documentation from #43, and formatter plus regression tests from #39 were integrated with their original commits as parents. Only template guidance was edited for the stricter webhook contract. #47's push trigger selects its own verification branch; the credentialed workflow was not dispatched. #35's two residual commits update historical proof in the November 11 documents (46 tests in [run 42975463597](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/42975463597)). The candidate keeps its later versions of those documents and includes #35's head as a parent. This preserves later evidence while recording the disposition of both overlapping edits. All 17 open heads at the initial snapshot are now accounted for on the integration line. Existing PRs remain independently reviewable.
+
+The operational drill runs on every push to the isolated integration branch so that the reported matrix and both recovery checks can be attached to the same commit. Runtime tests use offline bot identity and dummy input. Before release the owner must select and approve a production change set, stage the migrations and verify the host checks above.
