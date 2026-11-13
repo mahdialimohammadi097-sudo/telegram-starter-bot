@@ -13,7 +13,7 @@ test("only the replacement preview can publish the saved post after an edit", {
   const { startScheduler } = await import("./scheduler.js");
   const schema = "post_edit_" + randomUUID().replaceAll("-", "");
   const setup = await pool.connect();
-  const db = new pg.Pool({ connectionString: process.env.DATABASE_URL, options: "-c search_path=" + schema });
+  const db = new pg.Pool({ connectionString: process.env.DATABASE_URL, application_name: schema, options: "-c search_path=" + schema });
   const owner = 8810232463;
   const chat = { id: owner, type: "private" };
   const from = { id: owner, first_name: "Fixture", is_bot: false };
@@ -21,10 +21,14 @@ test("only the replacement preview can publish the saved post after an edit", {
   registerPostManagement(bot);
   const published = [];
   const previews = [];
+  const notices = [];
   let sequence = 0;
   let messageId = 100;
   let staleButtonVisible = false;
   bot.api.config.use(async (_prev, method, payload) => {
+    if (method === "answerCallbackQuery" || (method === "sendMessage" && payload.chat_id === owner)) {
+      notices.push(payload.text ?? "");
+    }
     if (method === "sendMessage") {
       const message = { message_id: ++messageId, chat: { id: payload.chat_id } };
       if (payload.chat_id === "@PROFINO1") published.push(payload.text);
@@ -94,6 +98,65 @@ test("only the replacement preview can publish the saved post after an edit", {
     const final = await state();
     assert.equal(final.status, "published");
     assert.equal(final.published_message_id, String(messageId));
+
+    // Hold the row until both real handlers are waiting inside their UPDATEs.
+    async function waitForBlockedWrite(sqlPrefix) {
+      const limit = Date.now() + 8000;
+      while (Date.now() < limit) {
+        const result = await db.query(`SELECT 1 FROM pg_stat_activity
+          WHERE application_name = $1 AND ltrim(query) LIKE $2
+            AND cardinality(pg_blocking_pids(pid)) > 0`, [schema, sqlPrefix]);
+        if (result.rowCount) return;
+        await delay(20);
+      }
+      assert.fail("Timed out waiting for " + sqlPrefix);
+    }
+
+    for (const editFirst of [true, false]) {
+      const id = editFirst ? 2 : 3;
+      const previewId = 80 + id;
+      await db.query(`INSERT INTO scheduled_posts
+        (id,title,content,status,preview_message_id,preview_chat_id,edit_version,scheduled_at)
+        VALUES ($1,'Race','Original','preview_sent',$2,$3,1,now())`, [id, previewId, owner]);
+      await click("post_edit_content:" + id, previewId);
+      const publish = () => click("post_approve:" + id, previewId);
+      const edit = () => bot.handleUpdate({ update_id: ++sequence, message: {
+        chat, from, message_id: 90 + id, date: 0, text: "Changed"
+      } });
+      const editSql = "UPDATE scheduled_posts SET content =%";
+      const approveSql = "UPDATE scheduled_posts%SET status = 'publishing'%";
+      const locker = await db.connect();
+      const pending = [];
+      const sentBefore = published.length;
+      notices.length = 0;
+      try {
+        await locker.query("BEGIN");
+        await locker.query("SELECT id FROM scheduled_posts WHERE id=$1 FOR UPDATE", [id]);
+        pending.push((editFirst ? edit : publish)());
+        await waitForBlockedWrite(editFirst ? editSql : approveSql);
+        pending.push((editFirst ? publish : edit)());
+        await waitForBlockedWrite(editFirst ? approveSql : editSql);
+      } finally {
+        try { await locker.query("ROLLBACK"); }
+        finally { locker.release(); }
+        await Promise.all(pending);
+      }
+      const { rows: [post] } = await db.query("SELECT * FROM scheduled_posts WHERE id=$1", [id]);
+      if (editFirst) {
+        assert.equal(post.status, "scheduled");
+        assert.equal(post.content, "Changed");
+        assert.equal(post.preview_message_id, null);
+        assert.equal(post.published_message_id, null);
+        assert.deepEqual(published.slice(sentBefore), []);
+        assert.ok(notices.includes("Post is no longer available."));
+      } else {
+        assert.equal(post.status, "published");
+        assert.equal(post.content, "Original");
+        assert.ok(post.published_message_id);
+        assert.deepEqual(published.slice(sentBefore), ["Race\n\nOriginal"]);
+        assert.ok(notices.some(text => text.includes("No changes were saved.")));
+      }
+    }
   } finally {
     await scheduler?.stop();
     await db.end();
