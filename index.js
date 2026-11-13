@@ -138,6 +138,7 @@ async function sendStartupReport(botUsername) {
       console.error("[health] database schema inspection failed:", schemaError);
     }
 
+    if (shuttingDown) return;
     const report = formatStartupHealthReport({
       botUsername,
       mode,
@@ -165,6 +166,7 @@ async function startPolling() {
 
     try {
       await bot.api.deleteWebhook({ drop_pending_updates: false });
+      if (shuttingDown) return;
       console.log("[bot] starting Telegram long polling");
       await bot.start({
         onStart: () => {
@@ -218,26 +220,36 @@ async function main() {
     getWebhookHandler: () => webhookHandler
   });
 
+  if (shuttingDown) {
+    await closeHttpServer();
+    return;
+  }
+
   const dbResult = await retryUntilAvailable(
     testDatabaseConnection,
     "PostgreSQL connection"
   );
+  if (shuttingDown) return;
   runtimeHealth.setDatabaseReady(true);
   console.log("[database] PostgreSQL connected successfully.");
   console.log("[database] server time:", dbResult.server_time);
 
   await ensurePostHistorySchema();
+  if (shuttingDown) return;
   console.log("[post-history] schema and audit trigger ready.");
   await ensureAdminOpsSchema();
+  if (shuttingDown) return;
   console.log("[admin-ops] audit log schema ready.");
 
   const me = await retryUntilAvailable(() => bot.api.getMe(), "Telegram API authentication");
+  if (shuttingDown) return;
   botUsername = me.username;
   runtimeHealth.setTelegramApiConnected(true);
   console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
 
   await sendStartupReport(me.username);
 
+  if (shuttingDown) return;
   healthMonitor = startHealthMonitor({
     bot,
     pool,
@@ -262,6 +274,7 @@ async function main() {
       drop_pending_updates: false
     }), "Telegram webhook registration");
 
+    if (shuttingDown) return;
     runtimeHealth.setTelegramReceiverActive(true);
     console.log("[bot] webhook registered.");
     return;
@@ -280,6 +293,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 main().catch(async (error) => {
+  if (shuttingDown) return;
   console.error("[startup] PROFINO could not start:", safeDiagnosticCode(error));
   process.exitCode = 1;
   await shutdown("startup failure");
