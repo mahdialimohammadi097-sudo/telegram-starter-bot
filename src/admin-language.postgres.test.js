@@ -98,7 +98,9 @@ test("private admin language survives new updates and handles unavailable prefer
     const action = keyboardData().find(data => data.startsWith("admin_user_action:"));
     await update(action);
     assert.ok(keyboardData().includes(detailFromList));
-    assert.ok(keyboardData().includes(action.replace("admin_user_action:", "admin_user_confirm:").replace(":blocked:1", ":blocked:active:1")));
+    const confirmStatus = keyboardData().find(data => data.startsWith("usc:"));
+    assert.deepEqual(confirmStatus.split(":").slice(1, 4), [action.split(":")[1], "blocked", "active"]);
+    assert.match(confirmStatus, /:\d+:1$/);
     await update(detailFromList);
     await update(keyboardData().find(data => data === nextUsers));
     assert.match(calls.at(-1).payload.text, /نمایش 9 تا 11 از 11/);

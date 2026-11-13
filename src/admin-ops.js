@@ -386,7 +386,7 @@ async function showAuditLog(ctx, beforeId = null, statusOnly = false, target = n
 async function confirmUserStatus(ctx, telegramId, newStatus, page) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
-    "SELECT telegram_id, status FROM users WHERE telegram_id = $1",
+    "SELECT telegram_id, status, xmin::text AS version FROM users WHERE telegram_id = $1",
     [telegramId]
   );
   if (!result.rowCount || Number(telegramId) === SUPER_ADMIN_ID) {
@@ -405,7 +405,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus, page) {
 
   const action = newStatus === "active" ? "activate" : "suspend";
   const keyboard = new InlineKeyboard()
-    .text(language === "fa" ? "تأیید" : "Confirm", "admin_user_confirm:" + telegramId + ":" + newStatus + ":" + current.status + userPageSuffix(page))
+    .text(language === "fa" ? "تأیید" : "Confirm", "usc:" + telegramId + ":" + newStatus + ":" + current.status + ":" + current.version + userPageSuffix(page))
     .text(language === "fa" ? "انصراف" : "Cancel", "admin_user:" + telegramId + userPageSuffix(page));
 
   await ctx.answerCallbackQuery();
@@ -431,7 +431,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus, page) {
   await sendAdminScreen(ctx, message, keyboard, true);
 }
 
-async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page) {
+async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page, version) {
   const language = await getAdminLanguage(ctx);
   if (Number(telegramId) === SUPER_ADMIN_ID) {
     return ctx.answerCallbackQuery({
@@ -440,7 +440,8 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page)
     });
   }
 
-  const changed = await commitUserStatus(telegramId, newStatus, expectedStatus);
+  // Older buttons have no row version. Refresh them without applying a change.
+  const changed = version && await commitUserStatus(telegramId, newStatus, expectedStatus, version);
   const notice = changed
     ? adminText(language, "User status updated.", "وضعیت کاربر به‌روزرسانی شد.")
     : adminText(language, "This confirmation is outdated.", "این تأیید منقضی شده است.");
@@ -460,7 +461,7 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page)
   }
 }
 
-async function commitUserStatus(telegramId, newStatus, expectedStatus) {
+async function commitUserStatus(telegramId, newStatus, expectedStatus, version) {
   const client = await pool.connect();
   let transactionOpen = false;
   let releaseError = null;
@@ -468,11 +469,11 @@ async function commitUserStatus(telegramId, newStatus, expectedStatus) {
     await client.query("BEGIN");
     transactionOpen = true;
     const locked = await client.query(
-      "SELECT id, status FROM users WHERE telegram_id = $1 FOR UPDATE",
+      "SELECT id, status, xmin::text AS version FROM users WHERE telegram_id = $1 FOR UPDATE",
       [telegramId]
     );
 
-    if (!locked.rowCount ||
+    if (!locked.rowCount || locked.rows[0].version !== version ||
         !isConfirmationCurrent(locked.rows[0].status, expectedStatus, newStatus)) {
       await client.query("ROLLBACK");
       transactionOpen = false;
@@ -1052,10 +1053,12 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     }
   });
 
-  bot.callbackQuery(/^admin_user_confirm:\d+:(active|blocked):(active|blocked|pending)(?::\d{1,9})?$/, async (ctx) => {
+  bot.callbackQuery([/^admin_user_confirm:\d+:(active|blocked):(active|blocked|pending)(?::\d{1,9})?$/, /^usc:\d{1,19}:(active|blocked):(active|blocked|pending):\d{1,10}(?::\d{1,9})?$/], async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const [, telegramId, status, expectedStatus, page] = ctx.callbackQuery.data.split(":");
-    try { await applyUserStatus(ctx, telegramId, status, expectedStatus, Number(page || 0)); }
+    const [prefix, telegramId, status, expectedStatus, token, origin] = ctx.callbackQuery.data.split(":");
+    const version = prefix === "usc" ? token : undefined;
+    const page = version ? origin : token;
+    try { await applyUserStatus(ctx, telegramId, status, expectedStatus, Number(page || 0), version); }
     catch (error) {
       console.error("[admin-ops] status update failed:", safeDiagnosticCode(error));
       const language = await getAdminLanguage(ctx);

@@ -81,6 +81,10 @@ test("private status confirmations commit once with their audit row and survive 
 
     await client.query("ALTER TABLE admin_audit_logs ADD CHECK (action <> 'user_activated')");
     await click("admin_user_confirm:" + target + ":active:blocked");
+    assert.match(calls[0].payload.text, /منقضی/);
+    await click("admin_user_action:" + target + ":active");
+    const activate = calls.at(-1).payload.reply_markup.inline_keyboard.flat().find(b => b.text === "تأیید").callback_data;
+    await click(activate);
     assert.match(calls[0].payload.text, /به‌روزرسانی وضعیت کاربر ممکن نشد/);
     assert.equal(await status(), "blocked");
     assert.equal((await audit()).length, 1);
@@ -143,6 +147,12 @@ test("private status confirmations commit once with their audit row and survive 
     await click(button("جزئیات کاربر"));
     assert.equal(button("کاربران"), "admin_users:1");
     await client.query("UPDATE admin_preferences SET language = 'en'");
+    await client.query("UPDATE users SET status = 'active' WHERE id = 2");
+    const beforeReplay = (await audit()).length;
+    await click(confirm);
+    assert.match(calls[0].payload.text, /outdated/);
+    assert.equal(await status(), "active");
+    assert.equal((await audit()).length, beforeReplay);
     await client.query("DELETE FROM users WHERE id = 2");
     failEdit = true;
     assert.deepEqual(await click(confirm), ["answerCallbackQuery", "editMessageText", "sendMessage"]);
