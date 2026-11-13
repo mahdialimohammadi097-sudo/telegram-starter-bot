@@ -104,7 +104,7 @@ test("only the replacement preview can publish the saved post after an edit", {
       const limit = Date.now() + 8000;
       while (Date.now() < limit) {
         const result = await db.query(`SELECT 1 FROM pg_stat_activity
-          WHERE application_name = $1 AND ltrim(query) LIKE $2
+          WHERE application_name = $1 AND query LIKE $2
             AND cardinality(pg_blocking_pids(pid)) > 0`, [schema, sqlPrefix]);
         if (result.rowCount) return;
         await delay(20);
@@ -124,7 +124,7 @@ test("only the replacement preview can publish the saved post after an edit", {
         chat, from, message_id: 90 + id, date: 0, text: "Changed"
       } });
       const editSql = "UPDATE scheduled_posts SET content =%";
-      const approveSql = "UPDATE scheduled_posts%SET status = 'publishing'%";
+      const approveSql = "%UPDATE scheduled_posts%SET status = 'publishing'%";
       const locker = await db.connect();
       const pending = [];
       const sentBefore = published.length;
