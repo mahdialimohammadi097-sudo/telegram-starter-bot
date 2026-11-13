@@ -597,9 +597,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
           `Username: ${account.username ? "@" + account.username : "Not set"}\n` +
           `Name: ${account.first_name ?? ""} ${account.last_name ?? ""}\n` +
           `Status: ${account.status.toUpperCase()}\n` +
-          `Referral Code: ${account.referral_code?.trim() || "Send /start to generate a code."}\n` +
+          `Referral Code: ${normalizeReferralCode(account.referral_code) || "Send /start to generate a code."}\n` +
           `Joined: ${new Date(account.created_at).toLocaleDateString("en-GB")}`,
-          { reply_markup: backMenu }
+          { reply_markup: new Keyboard().text("Referral Program").text("My Wallet").row().text("⬅ Main Menu").resized() }
         );
       } catch (error) {
         console.error("[account] Failed:", safeDiagnosticCode(error));
@@ -623,8 +623,8 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
           });
         }
 
-        const referralCode = result.rows[0].referral_code;
-        if (!referralCode?.trim()) {
+        const referralCode = normalizeReferralCode(result.rows[0].referral_code);
+        if (!referralCode) {
           return ctx.reply("Send /start to generate your invite link, then open Referral Program again.", {
             reply_markup: backMenu
           });
@@ -807,18 +807,12 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       }
     }
 
-    const sections = {
-
-      "Support":
-        "SUPPORT\n\nSend /start to create or reopen your account.\n" +
+    if (choice === "Support") {
+      const keyboard = new Keyboard().text("My Account").text("Referral Program").row()
+        .text("My Wallet").text("Transaction History").row().text("⬅ Main Menu").resized();
+      return ctx.reply("SUPPORT\n\nSend /start to create or reopen your account.\n" +
         "Choose My Wallet to check your balance, or Transaction History to see recent entries.\n" +
-        "To find your invite link, choose Referral Program from the main menu."
-    };
-
-    if (sections[choice]) {
-      return ctx.reply(sections[choice], {
-        reply_markup: backMenu
-      });
+        "Choose Referral Program to find your invite link.", { reply_markup: keyboard });
     }
 
     if (!choice.startsWith("/") && !isAdmin(ctx)) {
