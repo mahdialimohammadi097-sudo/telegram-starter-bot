@@ -178,7 +178,7 @@ async function showUsers(ctx, requestedPage, language) {
       .filter(Boolean).join(" · ") || String(user.telegram_id);
     keyboard.text(
       (name + " — " + userStatusLabel(user.status, language)).slice(0, 60),
-      "admin_user:" + user.telegram_id
+      "admin_user:" + user.telegram_id + userPageSuffix(page)
     ).row();
   }
 
@@ -219,7 +219,11 @@ async function showUsers(ctx, requestedPage, language) {
   return sendAdminScreen(ctx, message, keyboard, true);
 }
 
-async function showUser(ctx, telegramId, edit = false) {
+function userPageSuffix(page) {
+  return page > 0 ? ":" + page : "";
+}
+
+async function showUser(ctx, telegramId, edit = false, page = 0) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     `SELECT id, telegram_id, username, first_name, last_name,
@@ -230,7 +234,10 @@ async function showUser(ctx, telegramId, edit = false) {
 
   if (!result.rowCount) {
     const message = language === "fa" ? "کاربر پیدا نشد." : "User not found.";
-    if (edit) return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language) });
+    if (edit) {
+      const keyboard = new InlineKeyboard().text(adminText(language, "Users", "کاربران"), "admin_users:" + page);
+      return sendAdminScreen(ctx, message, keyboard, true);
+    }
     return ctx.reply(message);
   }
 
@@ -266,17 +273,16 @@ async function showUser(ctx, telegramId, edit = false) {
   const keyboard = new InlineKeyboard();
   if (Number(user.telegram_id) !== SUPER_ADMIN_ID) {
     if (user.status === "active") {
-      keyboard.text(language === "fa" ? "تعلیق کاربر" : "Suspend user", "admin_user_action:" + user.telegram_id + ":blocked");
+      keyboard.text(language === "fa" ? "تعلیق کاربر" : "Suspend user", "admin_user_action:" + user.telegram_id + ":blocked" + userPageSuffix(page));
     } else {
-      keyboard.text(language === "fa" ? "فعال‌سازی کاربر" : "Activate user", "admin_user_action:" + user.telegram_id + ":active");
+      keyboard.text(language === "fa" ? "فعال‌سازی کاربر" : "Activate user", "admin_user_action:" + user.telegram_id + ":active" + userPageSuffix(page));
     }
   }
   keyboard.row()
-    .text(language === "fa" ? "کاربران" : "Users", "admin_users:0")
+    .text(language === "fa" ? "کاربران" : "Users", "admin_users:" + page)
     .text(language === "fa" ? "داشبورد" : "Dashboard", "admin_home");
 
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
-  return ctx.reply(message, { reply_markup: keyboard });
+  return sendAdminScreen(ctx, message, keyboard, edit);
 }
 
 async function showPosts(ctx, edit = false) {
@@ -349,7 +355,7 @@ async function showAuditLog(ctx, edit = false) {
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
-async function confirmUserStatus(ctx, telegramId, newStatus) {
+async function confirmUserStatus(ctx, telegramId, newStatus, page) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     "SELECT telegram_id, status FROM users WHERE telegram_id = $1",
@@ -371,8 +377,8 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
 
   const action = newStatus === "active" ? "activate" : "suspend";
   const keyboard = new InlineKeyboard()
-    .text(language === "fa" ? "تأیید" : "Confirm", "admin_user_confirm:" + telegramId + ":" + newStatus + ":" + current.status)
-    .text(language === "fa" ? "انصراف" : "Cancel", "admin_user:" + telegramId);
+    .text(language === "fa" ? "تأیید" : "Confirm", "admin_user_confirm:" + telegramId + ":" + newStatus + ":" + current.status + userPageSuffix(page))
+    .text(language === "fa" ? "انصراف" : "Cancel", "admin_user:" + telegramId + userPageSuffix(page));
 
   await ctx.answerCallbackQuery();
   const message = language === "fa"
@@ -397,7 +403,7 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
   await ctx.editMessageText(message, { reply_markup: keyboard });
 }
 
-async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
+async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page) {
   const language = await getAdminLanguage(ctx);
   if (Number(telegramId) === SUPER_ADMIN_ID) {
     return ctx.answerCallbackQuery({
@@ -470,7 +476,7 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
     await ctx.answerCallbackQuery({
       text: language === "fa" ? "وضعیت کاربر به‌روزرسانی شد." : "User status updated."
     });
-    await showUser(ctx, telegramId, true);
+    await showUser(ctx, telegramId, true, page);
   } catch (error) {
     if (transactionOpen) {
       releaseError = await rollbackTransaction(client, error);
@@ -979,22 +985,23 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     }
   });
 
-  bot.callbackQuery(/^admin_user:\d+$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user:\d+(?::\d{1,9})?$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
-      await showUser(ctx, ctx.callbackQuery.data.split(":")[1], true);
+      const [, telegramId, page] = ctx.callbackQuery.data.split(":");
+      await showUser(ctx, telegramId, true, Number(page || 0));
     } catch (error) {
       console.error("[admin-ops] user details failed:", safeDiagnosticCode(error));
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load user.", "بارگذاری اطلاعات کاربر ممکن نشد."), show_alert: true });
+      await ctx.reply(adminText(language, "Unable to load user.", "بارگذاری اطلاعات کاربر ممکن نشد."));
     }
   });
 
-  bot.callbackQuery(/^admin_user_action:\d+:(active|blocked)$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user_action:\d+:(active|blocked)(?::\d{1,9})?$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const [, telegramId, status] = ctx.callbackQuery.data.split(":");
-    try { await confirmUserStatus(ctx, telegramId, status); }
+    const [, telegramId, status, page] = ctx.callbackQuery.data.split(":");
+    try { await confirmUserStatus(ctx, telegramId, status, Number(page || 0)); }
     catch (error) {
       console.error("[admin-ops] status confirmation failed:", safeDiagnosticCode(error));
       const language = await getAdminLanguage(ctx);
@@ -1005,10 +1012,10 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     }
   });
 
-  bot.callbackQuery(/^admin_user_confirm:\d+:(active|blocked):(active|blocked|pending)$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user_confirm:\d+:(active|blocked):(active|blocked|pending)(?::\d{1,9})?$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const [, telegramId, status, expectedStatus] = ctx.callbackQuery.data.split(":");
-    try { await applyUserStatus(ctx, telegramId, status, expectedStatus); }
+    const [, telegramId, status, expectedStatus, page] = ctx.callbackQuery.data.split(":");
+    try { await applyUserStatus(ctx, telegramId, status, expectedStatus, Number(page || 0)); }
     catch (error) {
       console.error("[admin-ops] status update failed:", safeDiagnosticCode(error));
       const language = await getAdminLanguage(ctx);
