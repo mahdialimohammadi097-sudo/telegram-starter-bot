@@ -18,7 +18,7 @@ test("private status confirmations commit once with their audit row and survive 
         first_name text, last_name text, referral_code text, created_at timestamptz);
       CREATE TEMP TABLE admin_users (user_id bigint, role text, status text);
       CREATE TEMP TABLE admin_preferences (user_id bigint, language text);
-      CREATE TEMP TABLE admin_audit_logs (admin_user_id bigint, actor_telegram_id bigint, action text,
+      CREATE TEMP TABLE admin_audit_logs (id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(), admin_user_id bigint, actor_telegram_id bigint, action text,
         target_user_id bigint, currency text, metadata jsonb, details jsonb);
       INSERT INTO admin_users VALUES (1, 'owner', 'active');
       INSERT INTO admin_preferences VALUES (1, 'fa')
@@ -81,6 +81,30 @@ test("private status confirmations commit once with their audit row and survive 
     assert.match(calls[0].payload.text, /به‌روزرسانی وضعیت کاربر ممکن نشد/);
     assert.equal(await status(), "blocked");
     assert.equal((await audit()).length, 1);
+
+    await client.query(`INSERT INTO admin_audit_logs (action)
+      SELECT 'archive_' || i FROM generate_series(2, 12) i`);
+    assert.deepEqual(await click("admin_logs"), ["answerCallbackQuery", "sendMessage"]);
+    const latest = calls.at(-1).payload;
+    assert.match(latest.text, /ARCHIVE_12/);
+    assert.doesNotMatch(latest.text, /ARCHIVE_2\b/);
+    const older = latest.reply_markup.inline_keyboard.flat().find(b => b.text === "فعالیت‌های قدیمی‌تر").callback_data;
+    await client.query("INSERT INTO admin_audit_logs (action) VALUES ('admin_user_search')");
+    for (const [sender, type] of [[target, "private"], [owner, "group"]]) {
+      assert.deepEqual(await click(older, sender, type), ["answerCallbackQuery"]);
+      assert.equal(calls[0].payload.text, "Unauthorized.");
+    }
+    assert.deepEqual(await click(older), ["answerCallbackQuery", "editMessageText"]);
+    const archive = calls.at(-1).payload;
+    assert.match(archive.text, /ARCHIVE_2\b/);
+    assert.match(archive.text, /کاربر تعلیق شد.*450021.*فعال → مسدود/);
+    assert.doesNotMatch(archive.text, /ARCHIVE_3\b/);
+    const newest = archive.reply_markup.inline_keyboard.flat().find(b => b.text === "آخرین فعالیت‌ها").callback_data;
+    await client.query("UPDATE admin_preferences SET language = 'en'");
+    await click(newest);
+    assert.match(calls.at(-1).payload.text, /User search/);
+    await click(older);
+    assert.match(calls.at(-1).payload.text, /User suspended.*ACTIVE → BLOCKED/);
   } finally {
     client.release(true);
     await pool.end();

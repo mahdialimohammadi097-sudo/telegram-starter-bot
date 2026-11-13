@@ -319,23 +319,39 @@ async function showPosts(ctx, edit = false) {
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
-async function showAuditLog(ctx, edit = false) {
+function auditActionLabel(action, language) {
+  const labels = {
+    user_blocked: ["User suspended", "کاربر تعلیق شد"],
+    user_activated: ["User activated", "کاربر فعال شد"],
+    admin_dashboard_opened: ["Dashboard opened", "داشبورد باز شد"],
+    admin_user_lookup: ["User details opened", "جزئیات کاربر باز شد"],
+    admin_user_search: ["User search", "جست‌وجوی کاربر"],
+    admin_activity_viewed: ["Activity viewed", "گزارش فعالیت مشاهده شد"]
+  };
+  return Object.hasOwn(labels, action) ? adminText(language, ...labels[action]) : action.toUpperCase();
+}
+
+async function showAuditLog(ctx, beforeId = null) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
-    `SELECT a.action, a.target_user_id, u.telegram_id AS target_telegram_id,
+    `SELECT a.id, a.action, a.target_user_id, u.telegram_id AS target_telegram_id,
             a.details, a.created_at
      FROM admin_audit_logs a
      LEFT JOIN users u ON u.id = a.target_user_id
+     WHERE ($1::numeric IS NULL OR a.id < least($1::numeric, 9223372036854775807)::bigint)
      ORDER BY a.id DESC
-     LIMIT 10`
+     LIMIT 11`, [beforeId]
   );
-  const lines = result.rows.map(row =>
+  const rows = result.rows.slice(0, 10);
+  const lines = rows.map(row =>
     formatDate(row.created_at, language) + "\n" +
-    row.action.toUpperCase() +
+    auditActionLabel(row.action, language) +
     (row.target_telegram_id
       ? (language === "fa" ? " | شناسه تلگرام: " : " | Telegram: ") + row.target_telegram_id
       : "") +
-    (row.details?.new_status
+    (row.details?.old_status && row.details?.new_status
+      ? " | " + userStatusLabel(row.details.old_status, language) + " → " + userStatusLabel(row.details.new_status, language)
+      : row.details?.new_status
       ? (language === "fa" ? " | وضعیت جدید: " : " | New status: ") + userStatusLabel(row.details.new_status, language)
       : "")
   );
@@ -343,16 +359,20 @@ async function showAuditLog(ctx, edit = false) {
     ? [
         "پروفینو — گزارش فعالیت مدیر",
         "",
-        lines.length ? lines.join("\n\n") : "هنوز فعالیت مدیریتی ثبت نشده است."
+        lines.length ? lines.join("\n\n") : beforeId ? "رویداد قدیمی‌تری پیدا نشد." : "هنوز فعالیت مدیریتی ثبت نشده است."
       ].join("\n")
     : [
         "PROFINO — ADMIN ACTIVITY AUDIT",
         "",
-        lines.length ? lines.join("\n\n") : "No admin activity recorded yet."
+        lines.length ? lines.join("\n\n") : beforeId ? "No older activity found." : "No admin activity recorded yet."
       ].join("\n");
-  const keyboard = new InlineKeyboard().text(language === "fa" ? "بازگشت" : "Back", "admin_home");
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
-  return ctx.reply(message, { reply_markup: keyboard });
+  const keyboard = new InlineKeyboard();
+  if (result.rows.length > rows.length) {
+    keyboard.text(adminText(language, "Older activity", "فعالیت‌های قدیمی‌تر"), "admin_logs:" + rows.at(-1).id).row();
+  }
+  if (beforeId) keyboard.text(adminText(language, "Latest activity", "آخرین فعالیت‌ها"), "admin_logs_latest").row();
+  keyboard.text(language === "fa" ? "بازگشت" : "Back", "admin_home");
+  return sendAdminScreen(ctx, message, keyboard, Boolean(beforeId) || ctx.callbackQuery?.data === "admin_logs_latest");
 }
 
 async function confirmUserStatus(ctx, telegramId, newStatus, page) {
@@ -1055,7 +1075,7 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     }
   });
 
-  bot.callbackQuery(/^admin_logs$/, async (ctx) => {
+  bot.callbackQuery(/^admin_logs(?:_latest|:([1-9]\d{0,18}))?$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) {
       return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     }
@@ -1067,9 +1087,7 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     await ctx.answerCallbackQuery();
 
     try {
-      // Send the activity report as a new message rather than editing the
-      // dashboard message; this avoids Telegram edit restrictions.
-      await showAuditLog(ctx, false);
+      await showAuditLog(ctx, ctx.match[1]);
     } catch (error) {
       console.error("[admin-ops] activity view failed:", safeDiagnosticCode(error));
 
