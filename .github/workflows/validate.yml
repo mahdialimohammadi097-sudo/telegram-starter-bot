@@ -53,3 +53,17 @@ jobs:
           npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/profino-tests.tap"
           grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-tests.tap"
           grep -Fxq '# skipped 0' "$RUNNER_TEMP/profino-tests.tap"
+      - name: Restore and replay synthetic wallet activity on PostgreSQL 17
+        if: matrix.node-version == 22
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec "$PG_CONTAINER" createdb -U postgres wallet_drill_source
+          docker exec "$PG_CONTAINER" createdb -U postgres wallet_drill_restored
+          node scripts/check-wallet-restore.js seed > "$RUNNER_TEMP/wallet-source.json"
+          docker exec "$PG_CONTAINER" pg_dump -U postgres -Fc wallet_drill_source |
+            docker exec -i "$PG_CONTAINER" pg_restore -U postgres --single-transaction --exit-on-error -d wallet_drill_restored
+          node scripts/check-wallet-restore.js verify > "$RUNNER_TEMP/wallet-restored.json"
+          cmp "$RUNNER_TEMP/wallet-source.json" "$RUNNER_TEMP/wallet-restored.json"
