@@ -373,10 +373,17 @@ export function startScheduler(bot) {
   isStarted = true;
   schedulerStopped = false;
 
-  bot.callbackQuery(
-    /^post_(approve|reject):\d+$/,
-    handlePostAction
-  );
+  const activeActions = new Set();
+  bot.callbackQuery(/^post_(approve|reject):\d+$/, async ctx => {
+    if (schedulerStopped) return;
+    const action = handlePostAction(ctx);
+    activeActions.add(action);
+    try {
+      await action;
+    } finally {
+      activeActions.delete(action);
+    }
+  });
 
   const ready = recoverInterruptedOperations()
     .then(() => {
@@ -408,7 +415,7 @@ export function startScheduler(bot) {
       if (schedulerTimer) clearInterval(schedulerTimer);
       schedulerTimer = null;
       await ready;
-      await activeBatch;
+      await Promise.all([activeBatch, Promise.allSettled(activeActions)]);
     }
   };
 }

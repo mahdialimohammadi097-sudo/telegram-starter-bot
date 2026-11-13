@@ -33,3 +33,5 @@
 ### Scheduled preview shutdown
 
 Shutdown stops new scheduler ticks and waits for startup recovery and the claimed preview batch before closing PostgreSQL. A completed preview can therefore record its Telegram message and chat IDs. The PG17 drill blocks a synthetic delivery during shutdown and verifies its history after restarting. A separate fixture represents a hard interruption: startup marks the pending result unknown and does not resend it. Actual host termination grace time and Telegram delivery still require staging verification.
+
+Shutdown also stops admitting new publication and rejection callbacks and waits for actions already accepted. The offline PG17 drill holds the post row after synthetic channel delivery, verifies shutdown waits for the final message ID write, and replays approval after restarting. A post still marked publishing after a hard interruption is recovered as publish_unknown for manual channel verification. Host termination deadlines and actual Telegram delivery require staging verification.

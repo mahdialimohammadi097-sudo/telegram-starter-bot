@@ -10,6 +10,7 @@ on:
       - scripts/check-rollback-audit.mjs
       - scripts/check-rollback-posts.mjs
       - scripts/check-preview-shutdown.mjs
+      - scripts/check-publication-shutdown.mjs
       - index.js
       - src/scheduler.js
       - src/admin-ops.js

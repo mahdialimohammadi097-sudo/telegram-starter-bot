@@ -134,6 +134,10 @@ done
 for stage in drain restart; do
   DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node scripts/check-preview-shutdown.mjs "$stage"
 done
+for stage in drain restart; do
+  DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node scripts/check-publication-shutdown.mjs "$stage"
+done
+echo "Publication shutdown and restart checks passed."
 echo "Preview shutdown and restart checks passed."
 echo "Scheduled-post rollback and forward checks passed."
 echo "Synthetic restore passed (pg_restore: ${restore_seconds}s, six tables). Rollback and forward audit checks passed."
