@@ -15,7 +15,7 @@ export function formatStartupHealthReport({
     "PostgreSQL: " + (databaseConnected ? "CONNECTED" : "NOT VERIFIED")
   ];
 
-  if (schemaSnapshot) {
+  if (databaseConnected && schemaSnapshot) {
     const expected = schemaSnapshot.expectedTables || [];
     const existing = new Set(schemaSnapshot.existingTables || []);
     const missing = expected.filter(name => !existing.has(name));
@@ -29,7 +29,11 @@ export function formatStartupHealthReport({
     if (missing.length) lines.push("Missing core tables: " + missing.join(", "));
   } else {
     lines.push("Database schema inspection: FAILED");
-    if (schemaError) lines.push("Diagnostic code: " + String(schemaError).slice(0, 80));
+    // Only expose a PostgreSQL SQLSTATE, never arbitrary driver error text.
+    const diagnosticCode = typeof schemaError === "string" && /^[0-9A-Z]{5}$/.test(schemaError)
+      ? schemaError
+      : "UNAVAILABLE";
+    lines.push("Diagnostic code: " + diagnosticCode);
   }
 
   lines.push(

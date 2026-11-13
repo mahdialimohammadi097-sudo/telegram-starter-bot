@@ -1,0 +1,31 @@
+// Read-only comparison of approved claims and pending or posted simulated deposit journals.
+// Uses the known clearing account and independently assigned AVAILABLE accounts.
+export async function findSimulationDiscrepancies(pool, clearingAccountId) {
+  const result = await pool.query(
+    `WITH approved AS (
+       SELECT d.id, d.amount, d.transfer_event, a.id AS wallet_id,
+              count(*) OVER (PARTITION BY d.transfer_event) AS approvals_for_event
+       FROM deposit_requests d
+       LEFT JOIN ledger_accounts a ON a.user_id = d.user_id
+         AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
+       WHERE d.status = 'approved'
+     ), journals AS (
+       SELECT id, reference_id, idempotency_key, status
+       FROM ledger_transactions WHERE transaction_type = 'simulated-deposit' AND status IN ('pending', 'posted')
+     )
+     SELECT a.id AS request_id, j.id AS journal_id
+     FROM approved a FULL JOIN journals j ON j.reference_id = a.id::text
+     LEFT JOIN ledger_entries e ON e.transaction_id = j.id
+     GROUP BY a.id, a.amount, a.transfer_event, a.wallet_id, a.approvals_for_event, j.id, j.idempotency_key, j.status
+     HAVING a.id IS NULL OR j.id IS NULL OR j.status = 'pending'
+        OR a.approvals_for_event > 1
+        OR j.idempotency_key IS DISTINCT FROM 'simulated-deposit:' || a.transfer_event
+        OR count(e.id) <> 2
+        OR count(*) FILTER (WHERE e.account_id = a.wallet_id AND e.entry_type = 'credit'
+                             AND e.currency = 'USDT' AND e.amount = a.amount) <> 1
+        OR count(*) FILTER (WHERE e.account_id = $1 AND e.entry_type = 'debit'
+                             AND e.currency = 'USDT' AND e.amount = a.amount) <> 1
+     ORDER BY a.id, j.id`, [clearingAccountId]
+  );
+  return result.rows;
+}
