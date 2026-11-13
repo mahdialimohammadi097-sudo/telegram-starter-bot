@@ -15,6 +15,9 @@ test("private admin language survives new updates and handles unavailable prefer
       CREATE TEMP TABLE users (id bigint PRIMARY KEY, telegram_id bigint UNIQUE, status text, username text, first_name text,
         last_name text, referral_code text, created_at timestamptz);
       CREATE TEMP TABLE admin_users (user_id bigint, role text, status text);
+      CREATE TEMP TABLE admin_audit_logs (id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(),
+        admin_user_id bigint, actor_telegram_id bigint, action text, target_user_id bigint,
+        currency text, metadata jsonb, details jsonb);
       CREATE TEMP TABLE admin_preferences (user_id bigint PRIMARY KEY, language text, updated_at timestamptz);
       CREATE TEMP TABLE scheduled_posts (
         id bigserial PRIMARY KEY, title varchar(255), content text, scheduled_at timestamptz, updated_at timestamptz DEFAULT now(), status text,
