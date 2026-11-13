@@ -20,15 +20,26 @@ async function withSchedulerLock(shared, operation) {
   const client = await pool.connect();
   const suffix = shared ? "_shared" : "";
   let clean = false;
+  let disconnected = false;
+  const onDisconnect = error => {
+    disconnected = true;
+    console.error("[scheduler] PostgreSQL session lost:", safeDiagnosticCode(error));
+  };
+  client.on("error", onDisconnect);
   try {
     await client.query("SELECT pg_advisory_lock" + suffix + "(780244, 1)");
     return await operation(client);
   } finally {
     try {
-      const result = await client.query("SELECT pg_advisory_unlock" + suffix + "(780244, 1) AS unlocked");
-      clean = result.rows[0].unlocked;
+      if (!disconnected) {
+        const result = await client.query("SELECT pg_advisory_unlock" + suffix + "(780244, 1) AS unlocked");
+        clean = result.rows[0].unlocked;
+      }
+    } catch (error) {
+      console.error("[scheduler] PostgreSQL lock cleanup failed:", safeDiagnosticCode(error));
     } finally {
-      client.release(!clean);
+      client.off("error", onDisconnect);
+      client.release(disconnected || !clean);
     }
   }
 }
@@ -364,7 +375,7 @@ async function publishApprovedPost(ctx, postId, language, client) {
 
     await updateAdminMessage(
       ctx,
-      `PROFINO — Post ${postId} was sent to the channel.\n\n` +
+      adminText(language, "Post " + postId + " sent. Message ID: ", "پست " + postId + " ارسال شد. شناسه پیام: ") + published.message_id + "\n\n" +
       adminText(language, "Database confirmation failed.\nPlease verify the channel and database status manually.", "تأیید پایگاه داده ناموفق بود.\nوضعیت کانال و پایگاه داده را دستی بررسی کنید.")
     );
   }

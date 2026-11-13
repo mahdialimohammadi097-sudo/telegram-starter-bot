@@ -134,7 +134,7 @@ done
 for stage in drain restart; do
   DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node scripts/check-preview-shutdown.mjs "$stage"
 done
-for stage in drain restart; do
+for stage in drain restart disconnect recover-disconnect; do
   DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node scripts/check-publication-shutdown.mjs "$stage"
 done
 echo "Publication shutdown and restart checks passed."

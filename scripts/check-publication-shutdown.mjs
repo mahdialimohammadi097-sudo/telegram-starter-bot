@@ -6,7 +6,7 @@ import { startScheduler } from "../src/scheduler.js";
 import { pool, closeDatabase } from "../src/database.js";
 
 const stage = process.argv[2];
-assert.ok(["drain", "restart", "overlap"].includes(stage));
+assert.ok(["drain", "restart", "overlap", "disconnect", "recover-disconnect"].includes(stage));
 const db = new URL(process.env.DATABASE_URL);
 assert.equal(db.hostname, "127.0.0.1");
 assert.equal(db.pathname, "/drill_restored");
@@ -14,16 +14,18 @@ const owner = 8810232463;
 const bot = new Bot("offline", { botInfo: { id: 7, is_bot: true, first_name: "Test", username: "fixture_bot" } });
 const lock = await pool.connect();
 let sends = 0;
+const edits = [];
 bot.api.config.use(async (_prev, method, payload) => {
   if (method === "sendMessage") {
     assert.equal(payload.chat_id, "@PROFINO1");
     sends++;
-    if (stage === "drain") {
+    if (stage === "drain" || stage === "disconnect") {
       await lock.query("BEGIN");
-      await lock.query("SELECT id FROM scheduled_posts WHERE id=91 FOR UPDATE");
+      await lock.query("SELECT id FROM scheduled_posts WHERE id=$1 FOR UPDATE", [stage === "disconnect" ? 94 : 91]);
     }
     return { ok: true, result: { message_id: 910 } };
   }
+  if (method === "editMessageText") edits.push(payload.text);
   assert.ok(["editMessageText", "answerCallbackQuery"].includes(method));
   return { ok: true, result: true };
 });
@@ -44,7 +46,34 @@ try {
   }
   scheduler = startScheduler(bot);
   assert.equal(await scheduler.ready, true);
-  if (stage === "overlap") {
+  if (stage === "disconnect" || stage === "recover-disconnect") {
+    if (stage === "disconnect") {
+      await pool.query("INSERT INTO scheduled_posts(id,title,status,content,preview_chat_id,preview_message_id) VALUES (94,'Session loss','preview_sent','Offline',$1,94)", [owner]);
+      pending = approve(94);
+      const deadline = Date.now() + 8000;
+      for (;;) {
+        const { rows } = await pool.query(`SELECT pid FROM pg_stat_activity
+          WHERE datname=current_database() AND $1::int=ANY(pg_blocking_pids(pid))
+            AND query LIKE '%published_message_id = $1%'`, [lock.processID]);
+        if (rows.length) {
+          assert.equal(rows.length, 1);
+          const result = await pool.query("SELECT pg_terminate_backend($1) AS terminated", [rows[0].pid]);
+          assert.equal(result.rows[0].terminated, true);
+          break;
+        }
+        assert.ok(Date.now() < deadline, "offline channel acknowledged and final write is blocked");
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      await lock.query("ROLLBACK");
+      await pending;
+      assert.ok(edits.some(text => text.includes("910")));
+    }
+    await approve(94);
+    const { rows: [post] } = await pool.query("SELECT status, published_message_id FROM scheduled_posts WHERE id=94");
+    assert.equal(post.status, stage === "disconnect" ? "publishing" : "publish_unknown");
+    assert.equal(post.published_message_id, null);
+    assert.equal(sends, stage === "disconnect" ? 1 : 0);
+  } else if (stage === "overlap") {
     await scheduler.stop();
     assert.equal(sends, 0);
     const state = await pool.query("SELECT status FROM scheduled_posts WHERE id=91");
@@ -89,11 +118,11 @@ try {
     await approve(91);
     await approve(93);
   }
-  assert.equal(sends, stage === "drain" ? 1 : 0);
+  assert.equal(sends, ["drain", "disconnect"].includes(stage) ? 1 : 0);
   const { rows } = await pool.query("SELECT id,status,published_message_id FROM scheduled_posts WHERE id BETWEEN 91 AND 93 ORDER BY id");
   const expected = [{ id: "91", status: "published", published_message_id: "910" },
     { id: "92", status: "preview_sent", published_message_id: null }];
-  if (stage === "restart") expected.push({ id: "93", status: "publish_unknown", published_message_id: null });
+  if (["restart", "disconnect", "recover-disconnect"].includes(stage)) expected.push({ id: "93", status: "publish_unknown", published_message_id: null });
   assert.deepEqual(rows, expected);
   const history = await pool.query("SELECT new_status FROM scheduled_post_history WHERE post_id=91 ORDER BY id");
   assert.deepEqual(history.rows.map(row => row.new_status), ["preview_sent", "publishing", "published"]);

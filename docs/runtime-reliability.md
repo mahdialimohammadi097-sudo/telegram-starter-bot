@@ -39,3 +39,5 @@ Shutdown also stops admitting new publication and rejection callbacks and waits 
 ### Overlapping scheduler instances
 
 Candidate instances share a PostgreSQL advisory lock during a preview batch or approved publication. Startup recovery obtains the exclusive lock before classifying outstanding sends. The sending session owns its lock through the final database write; losing the session releases it. The offline PG17 drill starts another Node process while the publication write is blocked and verifies that recovery waits and preserves the published state. This protocol requires session-affine PostgreSQL connections and cooperating scheduler versions. Drain the older instance before a mixed-version cutover.
+
+The offline restore drill terminates only the fixture database backend blocked on writing the acknowledged channel message ID. The operator notification includes that message ID for manual inspection. Replaying the approval before and after startup recovery does not resend the post. Recovery converts the interrupted publishing state to publish_unknown. A database error cannot by itself establish whether an external delivery succeeded.
