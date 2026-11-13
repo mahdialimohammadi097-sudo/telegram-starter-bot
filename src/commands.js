@@ -268,24 +268,30 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
     });
   }
 
-  async function showSimulationReceipt(ctx, id) {
+  async function showSimulationReceipt(ctx, id, historyCursor = null) {
+    const keyboard = new Keyboard();
+    if (historyCursor) keyboard.text("Older entries · #" + historyCursor).row();
+    keyboard.text("Transaction History").row().text("Deposit").text("Withdraw").row().text("⬅ Main Menu").resized();
+    const options = { reply_markup: keyboard };
     if (!/^[1-9]\d{0,18}$/.test(id) || BigInt(id) > 9223372036854775807n) {
       return ctx.reply("Use /receipt followed by the journal number shown in Deposit or Withdraw.");
     }
     try {
       const receipt = await getSimulationReceipt(pool, ctx.from.id, id);
-      if (!receipt) return ctx.reply("No matching simulation receipt is available.");
+      if (!receipt) return ctx.reply("No matching simulation receipt is available.", options);
       return ctx.reply([
         "SIMULATION RECEIPT · " + simulationHistoryLabels.get(receipt.transaction_type),
         "Request #" + receipt.reference_id + " · Journal #" + receipt.id,
         "Amount: " + formatUsdt(receipt.amount) + " test USDT",
         "Posted: " + receipt.created_at.toISOString()
-      ].join("\n"), { reply_markup: new Keyboard().text("Deposit").text("Withdraw").row().text("⬅ Main Menu").resized() });
+      ].join("\n"), options);
     } catch (error) {
       console.error("[receipt] lookup failed:", safeDiagnosticCode(error));
-      return ctx.reply("Unable to load your receipt. Please try again later.");
+      return ctx.reply("Unable to load your receipt. Please try again later.", options);
     }
   }
+  bot.hears(/^Receipt #([1-9]\d{0,18}) · history #([1-9]\d{0,18})$/, ctx =>
+    showSimulationReceipt(ctx, ctx.match[1], ctx.match[2]));
   bot.command("receipt", ctx => showSimulationReceipt(ctx, ctx.match.trim()));
   bot.hears(/^\/receipt_([1-9]\d{0,18})$/, ctx => showSimulationReceipt(ctx, ctx.match[1]));
 
@@ -717,7 +723,13 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         if (choice !== "My Wallet") {
           const { entries, next } = await getWalletHistoryPage(pool, userResult.rows[0].id, olderPage?.[1]);
           if (next) walletMenu.row().text("Older entries · #" + next);
-          if (olderPage) walletMenu.row().text("Transaction History");
+          if (olderPage) {
+            walletMenu.row().text("Transaction History");
+            const journals = new Set(entries.filter(entry => entry.has_receipt).map(entry => entry.journal_id));
+            for (const journal of journals) {
+              walletMenu.row().text("Receipt #" + journal + " · history #" + olderPage[1]);
+            }
+          }
           const lines = entries.map(entry => {
             const utc = entry.created_at.toISOString().slice(0, 16).replace("T", " ");
             const sign = entry.entry_type === "credit" ? "+" : "-";

@@ -1422,7 +1422,20 @@ test("one private Telegram wallet tracks a synthetic deposit, SMART settlement, 
   const inserted = await reserveWithdrawal(pool, owner, "while-reading-history", "1");
   const olderLines = [];
   for (let page = 0; nextPage && page < 5; page++) {
-    const text = await screen(nextPage.text);
+    const pageButton = nextPage.text;
+    const text = await screen(pageButton);
+    if (text.split("\n").some(line => line.endsWith(" · " + releasedReceipt))) {
+      const journal = releasedReceipt.split("_")[1];
+      const shortcuts = replies[0].reply_markup.keyboard.flat().filter(button => button.text.startsWith("Receipt #" + journal + " ·"));
+      assert.equal(shortcuts.length, 1);
+      assert.equal(await screen(shortcuts[0].text, secondUser), "No matching simulation receipt is available.");
+      const foreignPage = replies[0].reply_markup.keyboard[0][0].text;
+      assert.match(await screen(foreignPage, secondUser), /No older entries available/);
+      assert.equal(await screen(shortcuts[0].text), receipt);
+      const back = replies[0].reply_markup.keyboard[0][0].text;
+      assert.equal(back, pageButton);
+      assert.equal(await screen(back), text);
+    }
     olderLines.push(...text.split("\n").filter(line => line.includes(" UTC · ")));
     nextPage = olderButton();
   }
