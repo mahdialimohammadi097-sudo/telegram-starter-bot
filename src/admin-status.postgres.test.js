@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
+import pg from "pg";
 import { Bot } from "grammy";
 
 test("private status confirmations commit once with their audit row and survive delivery failures", {
@@ -7,25 +9,28 @@ test("private status confirmations commit once with their audit row and survive 
 }, async t => {
   const { pool } = await import("./database.js");
   const { registerAdminOps } = await import("./admin-ops.js");
-  const client = await pool.connect();
+  const schema = "admin_status_" + randomUUID().replaceAll("-", "");
+  const setup = await pool.connect();
+  const fixture = new pg.Pool({ connectionString: process.env.DATABASE_URL, options: "-c search_path=" + schema });
+  const client = await fixture.connect();
   const owner = 8810232463;
   const target = 450021;
   let leased = false;
   try {
+    await setup.query("CREATE SCHEMA " + schema);
     await client.query(`
-      SET search_path TO pg_temp;
-      CREATE TEMP TABLE users (id bigint PRIMARY KEY, telegram_id bigint, status text, username text,
+      CREATE TABLE users (id bigint PRIMARY KEY, telegram_id bigint, status text, username text,
         first_name text, last_name text, referral_code text, created_at timestamptz);
-      CREATE TEMP TABLE admin_users (user_id bigint, role text, status text);
-      CREATE TEMP TABLE admin_preferences (user_id bigint, language text);
-      CREATE TEMP TABLE admin_audit_logs (id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(), admin_user_id bigint, actor_telegram_id bigint, action text,
+      CREATE TABLE admin_users (user_id bigint, role text, status text);
+      CREATE TABLE admin_preferences (user_id bigint, language text);
+      CREATE TABLE admin_audit_logs (id bigserial PRIMARY KEY, created_at timestamptz DEFAULT now(), admin_user_id bigint, actor_telegram_id bigint, action text,
         target_user_id bigint, currency text, metadata jsonb, details jsonb);
       INSERT INTO admin_users VALUES (1, 'owner', 'active');
       INSERT INTO admin_preferences VALUES (1, 'fa')
     `);
     await client.query("INSERT INTO users VALUES (1, $1, 'active'), (2, $2, 'active')", [owner, target]);
     t.mock.method(pool, "query", client.query.bind(client));
-    t.mock.method(pool, "connect", async () => {
+    const connect = t.mock.method(pool, "connect", async () => {
       assert.equal(leased, false);
       leased = true;
       return { query: client.query.bind(client), release() { leased = false; } };
@@ -44,11 +49,14 @@ test("private status confirmations commit once with their audit row and survive 
       return { ok: true, result: true };
     });
     let seq = 0;
-    async function click(data, sender = owner, type = "private") {
-      calls.length = 0;
+    async function dispatch(data, sender, type) {
       const from = { id: sender, first_name: "Fixture", is_bot: false };
       await bot.handleUpdate({ update_id: ++seq, callback_query: { id: String(seq), data, from, chat_instance: "offline",
         message: { message_id: 1, date: 0, chat: { type, id: type === "private" ? sender : -7 } } } });
+    }
+    async function click(data, sender = owner, type = "private") {
+      calls.length = 0;
+      await dispatch(data, sender, type);
       return calls.map(call => call.method);
     }
     const status = async () => (await client.query("SELECT status FROM users WHERE id = 2")).rows[0].status;
@@ -153,6 +161,43 @@ test("private status confirmations commit once with their audit row and survive 
     assert.match(calls[0].payload.text, /outdated/);
     assert.equal(await status(), "active");
     assert.equal((await audit()).length, beforeReplay);
+    // Queue both independent database sessions behind the same row lock.
+    await click("admin_user_action:" + target + ":blocked:1");
+    const fresh = button("Confirm");
+    const acquired = [];
+    let bothReady;
+    const ready = new Promise(resolve => { bothReady = resolve; });
+    connect.mock.mockImplementation(async () => {
+      const session = await fixture.connect();
+      acquired.push(session.processID);
+      if (acquired.length === 2) bothReady();
+      return session;
+    });
+    await client.query("BEGIN");
+    await client.query("SELECT id FROM users WHERE id = 2 FOR UPDATE");
+    calls.length = 0;
+    const pending = Promise.all([dispatch(fresh, owner, "private"), dispatch(fresh, owner, "private")]);
+    try {
+      // Session reads, including language lookup, run on the fixture connection.
+      await Promise.race([ready, pending.then(() => { throw new Error("Missing confirmation sessions"); })]);
+      assert.equal(new Set(acquired).size, 2);
+      const deadline = Date.now() + 10000;
+      for (;;) {
+        const result = await setup.query(
+          "SELECT count(*)::int AS waiting FROM pg_stat_activity WHERE pid = ANY($1::int[]) AND wait_event_type = 'Lock'", [acquired]
+        );
+        if (result.rows[0].waiting === 2) break;
+        assert.ok(Date.now() < deadline, "both confirmations reached the locked row");
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    } finally {
+      await client.query("ROLLBACK");
+      await pending;
+    }
+    const notices = calls.filter(call => call.method === "answerCallbackQuery").map(call => call.payload.text);
+    assert.deepEqual(notices.sort(), ["This confirmation is outdated.", "User status updated."].sort());
+    assert.equal(await status(), "blocked");
+    assert.equal((await audit()).length, beforeReplay + 1);
     await client.query("DELETE FROM users WHERE id = 2");
     failEdit = true;
     assert.deepEqual(await click(confirm), ["answerCallbackQuery", "editMessageText", "sendMessage"]);
@@ -164,6 +209,12 @@ test("private status confirmations commit once with their audit row and survive 
     assert.match(calls.at(-1).payload.text, /No user status changes recorded yet/);
   } finally {
     client.release(true);
-    await pool.end();
+    await fixture.end();
+    try {
+      await setup.query("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+    } finally {
+      setup.release();
+      await pool.end();
+    }
   }
 });
