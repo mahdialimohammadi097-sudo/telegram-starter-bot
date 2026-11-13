@@ -552,6 +552,14 @@ export async function ensureAdminOpsSchema() {
     ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb
   `);
 
+  // Older local schemas lack fields used by both activity and status writers.
+  // Leave historical currency and metadata unknown rather than attributing them.
+  await pool.query(`
+    ALTER TABLE admin_audit_logs
+      ADD COLUMN IF NOT EXISTS currency TEXT,
+      ADD COLUMN IF NOT EXISTS metadata JSONB
+  `);
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created
     ON admin_audit_logs(id DESC)
