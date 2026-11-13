@@ -441,16 +441,11 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page)
   }
 
   const changed = await commitUserStatus(telegramId, newStatus, expectedStatus);
-  if (!changed) {
-    return ctx.answerCallbackQuery({
-      text: adminText(language, "This confirmation is outdated. Reopen the user details and try again.",
-        "این تأیید منقضی شده است. جزئیات کاربر را دوباره باز کنید و تلاش کنید."),
-      show_alert: true
-    });
-  }
-
+  const notice = changed
+    ? adminText(language, "User status updated.", "وضعیت کاربر به‌روزرسانی شد.")
+    : adminText(language, "This confirmation is outdated.", "این تأیید منقضی شده است.");
   try {
-    await ctx.answerCallbackQuery({ text: adminText(language, "User status updated.", "وضعیت کاربر به‌روزرسانی شد.") });
+    await ctx.answerCallbackQuery({ text: notice, show_alert: !changed });
   } catch (error) {
     console.error("[admin-ops] status acknowledgement failed:", safeDiagnosticCode(error));
   }
@@ -458,8 +453,8 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page)
     await showUser(ctx, telegramId, true, page);
   } catch (error) {
     console.error("[admin-ops] updated user details unavailable:", safeDiagnosticCode(error));
-    await ctx.reply(adminText(language, "Status updated. Reopen the user details to refresh.",
-      "وضعیت به‌روزرسانی شد. برای مشاهدهٔ نتیجه، جزئیات کاربر را دوباره باز کنید.")).catch(error => {
+    await ctx.reply(notice + "\n" + adminText(language, "Reopen the user details to refresh.",
+      "برای مشاهدهٔ نتیجه، جزئیات کاربر را دوباره باز کنید.")).catch(error => {
       console.error("[admin-ops] status notification failed:", safeDiagnosticCode(error));
     });
   }

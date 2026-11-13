@@ -70,8 +70,11 @@ test("private status confirmations commit once with their audit row and survive 
     assert.match(calls.at(-1).payload.text, /وضعیت: مسدود/);
     assert.ok(calls.at(-1).payload.reply_markup.inline_keyboard.flat().some(b => b.callback_data === "admin_users:1"));
     failAck = false;
-    assert.deepEqual(await click(confirm), ["answerCallbackQuery"]);
+    assert.deepEqual(await click(confirm), ["answerCallbackQuery", "editMessageText"]);
     assert.match(calls[0].payload.text, /منقضی/);
+    assert.equal(calls[0].payload.show_alert, true);
+    assert.match(calls[1].payload.text, /وضعیت: مسدود/);
+    assert.ok(calls[1].payload.reply_markup.inline_keyboard.flat().some(b => b.callback_data === "admin_users:1"));
     assert.equal(await status(), "blocked");
     assert.deepEqual(await audit(), [{ actor_telegram_id: String(owner), target_user_id: "2", action: "user_blocked",
       details: { old_status: "active", new_status: "blocked" } }]);
@@ -140,6 +143,13 @@ test("private status confirmations commit once with their audit row and survive 
     await click(button("جزئیات کاربر"));
     assert.equal(button("کاربران"), "admin_users:1");
     await client.query("UPDATE admin_preferences SET language = 'en'");
+    await client.query("DELETE FROM users WHERE id = 2");
+    failEdit = true;
+    assert.deepEqual(await click(confirm), ["answerCallbackQuery", "editMessageText", "sendMessage"]);
+    assert.match(calls[0].payload.text, /outdated/);
+    assert.equal(calls.at(-1).payload.text, "User not found.");
+    assert.equal(button("Users"), "admin_users:1");
+    failEdit = false;
     await click("au:999999:0");
     assert.match(calls.at(-1).payload.text, /No user status changes recorded yet/);
   } finally {
