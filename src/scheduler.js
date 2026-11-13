@@ -14,32 +14,35 @@ let isStarted = false;
 let schedulerStopped = false;
 let schedulerTimer = null;
 
-async function recoverInterruptedOperations() {
-  const previewResult = await pool.query(`
-    UPDATE scheduled_posts
-    SET status = 'preview_unknown',
-        updated_at = NOW()
-    WHERE status = 'preview_sending'
-  `);
-
-  const publishResult = await pool.query(`
-    UPDATE scheduled_posts
-    SET status = 'publish_unknown',
-        updated_at = NOW()
-    WHERE status = 'publishing'
-  `);
-
-  console.log(
-    `[scheduler] recovered ${previewResult.rowCount} interrupted previews.`
-  );
-
-  console.log(
-    `[scheduler] recovered ${publishResult.rowCount} interrupted publications.`
-  );
+// A session lock spans the committed claim, Telegram send and final status write.
+// Recovery waits for sends on other instances. Disconnecting releases the lock.
+async function withSchedulerLock(shared, operation) {
+  const client = await pool.connect();
+  const suffix = shared ? "_shared" : "";
+  let clean = false;
+  try {
+    await client.query("SELECT pg_advisory_lock" + suffix + "(780244, 1)");
+    return await operation(client);
+  } finally {
+    try {
+      const result = await client.query("SELECT pg_advisory_unlock" + suffix + "(780244, 1) AS unlocked");
+      clean = result.rows[0].unlocked;
+    } finally {
+      client.release(!clean);
+    }
+  }
 }
 
-async function claimScheduledPosts() {
-  const client = await pool.connect();
+async function recoverInterruptedOperations() {
+  return withSchedulerLock(false, client => client.query(`
+    UPDATE scheduled_posts
+    SET status = CASE WHEN status = 'preview_sending' THEN 'preview_unknown' ELSE 'publish_unknown' END,
+        updated_at = NOW()
+    WHERE status IN ('preview_sending', 'publishing')
+  `));
+}
+
+async function claimScheduledPosts(client) {
 
   try {
     await client.query("BEGIN");
@@ -76,13 +79,10 @@ async function claimScheduledPosts() {
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
-  } finally {
-    client.release();
   }
 }
 
-async function sendPreview(bot, post) {
-  const language = await getAdminLanguage({ from: { id: ADMIN_ID } });
+async function sendPreview(bot, post, client, language) {
   try {
     const scheduledTime = new Date(post.scheduled_at).toLocaleString(
       "en-GB",
@@ -121,7 +121,7 @@ async function sendPreview(bot, post) {
       { reply_markup: keyboard }
     );
 
-    await pool.query(`
+    await client.query(`
       UPDATE scheduled_posts
       SET status = 'preview_sent',
           preview_message_id = $1,
@@ -143,7 +143,7 @@ async function sendPreview(bot, post) {
     );
 
     try {
-      await pool.query(`
+      await client.query(`
         UPDATE scheduled_posts
         SET status = 'preview_unknown',
             updated_at = NOW()
@@ -161,11 +161,12 @@ async function sendPreview(bot, post) {
 
 async function processScheduledPosts(bot) {
   try {
-    const posts = await claimScheduledPosts();
-
-    for (const post of posts) {
-      await sendPreview(bot, post);
-    }
+    await withSchedulerLock(true, async client => {
+      const posts = await claimScheduledPosts(client);
+      if (!posts.length) return;
+      const language = await getAdminLanguage({ from: { id: ADMIN_ID } }, client);
+      for (const post of posts) await sendPreview(bot, post, client, language);
+    });
   } catch (error) {
     console.error("[scheduler] processing error:", safeDiagnosticCode(error));
   }
@@ -253,10 +254,14 @@ async function handlePostAction(ctx) {
     return;
   }
 
+  return withSchedulerLock(true, client => publishApprovedPost(ctx, postId, language, client));
+}
+
+async function publishApprovedPost(ctx, postId, language, client) {
   let post;
 
   try {
-    const result = await pool.query(`
+    const result = await client.query(`
       UPDATE scheduled_posts
       SET status = 'publishing',
           approved_by = $1,
@@ -311,7 +316,7 @@ async function handlePostAction(ctx) {
     );
 
     try {
-      await pool.query(`
+      await client.query(`
         UPDATE scheduled_posts
         SET status = 'publish_unknown',
             updated_at = NOW()
@@ -335,7 +340,7 @@ async function handlePostAction(ctx) {
   }
 
   try {
-    await pool.query(`
+    await client.query(`
       UPDATE scheduled_posts
       SET status = 'published',
           published_message_id = $1,

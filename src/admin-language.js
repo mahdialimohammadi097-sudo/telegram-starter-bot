@@ -1,10 +1,10 @@
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { pool } from "./database.js";
-export async function getAdminLanguage(ctx) {
+export async function getAdminLanguage(ctx, database = pool) {
   const id = ctx.from?.id;
   if (!id) return "en";
   try {
-    const result = await pool.query(`SELECT ap.language FROM users u LEFT JOIN admin_preferences ap ON ap.user_id = u.id WHERE u.telegram_id = $1 LIMIT 1`, [id]);
+    const result = await database.query(`SELECT ap.language FROM users u LEFT JOIN admin_preferences ap ON ap.user_id = u.id WHERE u.telegram_id = $1 LIMIT 1`, [id]);
     return result.rows[0]?.language === "fa" ? "fa" : "en";
   } catch (error) {
     console.error("[admin-language] lookup failed:", safeDiagnosticCode(error));

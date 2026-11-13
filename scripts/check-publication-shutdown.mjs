@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { Bot } from "grammy";
 import { startScheduler } from "../src/scheduler.js";
 import { pool, closeDatabase } from "../src/database.js";
 
 const stage = process.argv[2];
-assert.ok(["drain", "restart"].includes(stage));
+assert.ok(["drain", "restart", "overlap"].includes(stage));
 const db = new URL(process.env.DATABASE_URL);
 assert.equal(db.hostname, "127.0.0.1");
 assert.equal(db.pathname, "/drill_restored");
@@ -37,12 +39,17 @@ try {
   if (stage === "drain") {
     await pool.query(`INSERT INTO scheduled_posts(id,title,content,status,preview_chat_id,preview_message_id)
       SELECT i,'Shutdown','Offline','preview_sent',$1,i FROM generate_series(91,92) i`, [owner]);
-  } else {
+  } else if (stage === "restart") {
     await pool.query("INSERT INTO scheduled_posts(id,title,status,preview_chat_id,preview_message_id) VALUES (93,'Interrupted','publishing',$1,93)", [owner]);
   }
   scheduler = startScheduler(bot);
   assert.equal(await scheduler.ready, true);
-  if (stage === "drain") {
+  if (stage === "overlap") {
+    await scheduler.stop();
+    assert.equal(sends, 0);
+    const state = await pool.query("SELECT status FROM scheduled_posts WHERE id=91");
+    assert.equal(state.rows[0].status, "published");
+  } else if (stage === "drain") {
     pending = approve(91);
     const deadline = Date.now() + 8000;
     for (;;) {
@@ -53,6 +60,23 @@ try {
       assert.ok(Date.now() < deadline, "publication reached its final database write");
       await new Promise(resolve => setTimeout(resolve, 20));
     }
+    const second = spawn(process.execPath, [process.argv[1], "overlap"], { stdio: "inherit",
+      env: { ...process.env, PGAPPNAME: "fixture_overlapping_scheduler" } });
+    const exit = once(second, "exit");
+    try {
+      const deadline = Date.now() + 8000;
+      for (;;) {
+        const { rows: [row] } = await pool.query(`SELECT EXISTS (
+          SELECT 1 FROM pg_stat_activity WHERE application_name='fixture_overlapping_scheduler'
+            AND wait_event_type='Lock' AND wait_event='advisory') AS waiting`);
+        if (row.waiting) break;
+        assert.ok(second.exitCode === null && Date.now() < deadline, "second scheduler waited for the active publisher");
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    } catch (error) {
+      second.kill();
+      throw error;
+    }
     let finished = false;
     const stopping = scheduler.stop().then(() => { finished = true; });
     await approve(92);
@@ -60,6 +84,7 @@ try {
     assert.equal(finished, false);
     await lock.query("ROLLBACK");
     await Promise.all([stopping, pending]);
+    assert.deepEqual(await exit, [0, null]);
   } else {
     await approve(91);
     await approve(93);
