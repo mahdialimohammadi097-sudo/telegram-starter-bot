@@ -1,7 +1,7 @@
 // PROFINO Telegram Bot runtime
 // Polling is the default; webhook mode is optional.
 
-import { Bot, webhookCallback } from "grammy";
+import { Bot } from "grammy";
 import { registerCommands } from "./src/commands.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
 import { startScheduler } from "./src/scheduler.js";
@@ -11,6 +11,7 @@ import { inspectCoreSchema } from "./src/database-diagnostics.js";
 import { formatStartupHealthReport } from "./src/health-report.js";
 import { startHealthMonitor } from "./src/health-monitor.js";
 import { createRuntimeHealthState } from "./src/runtime-health.js";
+import { webhookConfiguration, telegramWebhookHandler } from "./src/telegram-webhook.js";
 import { startHealthHttpServer } from "./src/health-http.js";
 import { safeDiagnosticCode } from "./src/diagnostic-safety.js";
 
@@ -200,6 +201,15 @@ async function startPolling() {
 }
 
 async function main() {
+  let webhook;
+  if (mode === "webhook") {
+    try {
+      webhook = webhookConfiguration(process.env.WEBHOOK_URL, process.env.WEBHOOK_SECRET);
+    } catch {
+      console.error("[startup] Webhook mode requires a valid HTTPS base URL and WEBHOOK_SECRET.");
+      throw new Error("Invalid webhook configuration");
+    }
+  }
   healthServer = await startHealthHttpServer({
     port,
     runtimeHealth,
@@ -227,14 +237,13 @@ async function main() {
 
   await sendStartupReport(me.username);
 
-  const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
   healthMonitor = startHealthMonitor({
     bot,
     pool,
     telegramCheck: mode === "webhook"
       ? async () => {
           const info = await bot.api.getWebhookInfo();
-          return info.url === `${webhookUrl}/telegram`;
+          return info.url === webhook.url;
         }
       : async () => { await bot.api.getMe(); return true; },
     onStatus: (status) => {
@@ -246,20 +255,14 @@ async function main() {
   scheduler = startScheduler(bot);
 
   if (mode === "webhook") {
-    if (!webhookUrl.startsWith("https://")) {
-      throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
-    }
-
-    const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined;
-    webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
-
-    await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
-      secret_token: secret,
+    webhookHandler = telegramWebhookHandler(bot, webhook);
+    await retryUntilAvailable(() => bot.api.setWebhook(webhook.url, {
+      secret_token: webhook.secret,
       drop_pending_updates: false
     }), "Telegram webhook registration");
 
     runtimeHealth.setTelegramReceiverActive(true);
-    console.log(`[bot] webhook registered at ${webhookUrl}/telegram`);
+    console.log("[bot] webhook registered.");
     return;
   }
 
