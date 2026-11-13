@@ -28,8 +28,6 @@ const mainMenu = new Keyboard()
   .text("Transaction History").text("Support")
   .resized();
 
-const simulationReceiptTypes = new Set(["simulated-deposit", "sim-withdraw-reserve", "sim-withdraw-release"]);
-
 const simulationHistoryLabels = new Map([
   ["simulated-deposit", "Simulated deposit"],
   ["simulated-investment-open", "Simulated investment opened"],
@@ -727,7 +725,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
             const label = simulationHistoryLabels.get(entry.transaction_type);
             const line = utc + " UTC · " + account + " · " + sign + formatUsdt(entry.amount) + " USDT";
             if (!label) return line;
-            const receipt = simulationReceiptTypes.has(entry.transaction_type) ? " · /receipt_" + entry.journal_id : "";
+            const receipt = entry.has_receipt ? " · /receipt_" + entry.journal_id : "";
             return line + " · " + label + receipt;
           });
           const heading = olderPage ? "Older posted wallet entries" : "Latest posted wallet entries (up to 10)";

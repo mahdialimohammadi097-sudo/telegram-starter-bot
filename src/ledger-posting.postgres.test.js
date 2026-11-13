@@ -9,7 +9,7 @@ import { readTestnetTransfer } from "../test-support/bsc-testnet-receipt.js";
 import { findSettlementDiscrepancies } from "../test-support/reconcile-simulated-settlements.js";
 import { findSimulationDiscrepancies } from "../test-support/reconcile-simulated-deposits.js";
 import { formatUsdt } from "./ledger-safety.js";
-import { getWalletBalances, getRecentWalletEntries, getDailySimulatedProfits, getSimulationReceipt } from "./wallet-balances.js";
+import { getWalletBalances, getRecentWalletEntries, getDailySimulatedProfits, getSimulationReceipt, getSimulatedTransferActivity } from "./wallet-balances.js";
 import { postLedgerTransaction, postJournalInTransaction, withLedgerTransaction } from "./ledger-posting.js";
 
 const enabled = Boolean(process.env.DATABASE_URL);
@@ -1762,6 +1762,14 @@ test("transfer receipts reject a balanced release journal that debits another us
       ]
     });
     assert.equal(await getSimulationReceipt(client, 32674, journal.transactionId), undefined);
+    for (const user of [owner, other]) {
+      const transfers = await getSimulatedTransferActivity(client, user, "Withdraw");
+      assert.ok(!transfers.some(row => String(row.journal_id) === String(journal.transactionId)));
+      const history = await getRecentWalletEntries(client, user);
+      const entry = history.find(row => String(row.journal_id) === String(journal.transactionId));
+      assert.ok(entry);
+      assert.equal(entry.has_receipt, false);
+    }
   } finally {
     await client.query("ROLLBACK");
     client.release();
