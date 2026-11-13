@@ -8,6 +8,8 @@ on:
       - .github/workflows/postgres-restore.yml
       - scripts/test-postgres-restore.sh
       - scripts/check-rollback-audit.mjs
+      - scripts/check-rollback-posts.mjs
+      - src/scheduler.js
       - src/admin-ops.js
       - src/post-history.js
       - src/database.js

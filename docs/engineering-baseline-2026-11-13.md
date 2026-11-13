@@ -173,3 +173,7 @@ The PostgreSQL 17 operational drill seeds a synthetic legacy audit table with a 
 ## Previous-code rollback and forward replay
 
 The operational workflow checks out main revision `aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f` under `rollback-reference` and compares its dependency lock before sharing installed packages. The network-isolated PG17 drill restores six synthetic tables, including the owner membership, then runs the pinned initializers and the actual private `/adminlogs` handler with an offline grammY transport. A separate candidate process reruns its initializers, reads the previous revision's event in Persian and appends its own event. Assertions check historical entries, actor, currency, JSON fields and preservation of the prior row. Host image rollback, other workflows, production-equivalent DDL and operational recovery timing remain open.
+
+### Scheduled publication across a rollback
+
+The restore workflow seeds three synthetic already-previewed posts. Separate candidate, pinned previous-code and candidate processes replay approval callbacks against the same restored database. Assertions count outbound calls on an offline Telegram transport and verify every post-history transition. Cases include an expired approval acknowledgement after the claim, a lost publication response, and a post first published by the previous revision. An uncertain publication stays available for manual investigation without automatic resend. This drill starts at approval and does not establish actual channel delivery.

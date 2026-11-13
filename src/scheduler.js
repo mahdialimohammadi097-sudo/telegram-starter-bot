@@ -270,7 +270,7 @@ async function handlePostAction(ctx) {
 
     if (!result.rowCount) {
       await ctx.answerCallbackQuery({
-        text: "Post is no longer available.",
+        text: adminText(language, "Post is no longer available.", "این پست دیگر در دسترس نیست."),
         show_alert: true
       });
       return;
@@ -288,9 +288,14 @@ async function handlePostAction(ctx) {
     return;
   }
 
-  await ctx.answerCallbackQuery({
-    text: adminText(language, "Approval received. Publishing...", "تأیید دریافت شد. در حال انتشار...")
-  });
+  try {
+    await ctx.answerCallbackQuery({
+      text: adminText(language, "Approval received. Publishing...", "تأیید دریافت شد. در حال انتشار...")
+    });
+  } catch (error) {
+    // The approved post is already claimed. An expired callback does not undo that claim.
+    console.error("[scheduler] approval acknowledgement failed:", safeDiagnosticCode(error));
+  }
 
   let published;
 

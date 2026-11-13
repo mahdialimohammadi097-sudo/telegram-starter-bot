@@ -37,7 +37,9 @@ sql() { psql -X -v ON_ERROR_STOP=1 -d "$1"; }
 sql drill_source <<'SQL'
 CREATE TABLE users (id bigint PRIMARY KEY, telegram_id bigint UNIQUE);
 CREATE TABLE admin_users (user_id bigint PRIMARY KEY REFERENCES users(id), role text, status text);
-CREATE TABLE scheduled_posts (id bigint PRIMARY KEY, title text, status text, content text, scheduled_at timestamptz);
+CREATE TABLE scheduled_posts (id bigint PRIMARY KEY, title text, status text, content text, scheduled_at timestamptz,
+  updated_at timestamptz, preview_message_id bigint, preview_chat_id bigint, approved_by bigint,
+  published_message_id bigint, published_at timestamptz);
 INSERT INTO users VALUES (1, 8810232463);
 INSERT INTO admin_users VALUES (1, 'owner', 'active');
 CREATE TABLE admin_audit_logs (
@@ -122,4 +124,12 @@ SQL
 for revision in rollback-reference candidate; do
   DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node scripts/check-rollback-audit.mjs "$revision"
 done
+sql drill_restored <<'SQL'
+INSERT INTO scheduled_posts(id,title,content,status,preview_chat_id,preview_message_id)
+SELECT i,'Fixture post','Offline publication','preview_sent',8810232463,i FROM generate_series(71,73) i;
+SQL
+for stage in candidate-first rollback-reference candidate-return; do
+  DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node scripts/check-rollback-posts.mjs "$stage"
+done
+echo "Scheduled-post rollback and forward checks passed."
 echo "Synthetic restore passed (pg_restore: ${restore_seconds}s, six tables). Rollback and forward audit checks passed."
