@@ -43,7 +43,11 @@ test("Telegram registration preserves identity and invite codes across repeated 
     assert.match(await send(8001, "/start"), /Your account is ready/);
     const menu = replies[0].reply_markup.keyboard;
     assert.match(await send(8001, "Support"), /Transaction History/);
-    assert.equal(replies[0].reply_markup.keyboard[0][0].text, "⬅ Main Menu");
+    const shortcuts = replies[0].reply_markup.keyboard.flat().map(button => button.text);
+    assert.deepEqual(shortcuts, ["My Account", "Referral Program", "My Wallet", "Transaction History", "⬅ Main Menu"]);
+    await send(8001, shortcuts[0]);
+    const accountReferral = replies[0].reply_markup.keyboard.flat().find(button => button.text === "Referral Program");
+    assert.match(await send(8001, accountReferral.text), /Your invite link: https:/);
     assert.equal(await send(8001, "⬅ Main Menu"), "Main Menu");
     assert.deepEqual(replies[0].reply_markup.keyboard, menu);
     for (const input of ["/help", "Where is my wallet?"]) {
@@ -88,6 +92,19 @@ test("Telegram registration preserves identity and invite codes across repeated 
     assert.match(repaired.referral_code, /^[0-9a-f]{16}$/);
     assert.equal(repaired.id, original.id);
     assert.ok((await send(8002, "Referral Program")).includes("ref_" + repaired.referral_code));
+    await client.query("UPDATE users SET referral_code = 'legacy?broken' WHERE telegram_id = 8002");
+    assert.match(await send(8002, "My Account"), /Referral Code: Send \/start/);
+    assert.match(await send(8002, "Referral Program"), /Send \/start to generate/);
+    assert.equal((await account(8002)).referral_code, "legacy?broken");
+    await send(8002, "/start");
+    const valid = await account(8002);
+    assert.equal(valid.id, repaired.id);
+    assert.match(valid.referral_code, /^[0-9a-f]{16}$/);
+    await client.query("UPDATE users SET referral_code = ' ABCDEF0123456789 ' WHERE telegram_id = 8002");
+    await send(8002, "/start");
+    assert.match(await send(8002, "Referral Program"), /Your referral code: abcdef0123456789\n/);
+    const preserved = await account(8002);
+    assert.equal(preserved.referral_code, " ABCDEF0123456789 ");
     const walletRows = () => client.query(
       "SELECT account_code FROM ledger_accounts WHERE user_id = $1 ORDER BY account_type", [original.id]
     );
@@ -98,7 +115,7 @@ test("Telegram registration preserves identity and invite codes across repeated 
     await client.query("DELETE FROM ledger_accounts WHERE user_id = $1 AND account_type = 'PROFIT'", [original.id]);
     await client.query("UPDATE users SET status = 'blocked' WHERE telegram_id = 8002");
     assert.match(await send(8002, "/start", "Blocked update"), /account is not active/);
-    assert.deepEqual(await account(8002), repaired);
+    assert.deepEqual(await account(8002), preserved);
     assert.equal((await walletRows()).rowCount, 2);
 
     // A failed account insert must also undo the user insert in that statement.
