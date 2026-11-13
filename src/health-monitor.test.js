@@ -63,3 +63,31 @@ test("monitor reports webhook receiver health through the status callback", asyn
   monitor.stop();
   assert.deepEqual(observed, { telegram: false, database: true });
 });
+
+test("an undelivered outage retries, deduplicates and reports recovery", async t => {
+  const attempts = [];
+  const diagnostics = [];
+  let databaseReady = false;
+  const monitor = startHealthMonitor({
+    telegramCheck: async () => true,
+    pool: { query: async () => { if (!databaseReady) throw new Error("fixture outage"); } },
+    bot: { api: { sendMessage: async (_recipient, text) => {
+      attempts.push(text);
+      if (attempts.length === 1) throw Object.assign(new Error("fixture detail"), { error_code: "private fixture value" });
+    } } },
+    logger: { warn() {}, error(...args) { diagnostics.push(args); } },
+    intervalMs: 60000
+  });
+  t.after(() => monitor.stop());
+  await monitor.ready;
+  await monitor.check();
+  await monitor.check();
+  databaseReady = true;
+  await monitor.check();
+  await monitor.check();
+  assert.equal(attempts.length, 3);
+  assert.match(attempts[0], /DATABASE: UNAVAILABLE/);
+  assert.match(attempts[1], /DATABASE: UNAVAILABLE/);
+  assert.match(attempts[2], /DATABASE: RECOVERED/);
+  assert.deepEqual(diagnostics, [["[health] alert delivery failed:", "telegram_send_failed"]]);
+});

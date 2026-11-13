@@ -34,7 +34,15 @@ export function startHealthHttpServer({
 
     if (req.method === "POST" && pathname === "/telegram") {
       const handler = getWebhookHandler();
-      if (handler) return handler(req, res);
+      if (handler) {
+        Promise.resolve().then(() => handler(req, res)).catch(() => {
+          if (res.destroyed || res.writableEnded) return;
+          if (res.headersSent) return res.destroy();
+          res.writeHead(500, { "cache-control": "no-store" });
+          res.end("webhook processing failed");
+        });
+        return;
+      }
       res.writeHead(503, { "cache-control": "no-store" });
       return res.end("webhook not configured");
     }
