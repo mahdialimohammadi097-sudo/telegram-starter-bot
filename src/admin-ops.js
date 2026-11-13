@@ -278,6 +278,7 @@ async function showUser(ctx, telegramId, edit = false, page = 0) {
       keyboard.text(language === "fa" ? "فعال‌سازی کاربر" : "Activate user", "admin_user_action:" + user.telegram_id + ":active" + userPageSuffix(page));
     }
   }
+  keyboard.row().text(adminText(language, "Status history", "سابقه وضعیت"), "au:" + user.telegram_id + ":" + page);
   keyboard.row()
     .text(language === "fa" ? "کاربران" : "Users", "admin_users:" + page)
     .text(language === "fa" ? "داشبورد" : "Dashboard", "admin_home");
@@ -331,7 +332,7 @@ function auditActionLabel(action, language) {
   return Object.hasOwn(labels, action) ? adminText(language, ...labels[action]) : action.toUpperCase();
 }
 
-async function showAuditLog(ctx, beforeId = null, statusOnly = false) {
+async function showAuditLog(ctx, beforeId = null, statusOnly = false, target = null, page = 0) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     `SELECT a.id, a.action, a.target_user_id, u.telegram_id AS target_telegram_id,
@@ -340,8 +341,9 @@ async function showAuditLog(ctx, beforeId = null, statusOnly = false) {
      LEFT JOIN users u ON u.id = a.target_user_id
      WHERE ($1::numeric IS NULL OR a.id < least($1::numeric, 9223372036854775807)::bigint)
        AND (NOT $2::boolean OR a.action IN ('user_blocked', 'user_activated'))
+       AND ($3::numeric IS NULL OR u.telegram_id = $3::numeric)
      ORDER BY a.id DESC
-     LIMIT 11`, [beforeId, statusOnly]
+     LIMIT 11`, [beforeId, statusOnly, target]
   );
   const rows = result.rows.slice(0, 10);
   const lines = rows.map(row =>
@@ -368,15 +370,17 @@ async function showAuditLog(ctx, beforeId = null, statusOnly = false) {
         lines.length ? lines.join("\n\n") : beforeId ? "No older activity found." : statusOnly ? "No user status changes recorded yet." : "No admin activity recorded yet."
       ].join("\n");
   const keyboard = new InlineKeyboard();
-  const feed = statusOnly ? "admin_logs_status" : "admin_logs";
+  const feed = target ? "au:" + target + ":" + page : statusOnly ? "admin_logs_status" : "admin_logs";
   if (result.rows.length > rows.length) {
     keyboard.text(adminText(language, "Older activity", "فعالیت‌های قدیمی‌تر"), feed + ":" + rows.at(-1).id).row();
   }
-  if (beforeId) keyboard.text(adminText(language, "Latest activity", "آخرین فعالیت‌ها"), feed + "_latest").row();
-  if (statusOnly) keyboard.text(adminText(language, "All activity", "همه فعالیت‌ها"), "admin_logs_latest").row();
+  if (beforeId) keyboard.text(adminText(language, "Latest activity", "آخرین فعالیت‌ها"), (target ? feed : feed + "_latest")).row();
+  if (target) keyboard.text(adminText(language, "User details", "جزئیات کاربر"), "admin_user:" + target + userPageSuffix(page)).row();
+  else if (statusOnly) keyboard.text(adminText(language, "All activity", "همه فعالیت‌ها"), "admin_logs_latest").row();
   else keyboard.text(adminText(language, "User status changes", "تغییرات وضعیت کاربران"), "admin_logs_status").row();
   keyboard.text(language === "fa" ? "بازگشت" : "Back", "admin_home");
-  return sendAdminScreen(ctx, message, keyboard, Boolean(ctx.callbackQuery && ctx.callbackQuery.data !== "admin_logs"));
+  const heading = target ? adminText(language, "Telegram ID: ", "شناسه تلگرام: ") + target + "\n\n" : "";
+  return sendAdminScreen(ctx, heading + message, keyboard, Boolean(ctx.callbackQuery && ctx.callbackQuery.data !== "admin_logs"));
 }
 
 async function confirmUserStatus(ctx, telegramId, newStatus, page) {
@@ -1079,7 +1083,7 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     }
   });
 
-  bot.callbackQuery(/^admin_logs(_status)?(?:_latest|:([1-9]\d{0,18}))?$/, async (ctx) => {
+  bot.callbackQuery(/^(?:admin_logs(_status)?(?:_latest|:([1-9]\d{0,18}))?|au:([1-9]\d{0,18}):(\d{1,9})(?::([1-9]\d{0,18}))?)$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) {
       return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     }
@@ -1091,7 +1095,8 @@ export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview }
     await ctx.answerCallbackQuery();
 
     try {
-      await showAuditLog(ctx, ctx.match[2], Boolean(ctx.match[1]));
+      const [, statusFilter, auditCursor, target, page, userCursor] = ctx.match;
+      await showAuditLog(ctx, userCursor ?? auditCursor, Boolean(statusFilter || target), target, Number(page || 0));
     } catch (error) {
       console.error("[admin-ops] activity view failed:", safeDiagnosticCode(error));
 

@@ -124,6 +124,24 @@ test("private status confirmations commit once with their audit row and survive 
     assert.match(calls.at(-1).payload.text, /پروفینو — تغییرات وضعیت کاربران/);
     await click(button("همه فعالیت‌ها"));
     assert.match(calls.at(-1).payload.text, /پروفینو — گزارش فعالیت مدیر/);
+
+    await click("admin_user:" + target + ":1");
+    const history = button("سابقه وضعیت");
+    await client.query("UPDATE admin_audit_logs SET target_user_id = 2 WHERE target_user_id IS NULL AND action = 'user_blocked'");
+    await client.query("INSERT INTO admin_audit_logs (action, target_user_id) VALUES ('user_blocked', 1)");
+    await click(history);
+    assert.equal(calls.at(-1).payload.text.match(/کاربر تعلیق شد/g).length, 10);
+    assert.ok(!calls.at(-1).payload.text.includes(String(owner)));
+    const nextUserPage = button("فعالیت‌های قدیمی‌تر");
+    assert.deepEqual(await click(nextUserPage, target), ["answerCallbackQuery"]);
+    assert.equal(calls[0].payload.text, "Unauthorized.");
+    await click(nextUserPage);
+    assert.match(calls.at(-1).payload.text, /فعال → مسدود/);
+    await click(button("جزئیات کاربر"));
+    assert.equal(button("کاربران"), "admin_users:1");
+    await client.query("UPDATE admin_preferences SET language = 'en'");
+    await click("au:999999:0");
+    assert.match(calls.at(-1).payload.text, /No user status changes recorded yet/);
   } finally {
     client.release(true);
     await pool.end();
