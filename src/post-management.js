@@ -108,12 +108,18 @@ export function registerPostManagement(bot) {
   bot.callbackQuery(/^post_edit_back:\d+$/, async (ctx) => {
     const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
-    sessions.delete(ADMIN_ID);
     try {
       const post = await getCurrentPreview(ctx, postId);
       if (!post) {
         await ctx.answerCallbackQuery({ text: "This preview is no longer valid.", show_alert: true });
         return;
+      }
+      const session = sessions.get(ADMIN_ID);
+      if (session && session.postId === String(post.id) &&
+          session.previewMessageId === post.preview_message_id &&
+          session.previewChatId === post.preview_chat_id &&
+          session.editVersion === post.edit_version) {
+        sessions.delete(ADMIN_ID);
       }
       await ctx.answerCallbackQuery();
       await ctx.editMessageText(previewText(post, language), { reply_markup: previewKeyboard(postId, language) });
