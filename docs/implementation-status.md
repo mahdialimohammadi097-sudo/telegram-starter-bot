@@ -1,5 +1,20 @@
 # PROFINO implementation status
 
+## Reviewing PR #51, 2026-11-13
+
+The candidate targets `feature/simulated-deposit-wallet`. Reviewers can trace these paths on disposable PostgreSQL 17 with synthetic Telegram updates.
+
+| Path | What to verify | Test file |
+| --- | --- | --- |
+| Customer account and invitation | Repeated registration keeps the same account. Reopening an account repairs malformed invite codes. Support leads to the account and referral screens. | `src/registration.postgres.test.js` |
+| Private owner panel | Persian and English navigation, status confirmation, rollback on audit-write failure, duplicate confirmation, and access restrictions. | `src/admin-language.postgres.test.js` and `src/admin-status.postgres.test.js` |
+| Wallet history and receipts | Follow a receipt from an older history page and return to the same entries. Try the same buttons from another synthetic account. | `src/ledger-posting.postgres.test.js` |
+| Wallet recovery | Compare the source and restored snapshots, replay a closed cancellation, and release the remaining hold. | `scripts/check-wallet-restore.js` in the Node.js 22 validation job |
+
+For a focused review, run `npm ci` and `npm run test:postgres` with `DATABASE_URL` pointing to a disposable test database. The command includes every PostgreSQL integration test file. GitHub Actions runs the full suite on Node.js 22, 24 and 26. Each successful test step writes the revision and TAP totals to the job summary. The restore drill has a separate result on Node.js 22.
+
+The preceding revision passed 108 tests with zero skips. [Validation for c1edd8d](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/43395993501)
+
 ## Review candidate, 2026-11-12
 
 PR #51 targets `feature/simulated-deposit-wallet`. The customer menu and ledger tests below run against disposable PostgreSQL 17 with offline Telegram updates. The [validation run for revision e3e67d1](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/43267089520) passed all 104 tests on Node.js 22, 24 and 26.
