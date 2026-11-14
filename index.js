@@ -83,14 +83,6 @@ async function retryUntilAvailable(operation, label) {
   throw new Error(`Startup cancelled while waiting for ${label}.`);
 }
 
-async function closeHttpServer() {
-  if (!healthServer?.listening) return;
-  await new Promise((resolve) => {
-    healthServer.close(() => resolve());
-    healthServer.closeIdleConnections?.();
-  });
-}
-
 async function shutdown(signal = "shutdown") {
   if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
@@ -98,6 +90,7 @@ async function shutdown(signal = "shutdown") {
   console.log(`[shutdown] ${signal}: stopping PROFINO services`);
 
   shutdownPromise = (async () => {
+    const httpDrained = healthServer?.drain();
     const schedulerDrained = scheduler?.stop();
     healthMonitor?.stop();
 
@@ -107,7 +100,8 @@ async function shutdown(signal = "shutdown") {
       console.error("[shutdown] Telegram bot stop warning:", safeDiagnosticCode(error));
     }
 
-    await Promise.all([closeHttpServer(), schedulerDrained]);
+    await Promise.all([httpDrained, schedulerDrained]);
+    await Promise.allSettled([...webhookUpdates]);
 
     try {
       await closeDatabase();
@@ -120,6 +114,17 @@ async function shutdown(signal = "shutdown") {
   return shutdownPromise;
 }
 
+// grammY can finish an HTTP response before the underlying middleware settles.
+const webhookUpdates = new Set();
+if (mode === "webhook") {
+  bot.use(async (_ctx, next) => {
+    if (shuttingDown) throw new Error("Webhook receiver is shutting down");
+    const work = next();
+    webhookUpdates.add(work);
+    try { await work; }
+    finally { webhookUpdates.delete(work); }
+  });
+}
 registerCommands(bot);
 
 bot.catch((error) => {
@@ -221,7 +226,7 @@ async function main() {
   });
 
   if (shuttingDown) {
-    await closeHttpServer();
+    await healthServer.drain();
     return;
   }
 

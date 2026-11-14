@@ -7,7 +7,14 @@ export function startHealthHttpServer({
   webhookPath = "/telegram",
   getWebhookHandler = () => null
 }) {
+  const active = new Map();
+  const sockets = new Set();
+  let draining;
   const server = http.createServer((req, res) => {
+    if (draining) {
+      res.writeHead(503, { connection: "close" });
+      return res.end();
+    }
     let pathname = "/";
     try {
       pathname = new URL(req.url || "/", "http://localhost").pathname;
@@ -36,12 +43,13 @@ export function startHealthHttpServer({
     if (req.method === "POST" && (pathname === webhookPath || pathname === "/telegram")) {
       const handler = getWebhookHandler();
       if (handler) {
-        Promise.resolve().then(() => handler(req, res)).catch(() => {
+        const task = Promise.resolve().then(() => handler(req, res)).catch(() => {
           if (res.destroyed || res.writableEnded) return;
           if (res.headersSent) return res.destroy();
           res.writeHead(500, { "cache-control": "no-store" });
           res.end("webhook processing failed");
-        });
+        }).finally(() => active.delete(req));
+        active.set(req, task);
         return;
       }
       res.writeHead(503, { "cache-control": "no-store" });
@@ -56,6 +64,31 @@ export function startHealthHttpServer({
     res.writeHead(404);
     res.end();
   });
+
+  server.on("connection", socket => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  server.drain = () => {
+    if (draining) return draining;
+    const closed = new Promise(resolve => server.close(resolve));
+    const keep = new Set();
+    const work = [];
+    for (const [req, task] of active) {
+      if (req.complete) {
+        keep.add(req.socket);
+        work.push(task);
+      }
+    }
+    for (const socket of sockets) {
+      if (!keep.has(socket)) socket.destroy();
+    }
+    const finished = Promise.allSettled(work).then(() => {
+      for (const socket of keep) socket.end();
+    });
+    draining = Promise.all([closed, finished]);
+    return draining;
+  };
 
   return new Promise((resolve, reject) => {
     const onError = (error) => {
