@@ -1852,3 +1852,37 @@ test("ambiguous simulated broadcast survives retries and settles by the original
   assert.equal(formatUsdt((await getWalletBalances(pool, owner)).WITHDRAWAL_HOLD), "0.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+test("restarted simulation recovers the exact saved payload after a pre-send stop", { skip: !enabled }, async () => {
+  const { createHash } = await import("node:crypto");
+  const { reserveWithdrawal, submitSimulatedWithdrawal, recoverSimulatedWithdrawals } =
+    await import("../test-support/simulated-withdrawal.js");
+  const owner = await createSimulationWallet(740);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  await seedAvailableBalance(available.id, "1");
+  const destination = "0x" + "71".repeat(20);
+  const request = await reserveWithdrawal(pool, owner, "pre-send", "1", destination);
+  const payload = Buffer.from(JSON.stringify({ network: "simulation", destination, amount: "1", id: request.id }));
+  const hash = "0x" + createHash("sha256").update(payload).digest("hex");
+  const stopped = () => { throw new Error("Stopped before transport"); };
+  await assert.rejects(submitSimulatedWithdrawal(pool, request.id, hash, stopped, Buffer.from("wrong")), /payload hash/);
+  await assert.rejects(submitSimulatedWithdrawal(pool, request.id, hash, stopped, payload), /Stopped before transport/);
+  const accepted = new Set();
+  let calls = 0;
+  const transport = {
+    hasTransaction: async key => accepted.has(key),
+    async send(prepared) {
+      assert.deepEqual(prepared.payload, payload);
+      assert.equal(prepared.txHash, hash);
+      calls++;
+      accepted.add(hash);
+      throw new Error("Accepted but reply lost");
+    }
+  };
+  await assert.rejects(recoverSimulatedWithdrawals(pool, transport), /Accepted but reply lost/);
+  await recoverSimulatedWithdrawals(pool, transport);
+  assert.equal(calls, 1);
+  assert.equal(formatUsdt((await getWalletBalances(pool, owner)).WITHDRAWAL_HOLD), "1.00000000");
+});

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readTestnetWithdrawalReceipt } from "./bsc-testnet-receipt.js";
 import { toUsdtUnitsExact, formatUsdt } from "../src/ledger-safety.js";
 import { postJournalInTransaction, withLedgerTransaction } from "../src/ledger-posting.js";
@@ -141,16 +142,23 @@ export function simulationWithdrawalReview(pool) {
 
 // The offline caller supplies a prepared transaction hash and a fake transport.
 // Commit the claim before submission: an ambiguous response can only be reconciled by hash.
-export async function submitSimulatedWithdrawal(pool, id, txHash, send) {
+export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload = null) {
+  if (payload !== null) {
+    // Synthetic transport identity only. There is no chain signer in this harness.
+    if (!Buffer.isBuffer(payload) || payload.length === 0 ||
+        "0x" + createHash("sha256").update(payload).digest("hex") !== txHash) {
+      throw new Error("Simulation payload hash mismatch");
+    }
+  }
   if (typeof txHash !== "string" || !/^0x[0-9a-f]{64}$/i.test(txHash)) throw new Error("Invalid transaction hash");
   const hash = txHash.toLowerCase();
   const claim = await pool.query(
-    `UPDATE simulation_withdrawals SET status = 'pending_receipt', submitted_hash = $2
+    `UPDATE simulation_withdrawals SET status = 'pending_receipt', submitted_hash = $2, simulation_payload = $3
      WHERE id = $1 AND destination IS NOT NULL AND status = 'reserved'
-     RETURNING amount, destination`, [id, hash]
+     RETURNING amount, destination, simulation_payload`, [id, hash, payload]
   );
   if (claim.rowCount) {
-    await send({ txHash: hash, amount: claim.rows[0].amount, destination: claim.rows[0].destination });
+    await send({ txHash: hash, amount: claim.rows[0].amount, destination: claim.rows[0].destination, payload: claim.rows[0].simulation_payload });
   } else {
     const { rows: [existing] } = await pool.query(
       "SELECT submitted_hash FROM simulation_withdrawals WHERE id = $1", [id]
@@ -158,6 +166,23 @@ export async function submitSimulatedWithdrawal(pool, id, txHash, send) {
     if (existing?.submitted_hash !== hash) throw new Error("Withdrawal submission mismatch");
   }
   return hash;
+}
+
+// After a restart, process a bounded page. The transport must deduplicate identical
+// payloads by hash, including if lookup lags or a previous submit lost its reply.
+export async function recoverSimulatedWithdrawals(pool, transport, afterId = "0") {
+  const { rows } = await pool.query(
+    `SELECT id, submitted_hash AS hash, amount, destination, simulation_payload AS payload
+     FROM simulation_withdrawals WHERE status = 'pending_receipt' AND simulation_payload IS NOT NULL
+       AND id > $1 ORDER BY id LIMIT 50`, [afterId]
+  );
+  for (const request of rows) {
+    const known = await transport.hasTransaction(request.hash);
+    if (known === false) {
+      await transport.send({ txHash: request.hash, amount: request.amount, destination: request.destination, payload: request.payload });
+    }
+  }
+  return rows.length === 50 ? rows[49].id : null;
 }
 
 export async function confirmTestnetWithdrawal(pool, id, observation, expected, treasury) {
