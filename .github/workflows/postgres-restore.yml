@@ -1,0 +1,54 @@
+name: PostgreSQL 17 restore drill
+
+on:
+  push:
+    branches: [feature/integrated-postgres-matrix]
+  pull_request:
+    paths:
+      - .github/workflows/postgres-restore.yml
+      - scripts/test-postgres-restore.sh
+      - scripts/check-rollback-audit.mjs
+      - scripts/check-rollback-posts.mjs
+      - scripts/check-preview-shutdown.mjs
+      - scripts/check-publication-shutdown.mjs
+      - index.js
+      - src/scheduler.js
+      - src/admin-ops.js
+      - src/admin-language.js
+      - src/post-management.js
+      - src/post-schedule.js
+      - src/post-history.js
+      - src/database.js
+      - package*.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out pinned rollback reference
+        uses: actions/checkout@v4
+        with:
+          ref: aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f
+          path: rollback-reference
+          persist-credentials: false
+      - name: Verify matching dependency locks
+        run: cmp package-lock.json rollback-reference/package-lock.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run synthetic dump and restore on PostgreSQL 17
+        run: |
+          docker run --rm --network none --user postgres \
+            --volume "$GITHUB_WORKSPACE:/work:ro" \
+            --volume "$(realpath "$(command -v node)"):/usr/local/bin/node:ro" \
+            --workdir /work postgres:17-bookworm bash scripts/test-postgres-restore.sh

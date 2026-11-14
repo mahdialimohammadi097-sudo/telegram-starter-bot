@@ -10,18 +10,110 @@ on:
       - main
 
 jobs:
-  syntax:
-    name: JavaScript syntax check
+  test:
+    name: Node.js ${{ matrix.node-version }} / PostgreSQL 17
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24, 26]
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: profino_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d profino_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/profino_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 26
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Audit locked production dependencies for high or critical advisories
+        if: matrix.node-version == 22
+        run: npm audit --omit=dev --audit-level=high
       - name: Check JavaScript syntax
         run: |
           find . -path ./node_modules -prune -o -name "*.js" -print0 | xargs -0 -n1 node --check
-      - name: Run unit tests
-        run: npm test
+      - name: Run unit and PostgreSQL 17 integration tests
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/profino-tests.tap"
+          grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-tests.tap"
+          grep -Fxq '# skipped 0' "$RUNNER_TEMP/profino-tests.tap"
+          {
+            echo "### Node.js ${{ matrix.node-version }} / PostgreSQL 17"
+            echo "Commit: $GITHUB_SHA"
+            echo '~~~text'
+            grep -E '^# (tests|pass|fail|skipped) [0-9]+$' "$RUNNER_TEMP/profino-tests.tap"
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify the focused PostgreSQL review command
+        if: matrix.node-version == 22
+        run: npm run test:postgres
+      - name: Restore and replay synthetic wallet activity on PostgreSQL 17
+        if: matrix.node-version == 22
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec "$PG_CONTAINER" createdb -U postgres wallet_drill_source
+          docker exec "$PG_CONTAINER" createdb -U postgres wallet_drill_restored
+          node scripts/check-wallet-restore.js seed > "$RUNNER_TEMP/wallet-source.json"
+          docker exec "$PG_CONTAINER" pg_dump -U postgres -Fc wallet_drill_source |
+            docker exec -i "$PG_CONTAINER" pg_restore -U postgres --single-transaction --exit-on-error -d wallet_drill_restored
+          node scripts/check-wallet-restore.js verify > "$RUNNER_TEMP/wallet-restored.json"
+          cmp "$RUNNER_TEMP/wallet-source.json" "$RUNNER_TEMP/wallet-restored.json"
+          # Compare both catalogs in pg_restore form. PostgreSQL can rewrite equivalent CHECK casts during restore.
+          docker exec "$PG_CONTAINER" createdb -U postgres wallet_schema_reference
+          docker exec "$PG_CONTAINER" pg_dump -U postgres --schema-only -Fc wallet_drill_source |
+            docker exec -i "$PG_CONTAINER" pg_restore -U postgres --single-transaction --exit-on-error -d wallet_schema_reference
+          for db in wallet_drill_source wallet_schema_reference wallet_drill_restored; do
+            docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d "$db" \
+              < scripts/ledger-catalog.sql > "$RUNNER_TEMP/$db.catalog"
+          done
+          test "$(grep -c '^\["table",' "$RUNNER_TEMP/wallet_schema_reference.catalog")" -eq 3
+          diff -u "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/wallet_drill_restored.catalog"
+          node scripts/build-ledger-comparison.mjs "$RUNNER_TEMP/wallet_drill_source.catalog" "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/compare-ledger.sql"
+          for db in wallet_drill_source wallet_drill_restored; do
+            docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d "$db" \
+              < "$RUNNER_TEMP/compare-ledger.sql" > "$RUNNER_TEMP/comparison.txt"
+            grep -Fxq 'ledger|three tables|match' "$RUNNER_TEMP/comparison.txt"
+          done
+          docker exec "$PG_CONTAINER" psql -Xq -v ON_ERROR_STOP=1 -U postgres -d wallet_drill_restored \
+            -c 'ALTER TABLE ledger_entries DISABLE TRIGGER protect_posted_ledger_entries'
+          docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d wallet_drill_restored \
+            < scripts/ledger-catalog.sql > "$RUNNER_TEMP/disabled.catalog"
+          if cmp -s "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/disabled.catalog"; then
+            echo "Disabled ledger trigger went undetected" >&2
+            exit 1
+          fi
+          docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d wallet_drill_restored \
+            < "$RUNNER_TEMP/compare-ledger.sql" > "$RUNNER_TEMP/comparison.txt"
+          test "$(cat "$RUNNER_TEMP/comparison.txt")" = 'trigger|ledger_entries.protect_posted_ledger_entries|changed'
+          echo "Ledger catalog matches after restore and detects a disabled trigger."
+      - name: Save the tested PostgreSQL 17 ledger catalog for comparison
+        if: matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-catalog-postgres17
+          path: |
+            ${{ runner.temp }}/wallet_schema_reference.catalog
+            ${{ runner.temp }}/compare-ledger.sql
+          if-no-files-found: error
