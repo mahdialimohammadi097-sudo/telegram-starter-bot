@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
 import { InlineKeyboard } from "grammy";
@@ -381,7 +382,7 @@ async function publishApprovedPost(ctx, postId, language, client) {
   }
 }
 
-export function startScheduler(bot) {
+export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}) {
   if (isStarted) {
     return { ready: Promise.resolve(false), stop() {} };
   }
@@ -401,33 +402,38 @@ export function startScheduler(bot) {
     }
   });
 
-  const ready = recoverInterruptedOperations()
-    .then(() => {
-      if (schedulerStopped) return false;
-      console.log("[scheduler] recovery completed.");
+  const retryController = new AbortController();
+  async function initialize() {
+    while (!schedulerStopped) {
+      try {
+        await recoverInterruptedOperations();
+        break;
+      } catch (error) {
+        console.error("[scheduler] startup recovery failed:", safeDiagnosticCode(error));
+        if (schedulerStopped) return false;
+        try {
+          await delay(recoveryRetryMs, undefined, { signal: retryController.signal });
+        } catch (timerError) {
+          if (retryController.signal.aborted) return false;
+          throw timerError;
+        }
+      }
+    }
+    if (schedulerStopped) return false;
+    console.log("[scheduler] recovery completed.");
+    startBatch(bot);
+    schedulerTimer = setInterval(() => startBatch(bot), CHECK_INTERVAL_MS);
+    schedulerTimer.unref?.();
+    console.log("[scheduler] scheduled-post system started.");
+    return true;
+  }
 
-      startBatch(bot);
-
-      schedulerTimer = setInterval(() => {
-        startBatch(bot);
-      }, CHECK_INTERVAL_MS);
-      schedulerTimer.unref?.();
-
-      console.log("[scheduler] scheduled-post system started.");
-      return true;
-    })
-    .catch((error) => {
-      console.error(
-        "[scheduler] startup recovery failed. Scheduler remains disabled:",
-      safeDiagnosticCode(error)
-    );
-      return false;
-    });
-
+  const ready = initialize();
   return {
     ready,
     async stop() {
       schedulerStopped = true;
+      retryController.abort();
       if (schedulerTimer) clearInterval(schedulerTimer);
       schedulerTimer = null;
       await ready;

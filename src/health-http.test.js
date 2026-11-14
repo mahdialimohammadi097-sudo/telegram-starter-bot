@@ -29,6 +29,11 @@ test("health endpoints distinguish liveness from dependency readiness", async (t
   runtimeHealth.setTelegramApiConnected(true);
   runtimeHealth.setTelegramReceiverActive(true);
 
+  const recovering = await fetch(base + "/healthz");
+  assert.equal(recovering.status, 503);
+  assert.equal((await recovering.json()).scheduler, "unavailable");
+  runtimeHealth.setSchedulerReady(true);
+
   const ready = await fetch(base + "/healthz");
   assert.equal(ready.status, 200);
   assert.equal((await ready.json()).ready, true);

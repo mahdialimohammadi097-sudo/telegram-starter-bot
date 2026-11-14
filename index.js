@@ -280,6 +280,7 @@ async function main() {
   });
 
   scheduler = startScheduler(bot);
+  scheduler.ready.then(runtimeHealth.setSchedulerReady);
 
   if (mode === "webhook") {
     webhookHandler = telegramWebhookHandler(bot, webhook);
