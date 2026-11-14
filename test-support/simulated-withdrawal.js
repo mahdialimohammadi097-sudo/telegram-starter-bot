@@ -1,3 +1,4 @@
+import { readTestnetWithdrawalReceipt } from "./bsc-testnet-receipt.js";
 import { toUsdtUnitsExact, formatUsdt } from "../src/ledger-safety.js";
 import { postJournalInTransaction, withLedgerTransaction } from "../src/ledger-posting.js";
 
@@ -12,19 +13,25 @@ async function postMovement(client, request, operation, debit, credit) {
   });
 }
 
-export async function reserveWithdrawal(pool, userId, key, amount) {
+export async function reserveWithdrawal(pool, userId, key, amount, destination = null) {
   if (typeof key !== "string" || !key.trim()) throw new Error("Missing request key");
   if (toUsdtUnitsExact(amount) <= 0n) throw new Error("Withdrawal must be positive");
+  if (destination !== null && (!/^0x[0-9a-f]{40}$/i.test(destination) || /^0x0{40}$/i.test(destination))) {
+    throw new Error("Invalid withdrawal destination");
+  }
+  destination = destination?.toLowerCase() ?? null;
   const normalized = formatUsdt(amount);
   return withLedgerTransaction(pool, async client => {
     const owner = await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
     if (!owner.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
-      "SELECT id, amount, status FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
+      "SELECT id, amount, status, destination FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
     );
     if (prior.rowCount) {
       if (formatUsdt(prior.rows[0].amount) !== normalized) throw new Error("Request amount mismatch");
-      return prior.rows[0];
+      const { destination: saved, ...request } = prior.rows[0];
+      if (saved !== destination) throw new Error("Withdrawal destination mismatch");
+      return request;
     }
     // First-use setup shares the reservation transaction so a failed hold leaves no account behind.
     await client.query(
@@ -33,11 +40,11 @@ export async function reserveWithdrawal(pool, userId, key, amount) {
        ON CONFLICT (user_id, account_type, currency) DO NOTHING`, [userId]
     );
     const result = await client.query(
-      `INSERT INTO simulation_withdrawals (user_id, request_key, amount, available_id, held_id)
-       SELECT a.user_id, $2, $3, a.id, h.id FROM ledger_accounts a JOIN ledger_accounts h ON h.user_id = a.user_id
+      `INSERT INTO simulation_withdrawals (user_id, request_key, amount, available_id, held_id, destination)
+       SELECT a.user_id, $2, $3, a.id, h.id, $4 FROM ledger_accounts a JOIN ledger_accounts h ON h.user_id = a.user_id
        WHERE a.user_id = $1 AND a.currency = 'USDT' AND h.currency = 'USDT'
          AND a.account_type = 'AVAILABLE' AND h.account_type = 'WITHDRAWAL_HOLD'
-       RETURNING id, amount, status, available_id, held_id`, [userId, key, normalized]
+       RETURNING id, amount, status, available_id, held_id`, [userId, key, normalized, destination]
     );
     if (!result.rowCount) throw new Error("Incomplete withdrawal wallet");
     const request = result.rows[0];
@@ -130,4 +137,31 @@ export function simulationWithdrawalReview(pool) {
       });
     }
   };
+}
+
+export async function confirmTestnetWithdrawal(pool, id, observation, expected, treasury) {
+  return withLedgerTransaction(pool, async client => {
+    const { rows: [request] } = await client.query(
+      "SELECT * FROM simulation_withdrawals WHERE id = $1 FOR UPDATE", [id]
+    );
+    if (!request?.destination || request.status === "cancelled") throw new Error("No payable withdrawal");
+    const { event } = readTestnetWithdrawalReceipt(observation, expected, {
+      sender: treasury.sender, recipient: request.destination, amount: request.amount
+    });
+    if (request.status === "paid") {
+      if (request.payout_event !== event || request.clearing_id !== String(treasury.accountId)) throw new Error("Payout mismatch");
+      return request.payout_id;
+    }
+    const clearing = await client.query(
+      "SELECT id FROM ledger_accounts WHERE id = $1 AND account_type = 'CLEARING' AND currency = 'USDT' AND user_id IS NULL FOR SHARE",
+      [treasury.accountId]
+    );
+    if (!clearing.rowCount) throw new Error("Invalid payout clearing account");
+    const journal = await postMovement(client, request, "payout", request.held_id, treasury.accountId);
+    await client.query(
+      "UPDATE simulation_withdrawals SET status = 'paid', payout_event = $2, payout_id = $3, clearing_id = $4 WHERE id = $1",
+      [id, event, journal.transactionId, treasury.accountId]
+    );
+    return journal.transactionId;
+  });
 }

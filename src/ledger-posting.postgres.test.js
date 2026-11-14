@@ -1792,3 +1792,25 @@ test("transfer receipts reject a balanced release journal that debits another us
     client.release();
   }
 });
+
+test("one finalized testnet event settles exactly one destination-bound withdrawal", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, confirmTestnetWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const sample = JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url), "utf8"));
+  const owner = await createSimulationWallet(738);
+  const { rows: [available] } = await pool.query("SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]);
+  await seedAvailableBalance(available.id, "2");
+  const treasury = { sender: "0x03e37a3686a553735dd9737a060e4a2c6c018ace", accountId: simulationClearing };
+  const reserve = key => reserveWithdrawal(pool, owner, key, "1", sample.expected.recipient);
+  const first = await reserve("outbound-1");
+  const second = await reserve("outbound-2");
+  const confirm = request => confirmTestnetWithdrawal(pool, request.id, sample.observation, sample.expected, treasury);
+  const results = await Promise.allSettled([confirm(first), confirm(second)]);
+  assert.equal(results.filter(row => row.status === "fulfilled").length, 1);
+  const winner = results[0].status === "fulfilled" ? first : second;
+  const loser = winner === first ? second : first;
+  assert.equal(await confirm(winner), results.find(row => row.status === "fulfilled").value);
+  await assert.rejects(cancelWithdrawal(pool, owner, winner.id), /cannot be cancelled/);
+  await cancelWithdrawal(pool, owner, loser.id);
+  assert.equal((await displayedBalances(owner))[0], "1.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
