@@ -4,7 +4,9 @@ export async function createSimulationWithdrawalTables(pool) {
     id bigserial PRIMARY KEY, user_id bigint NOT NULL REFERENCES users(id), request_key text NOT NULL,
     amount numeric(36,8) NOT NULL CHECK (amount > 0),
     available_id bigint NOT NULL REFERENCES ledger_accounts(id), held_id bigint NOT NULL REFERENCES ledger_accounts(id),
-    status text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'cancelled', 'paid')),
+    status text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved', 'cancelled', 'pending_receipt', 'paid')),
+    submitted_hash text UNIQUE,
+    CHECK ((status IN ('pending_receipt', 'paid')) = (submitted_hash IS NOT NULL)),
     destination text, payout_event text UNIQUE, payout_id bigint UNIQUE REFERENCES ledger_transactions(id),
     clearing_id bigint REFERENCES ledger_accounts(id),
     CHECK ((status = 'paid') = (payout_event IS NOT NULL) AND

@@ -139,6 +139,27 @@ export function simulationWithdrawalReview(pool) {
   };
 }
 
+// The offline caller supplies a prepared transaction hash and a fake transport.
+// Commit the claim before submission: an ambiguous response can only be reconciled by hash.
+export async function submitSimulatedWithdrawal(pool, id, txHash, send) {
+  if (typeof txHash !== "string" || !/^0x[0-9a-f]{64}$/i.test(txHash)) throw new Error("Invalid transaction hash");
+  const hash = txHash.toLowerCase();
+  const claim = await pool.query(
+    `UPDATE simulation_withdrawals SET status = 'pending_receipt', submitted_hash = $2
+     WHERE id = $1 AND destination IS NOT NULL AND status = 'reserved'
+     RETURNING amount, destination`, [id, hash]
+  );
+  if (claim.rowCount) {
+    await send({ txHash: hash, amount: claim.rows[0].amount, destination: claim.rows[0].destination });
+  } else {
+    const { rows: [existing] } = await pool.query(
+      "SELECT submitted_hash FROM simulation_withdrawals WHERE id = $1", [id]
+    );
+    if (existing?.submitted_hash !== hash) throw new Error("Withdrawal submission mismatch");
+  }
+  return hash;
+}
+
 export async function confirmTestnetWithdrawal(pool, id, observation, expected, treasury) {
   return withLedgerTransaction(pool, async client => {
     const { rows: [request] } = await client.query(
@@ -148,6 +169,7 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
     const { event } = readTestnetWithdrawalReceipt(observation, expected, {
       sender: treasury.sender, recipient: request.destination, amount: request.amount
     });
+    if (request.submitted_hash && request.submitted_hash !== expected.txHash.toLowerCase()) throw new Error("Withdrawal transaction mismatch");
     if (request.status === "paid") {
       if (request.payout_event !== event || request.clearing_id !== String(treasury.accountId)) throw new Error("Payout mismatch");
       return request.payout_id;
@@ -159,8 +181,8 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
     if (!clearing.rowCount) throw new Error("Invalid payout clearing account");
     const journal = await postMovement(client, request, "payout", request.held_id, treasury.accountId);
     await client.query(
-      "UPDATE simulation_withdrawals SET status = 'paid', payout_event = $2, payout_id = $3, clearing_id = $4 WHERE id = $1",
-      [id, event, journal.transactionId, treasury.accountId]
+      "UPDATE simulation_withdrawals SET status = 'paid', payout_event = $2, payout_id = $3, clearing_id = $4, submitted_hash = $5 WHERE id = $1",
+      [id, event, journal.transactionId, treasury.accountId, expected.txHash.toLowerCase()]
     );
     return journal.transactionId;
   });

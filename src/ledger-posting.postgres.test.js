@@ -1814,3 +1814,41 @@ test("one finalized testnet event settles exactly one destination-bound withdraw
   assert.equal((await displayedBalances(owner))[0], "1.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+test("ambiguous simulated broadcast survives retries and settles by the original hash", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, submitSimulatedWithdrawal, cancelWithdrawal, confirmTestnetWithdrawal } =
+    await import("../test-support/simulated-withdrawal.js");
+  const sample = JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url), "utf8"));
+  // Use a distinct synthetic transaction in the shared fixture database.
+  const txHash = "0x" + "8b".repeat(32);
+  sample.expected.txHash = txHash;
+  sample.observation.receipt.transactionHash = txHash;
+  for (const log of sample.observation.receipt.logs) log.transactionHash = txHash;
+  const owner = await createSimulationWallet(739);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  await seedAvailableBalance(available.id, "1");
+  const request = await reserveWithdrawal(pool, owner, "lost-reply", "1", sample.expected.recipient);
+  let broadcasts = 0;
+  const send = async prepared => {
+    broadcasts++;
+    assert.equal(prepared.txHash, txHash);
+    throw new Error("Network reply lost");
+  };
+  const submit = () => submitSimulatedWithdrawal(pool, request.id, txHash, send);
+  const attempts = await Promise.allSettled([submit(), submit()]);
+  assert.equal(attempts.filter(r => r.status === "rejected" && r.reason.message === "Network reply lost").length, 1);
+  assert.equal(await submit(), txHash);
+  await assert.rejects(submitSimulatedWithdrawal(pool, request.id, "0x" + "9c".repeat(32), send), /mismatch/);
+  assert.equal(broadcasts, 1);
+  await assert.rejects(cancelWithdrawal(pool, owner, request.id), /cannot be cancelled/);
+  const balances = await getWalletBalances(pool, owner);
+  assert.equal(formatUsdt(balances.WITHDRAWAL_HOLD), "1.00000000");
+  const treasury = { sender: "0x03e37a3686a553735dd9737a060e4a2c6c018ace", accountId: simulationClearing };
+  const confirm = () => confirmTestnetWithdrawal(pool, request.id, sample.observation, sample.expected, treasury);
+  const journal = await confirm();
+  assert.equal(await confirm(), journal);
+  assert.equal(formatUsdt((await getWalletBalances(pool, owner)).WITHDRAWAL_HOLD), "0.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
