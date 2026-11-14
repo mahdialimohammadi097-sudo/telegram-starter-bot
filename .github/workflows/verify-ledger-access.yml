@@ -20,7 +20,14 @@ jobs:
               body = dict(jsonrpc="2.0", method=method, params=params)
               if ident is not None: body["id"] = ident
               req = urllib.request.Request("https://api.fadehost.com/mcp", json.dumps(body).encode(), headers)
-              with urllib.request.urlopen(req, timeout=40) as response:
+              try:
+                  response = urllib.request.urlopen(req, timeout=40)
+              except urllib.error.HTTPError as exc:
+                  body = exc.read(8192).decode(errors="replace").lower()
+                  markers = [s for s in ("cloudflare","challenge","access denied","invalid token","insufficient","scope","forbidden","not enabled","invalid origin","invalid api key","unauthenticated","error 1010","error 1020") if s in body]
+                  print("MCP",method,"HTTP",exc.code,"type",exc.headers.get_content_type(),"markers",markers,flush=True)
+                  raise SystemExit(1)
+              with response:
                   if response.headers.get("Mcp-Session-Id"): headers["Mcp-Session-Id"] = response.headers["Mcp-Session-Id"]
                   data = response.read().decode()
               if ident is None: return
