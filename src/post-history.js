@@ -95,20 +95,25 @@ export async function ensurePostHistorySchema() {
 
 async function showHistory(ctx, page = 0, status = "all", edit = false) {
   const language = await getAdminLanguage(ctx);
-  const offset = page * PAGE_SIZE;
+  // A saved navigation button may point past the end after posts change status.
+  // Count and select on the same snapshot so the range and keyboard agree.
   const result = await pool.query(
-    `SELECT id, title, scheduled_at, status, updated_at
-     FROM scheduled_posts
-     WHERE ($1 = 'all' OR status = $1)
-     ORDER BY updated_at DESC, id DESC
-     LIMIT $2 OFFSET $3`,
-    [status, PAGE_SIZE, offset]
+    `WITH counts AS (
+       SELECT COUNT(*)::int AS total FROM scheduled_posts WHERE ($1 = 'all' OR status = $1)
+     ), bounds AS (
+       SELECT total, LEAST($2::int, GREATEST(total - 1, 0) / $3::int) AS page FROM counts
+     )
+     SELECT bounds.total, bounds.page, posts.id, posts.title, posts.scheduled_at, posts.status
+     FROM bounds LEFT JOIN LATERAL (
+       SELECT id, title, scheduled_at, status, updated_at FROM scheduled_posts
+       WHERE ($1 = 'all' OR status = $1)
+       ORDER BY updated_at DESC, id DESC LIMIT $3 OFFSET bounds.page * $3
+     ) AS posts ON true
+     ORDER BY posts.updated_at DESC, posts.id DESC`,
+    [status, Math.min(page, 2147483647), PAGE_SIZE]
   );
-  const count = await pool.query(
-    "SELECT COUNT(*)::int AS total FROM scheduled_posts WHERE ($1 = 'all' OR status = $1)",
-    [status]
-  );
-  const total = count.rows[0].total;
+  const { total, page: currentPage } = result.rows[0];
+  const offset = currentPage * PAGE_SIZE;
   if (!total) {
     const empty = adminText(language, "No posts found for status: ", "هیچ پستی با وضعیت ") + postStatusLabel(status, language) + adminText(language, ".", " پیدا نشد.");
     const keyboard = new InlineKeyboard()
@@ -123,12 +128,13 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
     keyboard.text(filter === "all" ? adminText(language, "All", "همه") : (language === "fa" ? ({ scheduled: "زمان‌بندی‌شده", preview_sent: "پیش‌نمایش ارسال‌شده", published: "منتشرشده", rejected: "ردشده", cancelled: "لغوشده" }[filter] || filter) : filter.replaceAll("_", " ").toUpperCase()),
       "posthist_filter:" + filter);
   }
+  keyboard.row().text(adminText(language, "Uncertain previews", "پیش‌نمایش‌های نامشخص"), "posthist_filter:preview_unknown");
   keyboard.row().text(adminText(language, "Uncertain publications", "انتشارهای نامشخص"), "posthist_filter:publish_unknown").row();
   for (const post of result.rows) {
-    keyboard.text("#" + post.id + " · " + postStatusLabel(post.status, language), `posthist_detail:${post.id}:${status}:${page}`).row();
+    keyboard.text("#" + post.id + " · " + postStatusLabel(post.status, language), `posthist_detail:${post.id}:${status}:${currentPage}`).row();
   }
-  if (page > 0) keyboard.text(adminText(language, "← Previous", "← قبلی"), "posthist_page:" + status + ":" + (page - 1));
-  if (offset + result.rowCount < total) keyboard.text(adminText(language, "Next →", "بعدی →"), "posthist_page:" + status + ":" + (page + 1));
+  if (currentPage > 0) keyboard.text(adminText(language, "← Previous", "← قبلی"), "posthist_page:" + status + ":" + (currentPage - 1));
+  if (offset + result.rowCount < total) keyboard.text(adminText(language, "Next →", "بعدی →"), "posthist_page:" + status + ":" + (currentPage + 1));
   keyboard.row().text(adminText(language, "Post operations", "عملیات انتشار"), "admin_posts");
   const body = result.rows.map(post =>
     "#" + post.id + " — " + post.title + "\n" +
@@ -172,6 +178,9 @@ async function showDetails(ctx, postId, edit = false, back = "posthist_filter:al
     adminText(language, "Created: ", "ایجاد: ") + formatUtc(post.created_at, language),
     adminText(language, "Updated: ", "به‌روزرسانی: ") + formatUtc(post.updated_at, language),
     post.published_message_id ? adminText(language, "Channel message ID: ", "شناسه پیام کانال: ") + post.published_message_id : null,
+    post.status === "preview_unknown" ? adminText(language,
+      "Check your private chat with the bot for the preview with this post ID. The scheduler will not resend it automatically.",
+      "در گفت‌وگوی خصوصی با ربات، پیش‌نمایش همین شناسهٔ پست را جست‌وجو کنید. زمان‌بند آن را دوباره به‌صورت خودکار نمی‌فرستد.") : null,
     post.status === "publish_unknown" ? adminText(language,
       "Check @PROFINO1 against the title, content and UTC history below. If the private delivery notice contains a message ID, use it to locate the post.",
       "عنوان، متن و زمان‌های UTC در تاریخچه را با @PROFINO1 تطبیق دهید. اگر اعلان خصوصی ارسال، شناسه پیام دارد، پست را با همان شناسه پیدا کنید.") : null,
@@ -209,6 +218,14 @@ async function showDetails(ctx, postId, edit = false, back = "posthist_filter:al
   if (edit) await ctx.answerCallbackQuery();
 }
 
+function currentRestorePrompt(ctx, postId) {
+  const session = restoreSessions.get(ADMIN_ID);
+  if (session?.step === "confirm" && session.postId === postId &&
+      session.promptId != null && session.promptId === ctx.callbackQuery.message?.message_id) {
+    return session;
+  }
+}
+
 export function registerPostHistory(bot) {
   bot.command("posthistory", async (ctx) => {
     const language = await getAdminLanguage(ctx);
@@ -236,7 +253,7 @@ export function registerPostHistory(bot) {
     }
   });
 
-  bot.callbackQuery(/^(?:admin_posthistory|posthist_filter:(all|scheduled|preview_sent|publish_unknown|published|rejected|cancelled))$/, async (ctx) => {
+  bot.callbackQuery(/^(?:admin_posthistory|posthist_filter:(all|scheduled|preview_sent|preview_unknown|publish_unknown|published|rejected|cancelled))$/, async (ctx) => {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     try {
@@ -293,30 +310,53 @@ export function registerPostHistory(bot) {
     const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const postId = ctx.callbackQuery.data.split(":")[1];
-    const session = restoreSessions.get(ADMIN_ID);
-    if (!session || session.postId !== postId || !session.scheduledAt) {
+    const session = currentRestorePrompt(ctx, postId);
+    if (!session) {
       return ctx.answerCallbackQuery({ text: adminText(language, "Restore session expired. Start again.", "مهلت نشست بازگردانی تمام شده است. دوباره شروع کنید."), show_alert: true });
     }
+    if (Date.parse(session.scheduledAt) <= Date.now()) {
+      restoreSessions.set(ADMIN_ID, { postId, step: "time" });
+      return ctx.answerCallbackQuery({
+        text: adminText(language, "The selected time has passed. Send a new future time in UTC (YYYY-MM-DD HH:mm).",
+          "زمان انتخابی گذشته است. یک زمان جدید در آینده به وقت UTC با قالب YYYY-MM-DD HH:mm بفرستید."),
+        show_alert: true
+      });
+    }
+    session.step = "saving";
+    let result;
     try {
-      const result = await pool.query(
+      result = await pool.query(
         "UPDATE scheduled_posts SET status = 'scheduled', scheduled_at = $1, preview_message_id = NULL, preview_chat_id = NULL, approved_by = NULL, published_message_id = NULL, published_at = NULL, edit_version = COALESCE(edit_version, 0) + 1, updated_at = NOW() WHERE id = $2 AND status = 'rejected' RETURNING id, title, scheduled_at",
         [session.scheduledAt, postId]
       );
-      restoreSessions.delete(ADMIN_ID);
-      if (!result.rowCount) return ctx.answerCallbackQuery({ text: adminText(language, "Post is no longer rejected.", "وضعیت پست دیگر «ردشده» نیست."), show_alert: true });
-      await ctx.answerCallbackQuery({ text: adminText(language, "Post restored to schedule.", "پست به برنامه زمان‌بندی بازگردانده شد.") });
-      await ctx.editMessageText(
-        adminText(language, "PROFINO — POST RESTORED\n\nPost: #" + postId + "\nTitle: " + result.rows[0].title + "\nNew schedule: " + formatUtc(result.rows[0].scheduled_at) + "\nStatus: SCHEDULED\n\nA new private preview will be sent at the scheduled time. Publication still requires your approval.", "پروفینو — پست بازگردانی شد\n\nپست: شماره " + postId + "\nعنوان: " + result.rows[0].title + "\nزمان جدید: " + formatUtc(result.rows[0].scheduled_at, language) + "\nوضعیت: زمان‌بندی‌شده\n\nدر زمان مقرر پیش‌نمایش خصوصی جدید ارسال می‌شود. انتشار همچنان به تأیید شما نیاز دارد.")
-      );
     } catch (error) {
+      session.step = "confirm";
       console.error("[post-history] restore failed:", safeDiagnosticCode(error));
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to restore post.", "بازگردانی پست ممکن نشد."), show_alert: true });
+      return ctx.answerCallbackQuery({ text: adminText(language, "Unable to restore post.", "بازگردانی پست ممکن نشد."), show_alert: true });
+    }
+    if (restoreSessions.get(ADMIN_ID) === session) restoreSessions.delete(ADMIN_ID);
+    if (!result.rowCount) return ctx.answerCallbackQuery({ text: adminText(language, "Post is no longer rejected.", "وضعیت پست دیگر «ردشده» نیست."), show_alert: true });
+    try {
+      await ctx.answerCallbackQuery({ text: adminText(language, "Post restored to schedule.", "پست به برنامه زمان‌بندی بازگردانده شد.") });
+    } catch (error) {
+      console.error("[post-history] restore acknowledgement failed:", safeDiagnosticCode(error));
+    }
+    const receipt = adminText(language, "PROFINO — POST RESTORED\n\nPost: #" + postId + "\nTitle: " + result.rows[0].title + "\nNew schedule: " + formatUtc(result.rows[0].scheduled_at) + "\nStatus: SCHEDULED\n\nA new private preview will be sent at the scheduled time. Publication still requires your approval.", "پروفینو — پست بازگردانی شد\n\nپست: شماره " + postId + "\nعنوان: " + result.rows[0].title + "\nزمان جدید: " + formatUtc(result.rows[0].scheduled_at, language) + "\nوضعیت: زمان‌بندی‌شده\n\nدر زمان مقرر پیش‌نمایش خصوصی جدید ارسال می‌شود. انتشار همچنان به تأیید شما نیاز دارد.");
+    try {
+      await ctx.editMessageText(receipt);
+    } catch (error) {
+      console.error("[post-history] restore receipt edit failed:", safeDiagnosticCode(error));
+      await ctx.reply(receipt);
     }
   });
 
   bot.callbackQuery(/^posthist_restore_cancel:\d+$/, async (ctx) => {
     const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const postId = ctx.callbackQuery.data.split(":")[1];
+    if (!currentRestorePrompt(ctx, postId)) {
+      return ctx.answerCallbackQuery({ text: adminText(language, "Restore session expired. Start again.", "مهلت نشست بازگردانی تمام شده است. دوباره شروع کنید."), show_alert: true });
+    }
     restoreSessions.delete(ADMIN_ID);
     await ctx.answerCallbackQuery({ text: adminText(language, "Restore cancelled.", "بازگردانی لغو شد.") });
     await ctx.editMessageText(adminText(language, "Post restoration cancelled.", "عملیات بازگردانی پست لغو شد."));
@@ -327,6 +367,7 @@ export function registerPostHistory(bot) {
     const session = restoreSessions.get(ADMIN_ID);
     if (!session || session.step !== "time") return next();
     const language = await getAdminLanguage(ctx);
+    if (session !== restoreSessions.get(ADMIN_ID) || session.step !== "time") return;
     const value = ctx.message.text.trim();
     if (value.startsWith("/")) return next();
     const date = parseUtcDateTime(value);
@@ -339,10 +380,11 @@ export function registerPostHistory(bot) {
     const keyboard = new InlineKeyboard()
       .text(adminText(language, "Confirm Restore", "تأیید بازگردانی"), "posthist_restore_confirm:" + session.postId)
       .text(adminText(language, "Cancel", "لغو"), "posthist_restore_cancel:" + session.postId);
-    await ctx.reply(
+    const prompt = await ctx.reply(
       adminText(language, "CONFIRM POST RESTORATION\n\nPost: #" + session.postId + "\nNew schedule: " + formatUtc(session.scheduledAt, language) + "\n\nThe post will be scheduled, not published. A fresh preview and your approval will still be required.", "تأیید بازگردانی پست\n\nپست: شماره " + session.postId + "\nزمان‌بندی جدید: " + formatUtc(session.scheduledAt, language) + "\n\nپست زمان‌بندی می‌شود و فوراً منتشر نخواهد شد. پیش‌نمایش جدید و تأیید شما همچنان الزامی است."),
       { reply_markup: keyboard }
     );
+    session.promptId = prompt.message_id;
   });
 }
 

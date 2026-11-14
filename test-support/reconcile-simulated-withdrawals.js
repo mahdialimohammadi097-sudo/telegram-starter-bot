@@ -2,21 +2,22 @@ export async function findWithdrawalDiscrepancies(client) {
   const { rows } = await client.query(`
     WITH expected AS (
       SELECT w.*, op.kind,
-             op.kind = 'reserve' OR w.status = 'cancelled' AS required,
+             op.kind = 'reserve' OR (op.kind = 'release' AND w.status = 'cancelled') OR (op.kind = 'payout' AND w.status = 'paid') AS required,
              CASE WHEN op.kind = 'reserve' THEN w.available_id ELSE w.held_id END AS debit_id,
-             CASE WHEN op.kind = 'reserve' THEN w.held_id ELSE w.available_id END AS credit_id
+             CASE WHEN op.kind = 'reserve' THEN w.held_id WHEN op.kind = 'payout' THEN w.clearing_id ELSE w.available_id END AS credit_id
       FROM simulation_withdrawals w
-      CROSS JOIN (VALUES ('reserve'), ('release')) op(kind)
+      CROSS JOIN (VALUES ('reserve'), ('release'), ('payout')) op(kind)
     ), actual AS (
       SELECT t.*, count(*) OVER (PARTITION BY reference_id, transaction_type) AS copies
       FROM ledger_transactions t
-      WHERE transaction_type IN ('sim-withdraw-reserve', 'sim-withdraw-release')
+      WHERE transaction_type IN ('sim-withdraw-reserve', 'sim-withdraw-release', 'sim-withdraw-payout')
     )
     SELECT w.id AS withdrawal_id, j.id AS journal_id,
            coalesce(w.kind, replace(j.transaction_type, 'sim-withdraw-', '')) AS operation
     FROM expected w FULL JOIN actual j
       ON j.reference_id = w.id::text AND j.transaction_type = 'sim-withdraw-' || w.kind
     WHERE w.id IS NULL OR w.required IS DISTINCT FROM (j.id IS NOT NULL)
+       OR (w.kind = 'payout' AND w.payout_id IS DISTINCT FROM j.id)
        OR (w.kind = 'release' AND w.release_id IS DISTINCT FROM j.id)
        OR (j.id IS NOT NULL AND (
          j.status IS DISTINCT FROM 'posted' OR j.copies <> 1

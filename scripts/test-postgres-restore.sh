@@ -39,7 +39,7 @@ CREATE TABLE users (id bigint PRIMARY KEY, telegram_id bigint UNIQUE);
 CREATE TABLE admin_users (user_id bigint PRIMARY KEY REFERENCES users(id), role text, status text);
 CREATE TABLE scheduled_posts (id bigint PRIMARY KEY, title text, status text, content text, scheduled_at timestamptz,
   updated_at timestamptz, preview_message_id bigint, preview_chat_id bigint, approved_by bigint,
-  published_message_id bigint, published_at timestamptz);
+  published_message_id bigint, published_at timestamptz, edit_version int DEFAULT 0, last_edited_at timestamptz);
 INSERT INTO users VALUES (1, 8810232463);
 INSERT INTO admin_users VALUES (1, 'owner', 'active');
 CREATE TABLE admin_audit_logs (
@@ -68,6 +68,8 @@ INSERT INTO admin_preferences(user_id,language) VALUES (1,'fa');
 INSERT INTO admin_audit_logs(admin_user_id,actor_telegram_id,action,target_user_id,currency,metadata,details)
 VALUES (1,1001,'restore_drill',1,'USDT','{"source":"fixture"}','{"source":"fixture"}');
 INSERT INTO scheduled_posts(id,title,status) VALUES (1,'Restore drill','scheduled');
+INSERT INTO scheduled_posts(id,title,content,status,preview_chat_id,preview_message_id,scheduled_at,edit_version)
+VALUES (61,'Restored preview','Original','preview_sent',8810232463,610,now(),3);
 SQL
 
 pg_dump --format=custom --file="$workdir/synthetic.dump" drill_source
@@ -121,6 +123,44 @@ BEGIN
   END;
 END $$;
 SQL
+# Exercise the candidate's private edit flow using the restored preview and language preference.
+DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node --input-type=module <<'JS'
+import assert from 'node:assert/strict';
+import { Bot } from 'grammy';
+import { registerPostManagement } from './src/post-management.js';
+import { pool, closeDatabase } from './src/database.js';
+const owner = 8810232463;
+const from = { id: owner, first_name: 'Fixture', is_bot: false };
+const message = { message_id: 610, date: 0, chat: { id: owner, type: 'private' }, from };
+const bot = new Bot('offline', { botInfo: { id: 7, username: 'fixture_bot', first_name: 'Test', is_bot: true } });
+const notices = [];
+bot.api.config.use(async (_prev, method, payload) => {
+  assert.ok(['sendMessage', 'answerCallbackQuery', 'editMessageText', 'editMessageReplyMarkup'].includes(method));
+  if (payload.chat_id !== undefined) assert.equal(String(payload.chat_id), String(owner));
+  if (payload.text) notices.push(payload.text);
+  return { ok: true, result: true };
+});
+registerPostManagement(bot);
+const selectContent = id => bot.handleUpdate({ update_id: id, callback_query: {
+  id: String(id), from, message, data: 'post_edit_content:61', chat_instance: 'offline'
+} });
+try {
+  await selectContent(1);
+  assert.match(notices.at(-1), /متن جدید/);
+  await bot.handleUpdate({ update_id: 2, message: { ...message, message_id: 611, text: 'Updated after restore' } });
+  assert.match(notices.at(-1), /تأیید شما/);
+  const { rows: [post] } = await pool.query(
+    'SELECT status, content, edit_version, preview_message_id, preview_chat_id FROM scheduled_posts WHERE id=61'
+  );
+  assert.deepEqual(post, { status: 'scheduled', content: 'Updated after restore', edit_version: 4,
+    preview_message_id: null, preview_chat_id: null });
+  await selectContent(3);
+  assert.match(notices.at(-1), /پیش‌نمایش دیگر معتبر نیست/);
+  console.log('Restored Persian preference and saved preview edit verified.');
+} finally {
+  await closeDatabase();
+}
+JS
 for revision in rollback-reference candidate; do
   DATABASE_URL="postgresql://$PGUSER@$PGHOST:$PGPORT/drill_restored" node scripts/check-rollback-audit.mjs "$revision"
 done
