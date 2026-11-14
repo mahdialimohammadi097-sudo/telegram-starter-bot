@@ -371,7 +371,7 @@ async function publishApprovedPost(ctx, postId, language, client) {
   }
 
   try {
-    await client.query(`
+    const confirmation = await client.query(`
       UPDATE scheduled_posts
       SET status = 'published',
           published_message_id = $1,
@@ -380,6 +380,8 @@ async function publishApprovedPost(ctx, postId, language, client) {
       WHERE id = $2
         AND status = 'publishing'
     `, [published.message_id, postId]);
+
+    if (confirmation.rowCount !== 1) throw new Error("Publication confirmation did not update the post");
 
     console.log(`[scheduler] post ${postId} published successfully.`);
 

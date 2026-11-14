@@ -22,6 +22,7 @@ test("only the replacement preview can publish the saved post after an edit", {
   const published = [];
   const previews = [];
   const notices = [];
+  const edits = [];
   let sequence = 0;
   let messageId = 100;
   let staleButtonVisible = false;
@@ -38,6 +39,7 @@ test("only the replacement preview can publish the saved post after an edit", {
       }
       return { ok: true, result: message };
     }
+    if (method === "editMessageText") edits.push(payload.text);
     if (method === "editMessageText" && String(payload.message_id) === "70") {
       staleButtonVisible = true;
       throw new Error("Simulated failure to invalidate the old Telegram preview");
@@ -100,13 +102,13 @@ test("only the replacement preview can publish the saved post after an edit", {
     assert.equal(final.published_message_id, String(messageId));
 
     // Hold the row until both real handlers are waiting inside their UPDATEs.
-    async function waitForBlockedWrite(sqlPrefix) {
+    async function waitForBlockedWrite(sqlPrefix, count = 1) {
       const limit = Date.now() + 8000;
       while (Date.now() < limit) {
         const result = await db.query(`SELECT 1 FROM pg_stat_activity
           WHERE application_name = $1 AND query LIKE $2
             AND cardinality(pg_blocking_pids(pid)) > 0`, [schema, sqlPrefix]);
-        if (result.rowCount) return;
+        if (result.rowCount >= count) return;
         await delay(20);
       }
       assert.fail("Timed out waiting for " + sqlPrefix);
@@ -121,7 +123,7 @@ test("only the replacement preview can publish the saved post after an edit", {
         pending.push(first());
         await waitForBlockedWrite(firstSql);
         pending.push(second());
-        await waitForBlockedWrite(secondSql);
+        await waitForBlockedWrite(secondSql, firstSql === secondSql ? 2 : 1);
       } finally {
         try { await locker.query("ROLLBACK"); }
         finally { locker.release(); }
@@ -204,6 +206,42 @@ test("only the replacement preview can publish the saved post after an edit", {
         assert.equal(post.cancellation_reason, null);
         assert.deepEqual(published.slice(sentBefore), ["Cancellation\n\nOriginal"]);
       }
+    }
+
+    await db.query(`INSERT INTO scheduled_posts
+      (id,title,content,status,preview_message_id,preview_chat_id)
+      VALUES (6,'Double click','Once','preview_sent',86,$1)`, [owner]);
+    const approveTwice = () => click("post_approve:6", 86);
+    const beforeRace = published.length;
+    await raceWrites(6, approveTwice, approveSql, approveTwice, approveSql);
+    assert.deepEqual(published.slice(beforeRace), ["Double click\n\nOnce"]);
+    const confirmed = await db.query("SELECT status, published_message_id FROM scheduled_posts WHERE id=6");
+    assert.deepEqual(confirmed.rows, [{ status: "published", published_message_id: String(messageId) }]);
+
+    // Exercise a skipped final UPDATE and a database error after Telegram accepted the send.
+    await db.query(`CREATE FUNCTION fail_confirmation() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.status = 'published' AND NEW.id = 7 THEN RETURN NULL; END IF;
+        IF NEW.status = 'published' AND NEW.id = 8 THEN RAISE EXCEPTION 'offline fixture'; END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER fail_confirmation BEFORE UPDATE ON scheduled_posts
+      FOR EACH ROW EXECUTE FUNCTION fail_confirmation()`);
+    for (const id of [7, 8]) {
+      const previewId = 80 + id;
+      await db.query(`INSERT INTO scheduled_posts
+        (id,title,content,status,preview_message_id,preview_chat_id)
+        VALUES ($1,'Confirmation','Once','preview_sent',$2,$3)`, [id, previewId, owner]);
+      const before = published.length;
+      edits.length = 0;
+      await click("post_approve:" + id, previewId);
+      assert.equal(edits.length, 1);
+      assert.ok(edits[0].includes("Message ID: " + messageId));
+      assert.match(edits[0], /Database confirmation failed/);
+      await click("post_approve:" + id, previewId);
+      assert.deepEqual(published.slice(before), ["Confirmation\n\nOnce"]);
+      const unresolved = await db.query("SELECT status, published_message_id FROM scheduled_posts WHERE id=$1", [id]);
+      assert.deepEqual(unresolved.rows, [{ status: "publishing", published_message_id: null }]);
     }
   } finally {
     await scheduler?.stop();
