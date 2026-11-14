@@ -95,20 +95,25 @@ export async function ensurePostHistorySchema() {
 
 async function showHistory(ctx, page = 0, status = "all", edit = false) {
   const language = await getAdminLanguage(ctx);
-  const offset = page * PAGE_SIZE;
+  // A saved navigation button may point past the end after posts change status.
+  // Count and select on the same snapshot so the range and keyboard agree.
   const result = await pool.query(
-    `SELECT id, title, scheduled_at, status, updated_at
-     FROM scheduled_posts
-     WHERE ($1 = 'all' OR status = $1)
-     ORDER BY updated_at DESC, id DESC
-     LIMIT $2 OFFSET $3`,
-    [status, PAGE_SIZE, offset]
+    `WITH counts AS (
+       SELECT COUNT(*)::int AS total FROM scheduled_posts WHERE ($1 = 'all' OR status = $1)
+     ), bounds AS (
+       SELECT total, LEAST($2::int, GREATEST(total - 1, 0) / $3::int) AS page FROM counts
+     )
+     SELECT bounds.total, bounds.page, posts.id, posts.title, posts.scheduled_at, posts.status
+     FROM bounds LEFT JOIN LATERAL (
+       SELECT id, title, scheduled_at, status, updated_at FROM scheduled_posts
+       WHERE ($1 = 'all' OR status = $1)
+       ORDER BY updated_at DESC, id DESC LIMIT $3 OFFSET bounds.page * $3
+     ) AS posts ON true
+     ORDER BY posts.updated_at DESC, posts.id DESC`,
+    [status, Math.min(page, 2147483647), PAGE_SIZE]
   );
-  const count = await pool.query(
-    "SELECT COUNT(*)::int AS total FROM scheduled_posts WHERE ($1 = 'all' OR status = $1)",
-    [status]
-  );
-  const total = count.rows[0].total;
+  const { total, page: currentPage } = result.rows[0];
+  const offset = currentPage * PAGE_SIZE;
   if (!total) {
     const empty = adminText(language, "No posts found for status: ", "هیچ پستی با وضعیت ") + postStatusLabel(status, language) + adminText(language, ".", " پیدا نشد.");
     const keyboard = new InlineKeyboard()
@@ -126,10 +131,10 @@ async function showHistory(ctx, page = 0, status = "all", edit = false) {
   keyboard.row().text(adminText(language, "Uncertain previews", "پیش‌نمایش‌های نامشخص"), "posthist_filter:preview_unknown");
   keyboard.row().text(adminText(language, "Uncertain publications", "انتشارهای نامشخص"), "posthist_filter:publish_unknown").row();
   for (const post of result.rows) {
-    keyboard.text("#" + post.id + " · " + postStatusLabel(post.status, language), `posthist_detail:${post.id}:${status}:${page}`).row();
+    keyboard.text("#" + post.id + " · " + postStatusLabel(post.status, language), `posthist_detail:${post.id}:${status}:${currentPage}`).row();
   }
-  if (page > 0) keyboard.text(adminText(language, "← Previous", "← قبلی"), "posthist_page:" + status + ":" + (page - 1));
-  if (offset + result.rowCount < total) keyboard.text(adminText(language, "Next →", "بعدی →"), "posthist_page:" + status + ":" + (page + 1));
+  if (currentPage > 0) keyboard.text(adminText(language, "← Previous", "← قبلی"), "posthist_page:" + status + ":" + (currentPage - 1));
+  if (offset + result.rowCount < total) keyboard.text(adminText(language, "Next →", "بعدی →"), "posthist_page:" + status + ":" + (currentPage + 1));
   keyboard.row().text(adminText(language, "Post operations", "عملیات انتشار"), "admin_posts");
   const body = result.rows.map(post =>
     "#" + post.id + " — " + post.title + "\n" +

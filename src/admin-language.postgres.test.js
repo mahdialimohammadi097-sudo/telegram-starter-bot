@@ -224,6 +224,12 @@ test("private admin language survives new updates and handles unavailable prefer
     assert.equal(back, "posthist_page:failed:1");
     await update(back);
     assert.match(calls.at(-1).payload.text, /9–16/);
+    // The filtered list shrinks while the admin is reading a detail on page two.
+    await client.query("UPDATE scheduled_posts SET status='scheduled' WHERE id <> $1", [postId]);
+    await update(back);
+    assert.match(calls.at(-1).payload.text, /نمایش 1–1 از 1/);
+    assert.ok(buttons().some(button => button.callback_data === "posthist_detail:" + postId + ":failed:0"));
+    assert.ok(buttons().every(button => !button.callback_data.startsWith("posthist_page:")));
     await update("posthist_detail:" + postId);
     assert.equal(calls[1].payload.reply_markup.inline_keyboard[0][0].callback_data, "posthist_filter:all");
     assert.deepEqual(await update(history, admin, "group"), ["answerCallbackQuery"]);
