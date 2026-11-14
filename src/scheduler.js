@@ -226,8 +226,9 @@ async function handlePostAction(ctx) {
   const postId = match[2];
 
   if (action === "reject") {
+    let result;
     try {
-      const result = await pool.query(`
+      result = await pool.query(`
         UPDATE scheduled_posts
         SET status = 'rejected',
             updated_at = NOW()
@@ -237,23 +238,6 @@ async function handlePostAction(ctx) {
           AND preview_chat_id = $3
         RETURNING id
       `, [postId, ctx.callbackQuery.message.message_id, ctx.callbackQuery.message.chat.id]);
-
-      if (!result.rowCount) {
-        await ctx.answerCallbackQuery({
-          text: adminText(language, "Post is no longer available.", "این پست دیگر در دسترس نیست."),
-          show_alert: true
-        });
-        return;
-      }
-
-      await ctx.answerCallbackQuery({
-        text: adminText(language, "Post rejected.", "پست رد شد.")
-      });
-
-      await updateAdminMessage(
-        ctx,
-        adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
-      );
     } catch (error) {
       console.error("[scheduler] rejection error:", safeDiagnosticCode(error));
 
@@ -261,7 +245,29 @@ async function handlePostAction(ctx) {
         text: adminText(language, "Database error. Please try again.", "خطای پایگاه داده. دوباره تلاش کنید."),
         show_alert: true
       });
+      return;
     }
+
+    if (!result.rowCount) {
+      await ctx.answerCallbackQuery({
+        text: adminText(language, "Post is no longer available.", "این پست دیگر در دسترس نیست."),
+        show_alert: true
+      });
+      return;
+    }
+
+    try {
+      await ctx.answerCallbackQuery({
+        text: adminText(language, "Post rejected.", "پست رد شد.")
+      });
+    } catch (error) {
+      console.error("[scheduler] rejection acknowledgement failed:", safeDiagnosticCode(error));
+    }
+
+    await updateAdminMessage(
+      ctx,
+      adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
+    );
 
     return;
   }
