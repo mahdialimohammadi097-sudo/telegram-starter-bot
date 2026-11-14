@@ -125,6 +125,9 @@ if (mode === "webhook") {
     try { await work; }
     finally { webhookUpdates.delete(work); }
   });
+} else {
+  // stop() confirms the current polling offset. Leave the unconfirmed tail for the next receiver.
+  bot.use((_ctx, next) => shuttingDown ? undefined : next());
 }
 registerCommands(bot);
 

@@ -130,3 +130,45 @@ test("polling finishes the active command before closing the database on SIGTERM
   assert.ok(log.indexOf("Private command reply") >= 0, log);
   assert.ok(log.indexOf("PostgreSQL pool closed") > log.indexOf("Private command reply"), log);
 });
+
+test("a polling restart handles the queued command once when stopped halfway through a batch", { timeout: 12000 }, async t => {
+  // Model Telegram's retained queue. Only an offset sent to getUpdates confirms earlier updates.
+  async function runReceiver(firstPending, activeId) {
+    return runUntilShutdown(t, `
+      const activeId = ${activeId};
+      const pending = [41, 42].filter(id => id >= ${firstPending});
+      let stopped;
+      const stopping = new Promise(resolve => { stopped = resolve; });
+      pg.Pool.prototype.connect = async () => { throw new Error("offline scheduler"); };
+      pg.Pool.prototype.query = async (sql, args) => {
+        if (sql.includes("AS server_time")) return { rows: [{ server_time: new Date() }] };
+        if (sql.includes("SELECT status FROM users") && args[0] === activeId) {
+          process.kill(process.pid, "SIGTERM");
+          await stopping;
+        }
+        return { rows: [] };
+      };
+      Api.prototype.getMe = async () => ({ id: 7, is_bot: true, first_name: "Fixture", username: "fixture_bot" });
+      Api.prototype.deleteWebhook = async () => true;
+      Api.prototype.sendMessage = async chat => { if (pending.includes(chat)) console.log("REPLY", chat); };
+      Api.prototype.getUpdates = async ({ offset, limit }) => {
+        const updates = pending.filter(id => id >= offset).slice(0, limit ?? 100);
+        if (offset === activeId + 1) {
+          console.log("CONFIRMED_OFFSET", offset);
+          stopped();
+        }
+        return updates.map(id => ({ update_id: id, message: { message_id: id, date: 0,
+          from: { id, first_name: "Fixture", is_bot: false }, chat: { type: "private", id },
+          text: "/id", entities: [{ type: "bot_command", offset: 0, length: 3 }] } }));
+      };
+    `);
+  }
+  const beforeRestart = await runReceiver(41, 41);
+  const offset = Number(/CONFIRMED_OFFSET (\d+)/.exec(beforeRestart)?.[1]);
+  assert.equal(offset, 42, beforeRestart);
+  const afterRestart = await runReceiver(offset, 42);
+  const replies = log => Array.from(log.matchAll(/REPLY (\d+)/g), match => Number(match[1]));
+  assert.deepEqual(replies(beforeRestart), [41]);
+  assert.deepEqual(replies(afterRestart), [42]);
+  assert.match(afterRestart, /CONFIRMED_OFFSET 43/);
+});
