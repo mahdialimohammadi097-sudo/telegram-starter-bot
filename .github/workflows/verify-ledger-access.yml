@@ -1,0 +1,57 @@
+name: Check read-only ledger access
+on:
+  push:
+    branches: [verify/fadehost-runtime-access]
+    paths: [.github/workflows/verify-ledger-access.yml]
+permissions: {}
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect table presence inside the hosted bot
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request, shlex
+          headers = {"Authorization":"Bearer "+os.environ["FADEHOST_TOKEN"], "Content-Type":"application/json", "Accept":"application/json, text/event-stream"}
+          def rpc(method, params, ident=None):
+              body = dict(jsonrpc="2.0", method=method, params=params)
+              if ident is not None: body["id"] = ident
+              req = urllib.request.Request("https://api.fadehost.com/mcp", json.dumps(body).encode(), headers)
+              with urllib.request.urlopen(req, timeout=40) as response:
+                  if response.headers.get("Mcp-Session-Id"): headers["Mcp-Session-Id"] = response.headers["Mcp-Session-Id"]
+                  data = response.read().decode()
+              if ident is None: return
+              if not data.lstrip().startswith("{"):
+                  data = next(line[5:].strip() for line in data.splitlines() if line.startswith("data:") and line[5:].strip().startswith("{"))
+              msg = json.loads(data)
+              if "error" in msg: raise SystemExit("MCP request failed: "+method)
+              return msg["result"]
+          init = rpc("initialize", {"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"profino-schema-check","version":"1"}},1)
+          headers["MCP-Protocol-Version"] = init["protocolVersion"]
+          rpc("notifications/initialized", {})
+          specs = {t["name"]:t for t in rpc("tools/list",{},2)["tools"]}
+          def call(name,args,i):
+              obj = rpc("tools/call", {"name":name,"arguments":args},i)
+              if obj.get("isError"):
+                  msg = str(obj.get("content","")).lower()
+                  reason = next((w for w in ("paid","upgrade","free","scope","permission","terminal","missing","invalid") if w in msg),"rejected")
+                  raise SystemExit(name+" denied: "+reason)
+              return "\n".join(x.get("text","") for x in obj.get("content",[]))
+          bots = call("list_bots",{},3)
+          matches = [s for s in re.split(r"(?<=\})\s*,|\n",bots) if "telegram-bot" in s]
+          ids = set(re.findall(r"\bbot_[\w-]+", " ".join(matches)))
+          if len(ids)!=1:
+              allids=set(re.findall(r"\bbot_[\w-]+",bots))
+              if "telegram-bot" not in bots or len(allids)!=1: raise SystemExit("Cannot uniquely resolve telegram-bot")
+              ids=allids
+          props=specs["run_app_command"]["inputSchema"]["properties"]
+          key=next(k for k in ("bot_id","app_id","id","botId","appId") if k in props)
+          code="""import {pool} from './src/database.js'; const c=await pool.connect(); try {await c.query('BEGIN READ ONLY'); const r=await c.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('ledger_accounts','ledger_entries','ledger_transactions')"); console.log('LEDGER_TABLE_COUNT='+r.rows[0].n); await c.query('ROLLBACK')} finally {c.release();await pool.end()}"""
+          response=call("run_app_command",{key:ids.pop(),"command":"node --input-type=module -e "+shlex.quote(code)},4)
+          match=re.search(r"LEDGER_TABLE_COUNT=([0-3])\b",response)
+          if not match: raise SystemExit("No confirmed schema result")
+          print(match.group())
+          PY
