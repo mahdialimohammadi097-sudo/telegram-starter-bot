@@ -266,7 +266,20 @@ async function handlePostAction(ctx) {
     return;
   }
 
-  return withSchedulerLock(true, client => publishApprovedPost(ctx, postId, language, client));
+  let publicationStarted = false;
+  try {
+    await withSchedulerLock(true, client => {
+      publicationStarted = true;
+      return publishApprovedPost(ctx, postId, language, client);
+    });
+  } catch (error) {
+    if (publicationStarted) throw error;
+    console.error("[scheduler] approval lock unavailable:", safeDiagnosticCode(error));
+    await ctx.answerCallbackQuery({
+      text: adminText(language, "Could not start publication. Please try again.", "انتشار شروع نشد. لطفاً دوباره تلاش کنید."),
+      show_alert: true
+    });
+  }
 }
 
 async function publishApprovedPost(ctx, postId, language, client) {
@@ -441,3 +454,4 @@ export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}
     }
   };
 }
+
