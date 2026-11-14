@@ -314,6 +314,14 @@ export function registerPostHistory(bot) {
     if (!session) {
       return ctx.answerCallbackQuery({ text: adminText(language, "Restore session expired. Start again.", "مهلت نشست بازگردانی تمام شده است. دوباره شروع کنید."), show_alert: true });
     }
+    if (Date.parse(session.scheduledAt) <= Date.now()) {
+      restoreSessions.set(ADMIN_ID, { postId, step: "time" });
+      return ctx.answerCallbackQuery({
+        text: adminText(language, "The selected time has passed. Send a new future time in UTC (YYYY-MM-DD HH:mm).",
+          "زمان انتخابی گذشته است. یک زمان جدید در آینده به وقت UTC با قالب YYYY-MM-DD HH:mm بفرستید."),
+        show_alert: true
+      });
+    }
     session.step = "saving";
     try {
       const result = await pool.query(

@@ -54,4 +54,16 @@ test("only the current restore prompt may confirm or cancel the proposed time", 
   await click("posthist_restore_confirm:1", cancelPrompt);
   assert.equal(answers.at(-1).show_alert, true);
   assert.equal(writes.length, 1);
+
+  const expiredPrompt = await propose("2090-04-01 12:00");
+  t.mock.method(Date, "now", () => Date.parse("2090-04-01T12:00:00Z"));
+  await click("posthist_restore_confirm:1", expiredPrompt);
+  assert.equal(writes.length, 1);
+  assert.match(answers.at(-1).text, /future time/);
+  await input({ ...ctx, message: { text: "2090-04-01 12:30" } });
+  const replacementPrompt = nextId;
+  await click("posthist_restore_confirm:1", expiredPrompt);
+  assert.equal(writes.length, 1);
+  await click("posthist_restore_confirm:1", replacementPrompt);
+  assert.deepEqual(writes.at(-1), ["2090-04-01T12:30:00.000Z", "1"]);
 });
