@@ -133,7 +133,7 @@ async function sendPreview(bot, post, client, language) {
       { reply_markup: keyboard }
     );
 
-    await client.query(`
+    const confirmation = await client.query(`
       UPDATE scheduled_posts
       SET status = 'preview_sent',
           preview_message_id = $1,
@@ -146,6 +146,8 @@ async function sendPreview(bot, post, client, language) {
       message.chat.id,
       post.id
     ]);
+
+    if (confirmation.rowCount !== 1) throw new Error("Preview confirmation did not update the post");
 
     console.log(`[scheduler] preview sent for post ${post.id}.`);
   } catch (error) {
