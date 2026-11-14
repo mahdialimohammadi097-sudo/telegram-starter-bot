@@ -1,0 +1,35 @@
+name: Verify FadeHost runtime access
+on:
+  push:
+    branches: [verify/fadehost-runtime-access]
+    paths: [.github/workflows/verify-fadehost.yml]
+  workflow_dispatch:
+permissions: {}
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read telegram-bot status and deployed revision
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -eu
+          test -n "$FADEHOST_TOKEN" || { echo "Missing FadeHost secret"; exit 1; }
+          npx --yes fadehost apps status telegram-bot --json > "$RUNNER_TEMP/status.json"
+          npx --yes fadehost apps logs telegram-bot --tail 300 --json > "$RUNNER_TEMP/logs.json"
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          status = json.loads((root / "status.json").read_text())
+          bot = status.get("bot", status)
+          if bot.get("name") != "telegram-bot":
+              raise SystemExit("Unexpected status shape or bot identity")
+          state = bot.get("status")
+          print("telegram-bot status:", state if state in ("running", "stopped", "starting", "failed") else "unclassified")
+          hits = re.findall(r"\[runtime\] deployed ([0-9a-f]{7,40})\b", (root / "logs.json").read_text())
+          if hits:
+              print("Deployment recorded in runtime logs:", hits[-1])
+          else:
+              print("No deployment revision in recent runtime logs")
+          PY
