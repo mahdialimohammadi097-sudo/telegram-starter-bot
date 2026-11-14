@@ -64,6 +64,13 @@ test("only the current restore prompt may confirm or cancel the proposed time", 
   const replacementPrompt = nextId;
   await click("posthist_restore_confirm:1", expiredPrompt);
   assert.equal(writes.length, 1);
+  const receipts = [];
+  ctx.answerCallbackQuery = async () => { throw new Error("callback expired"); };
+  ctx.editMessageText = async () => { throw new Error("message unavailable"); };
+  ctx.reply = async text => { receipts.push(text); };
   await click("posthist_restore_confirm:1", replacementPrompt);
+  assert.equal(receipts.length, 1);
+  assert.match(receipts[0], /POST RESTORED/);
+  assert.equal(writes.length, 2);
   assert.deepEqual(writes.at(-1), ["2090-04-01T12:30:00.000Z", "1"]);
 });

@@ -323,21 +323,30 @@ export function registerPostHistory(bot) {
       });
     }
     session.step = "saving";
+    let result;
     try {
-      const result = await pool.query(
+      result = await pool.query(
         "UPDATE scheduled_posts SET status = 'scheduled', scheduled_at = $1, preview_message_id = NULL, preview_chat_id = NULL, approved_by = NULL, published_message_id = NULL, published_at = NULL, edit_version = COALESCE(edit_version, 0) + 1, updated_at = NOW() WHERE id = $2 AND status = 'rejected' RETURNING id, title, scheduled_at",
         [session.scheduledAt, postId]
-      );
-      if (restoreSessions.get(ADMIN_ID) === session) restoreSessions.delete(ADMIN_ID);
-      if (!result.rowCount) return ctx.answerCallbackQuery({ text: adminText(language, "Post is no longer rejected.", "وضعیت پست دیگر «ردشده» نیست."), show_alert: true });
-      await ctx.answerCallbackQuery({ text: adminText(language, "Post restored to schedule.", "پست به برنامه زمان‌بندی بازگردانده شد.") });
-      await ctx.editMessageText(
-        adminText(language, "PROFINO — POST RESTORED\n\nPost: #" + postId + "\nTitle: " + result.rows[0].title + "\nNew schedule: " + formatUtc(result.rows[0].scheduled_at) + "\nStatus: SCHEDULED\n\nA new private preview will be sent at the scheduled time. Publication still requires your approval.", "پروفینو — پست بازگردانی شد\n\nپست: شماره " + postId + "\nعنوان: " + result.rows[0].title + "\nزمان جدید: " + formatUtc(result.rows[0].scheduled_at, language) + "\nوضعیت: زمان‌بندی‌شده\n\nدر زمان مقرر پیش‌نمایش خصوصی جدید ارسال می‌شود. انتشار همچنان به تأیید شما نیاز دارد.")
       );
     } catch (error) {
       session.step = "confirm";
       console.error("[post-history] restore failed:", safeDiagnosticCode(error));
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to restore post.", "بازگردانی پست ممکن نشد."), show_alert: true });
+      return ctx.answerCallbackQuery({ text: adminText(language, "Unable to restore post.", "بازگردانی پست ممکن نشد."), show_alert: true });
+    }
+    if (restoreSessions.get(ADMIN_ID) === session) restoreSessions.delete(ADMIN_ID);
+    if (!result.rowCount) return ctx.answerCallbackQuery({ text: adminText(language, "Post is no longer rejected.", "وضعیت پست دیگر «ردشده» نیست."), show_alert: true });
+    try {
+      await ctx.answerCallbackQuery({ text: adminText(language, "Post restored to schedule.", "پست به برنامه زمان‌بندی بازگردانده شد.") });
+    } catch (error) {
+      console.error("[post-history] restore acknowledgement failed:", safeDiagnosticCode(error));
+    }
+    const receipt = adminText(language, "PROFINO — POST RESTORED\n\nPost: #" + postId + "\nTitle: " + result.rows[0].title + "\nNew schedule: " + formatUtc(result.rows[0].scheduled_at) + "\nStatus: SCHEDULED\n\nA new private preview will be sent at the scheduled time. Publication still requires your approval.", "پروفینو — پست بازگردانی شد\n\nپست: شماره " + postId + "\nعنوان: " + result.rows[0].title + "\nزمان جدید: " + formatUtc(result.rows[0].scheduled_at, language) + "\nوضعیت: زمان‌بندی‌شده\n\nدر زمان مقرر پیش‌نمایش خصوصی جدید ارسال می‌شود. انتشار همچنان به تأیید شما نیاز دارد.");
+    try {
+      await ctx.editMessageText(receipt);
+    } catch (error) {
+      console.error("[post-history] restore receipt edit failed:", safeDiagnosticCode(error));
+      await ctx.reply(receipt);
     }
   });
 

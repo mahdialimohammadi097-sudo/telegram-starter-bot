@@ -102,12 +102,12 @@ test("only the replacement preview can publish the saved post after an edit", {
     assert.equal(final.published_message_id, String(messageId));
 
     // Hold the row until both real handlers are waiting inside their UPDATEs.
-    async function waitForBlockedWrite(sqlPrefix, count = 1) {
+    async function waitForBlockedWrite(sqlPrefix, count = 1, includeApprovalLock = false) {
       const limit = Date.now() + 8000;
       while (Date.now() < limit) {
         const result = await db.query(`SELECT 1 FROM pg_stat_activity
-          WHERE application_name = $1 AND query LIKE $2
-            AND cardinality(pg_blocking_pids(pid)) > 0`, [schema, sqlPrefix]);
+          WHERE application_name = $1 AND (query LIKE $2 OR ($3 AND query LIKE 'SELECT pg_advisory_lock_shared%'))
+            AND cardinality(pg_blocking_pids(pid)) > 0`, [schema, sqlPrefix, includeApprovalLock]);
         if (result.rowCount >= count) return;
         await delay(20);
       }
@@ -123,7 +123,9 @@ test("only the replacement preview can publish the saved post after an edit", {
         pending.push(first());
         await waitForBlockedWrite(firstSql);
         pending.push(second());
-        await waitForBlockedWrite(secondSql, firstSql === secondSql ? 2 : 1);
+        // Concurrent recovery can queue between approvals at the advisory lock.
+        const twoApprovals = firstSql === secondSql;
+        await waitForBlockedWrite(secondSql, twoApprovals ? 2 : 1, twoApprovals);
       } finally {
         try { await locker.query("ROLLBACK"); }
         finally { locker.release(); }
