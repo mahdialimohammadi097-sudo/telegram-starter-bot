@@ -1885,4 +1885,18 @@ test("restarted simulation recovers the exact saved payload after a pre-send sto
   await recoverSimulatedWithdrawals(pool, transport);
   assert.equal(calls, 1);
   assert.equal(formatUsdt((await getWalletBalances(pool, owner)).WITHDRAWAL_HOLD), "1.00000000");
+  const sample = JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url), "utf8"));
+  sample.expected.txHash = hash;
+  sample.observation.receipt.transactionHash = hash;
+  for (const log of sample.observation.receipt.logs) {
+    log.transactionHash = hash;
+    if (log.logIndex === sample.expected.logIndex) log.topics[2] = "0x" + destination.slice(2).padStart(64, "0");
+  }
+  const { confirmTestnetWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const treasury = { sender: "0x03e37a3686a553735dd9737a060e4a2c6c018ace", accountId: simulationClearing };
+  const settle = () => confirmTestnetWithdrawal(pool, request.id, sample.observation, sample.expected, treasury);
+  assert.equal(await settle(), await settle());
+  assert.equal(formatUsdt((await getWalletBalances(pool, owner)).WITHDRAWAL_HOLD), "0.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+  await recoverSimulatedWithdrawals(pool, { hasTransaction: () => assert.fail("Settled payout was rescanned") });
 });
