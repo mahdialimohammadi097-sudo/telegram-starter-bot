@@ -96,3 +96,37 @@ for (const stage of ["database", "authentication", "startup report", "delete web
     assert.doesNotMatch(log, /LATE OPERATION|webhook registered|could not start/);
   });
 }
+
+test("polling finishes the active command before closing the database on SIGTERM", { timeout: 12000 }, async t => {
+  const log = await runUntilShutdown(t, `
+    const user = 735;
+    let acknowledged;
+    const stopping = new Promise(resolve => { acknowledged = resolve; });
+    let poolClosed = false;
+    pg.Pool.prototype.end = async () => { poolClosed = true; };
+    pg.Pool.prototype.connect = async () => { throw new Error("offline scheduler"); };
+    pg.Pool.prototype.query = async sql => {
+      if (sql.includes("AS server_time")) return { rows: [{ server_time: new Date() }] };
+      if (sql.includes("SELECT status FROM users")) {
+        process.kill(process.pid, "SIGTERM");
+        await stopping;
+        await new Promise(resolve => setTimeout(resolve, 30));
+        console.log("Command completed with pool", poolClosed ? "closed" : "open");
+        return { rowCount: 1, rows: [{ status: "active" }] };
+      }
+      return { rows: [] };
+    };
+    Api.prototype.getMe = async () => ({ id: 7, is_bot: true, first_name: "Fixture", username: "fixture_bot" });
+    Api.prototype.deleteWebhook = async () => true;
+    Api.prototype.sendMessage = async chat => { if (chat === user) console.log("Private command reply"); };
+    Api.prototype.getUpdates = async options => {
+      if (options.limit === 1 && options.offset === 42) { acknowledged(); return []; }
+      return [{ update_id: 41, message: { message_id: 4, date: 0,
+        from: { id: user, first_name: "User", is_bot: false }, chat: { type: "private", id: user },
+        text: "/id", entities: [{ type: "bot_command", offset: 0, length: 3 }] } }];
+    };
+  `);
+  assert.match(log, /Command completed with pool open/);
+  assert.ok(log.indexOf("Private command reply") >= 0, log);
+  assert.ok(log.indexOf("PostgreSQL pool closed") > log.indexOf("Private command reply"), log);
+});

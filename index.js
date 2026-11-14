@@ -38,6 +38,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const bot = new Bot(token);
 const runtimeHealth = createRuntimeHealthState();
 let healthServer = null;
+let pollingBatchLoop = null;
 let webhookHandler = null;
 let botUsername = "PROFINO";
 let healthMonitor = null;
@@ -101,7 +102,7 @@ async function shutdown(signal = "shutdown") {
     }
 
     await Promise.all([httpDrained, schedulerDrained]);
-    await Promise.allSettled([...webhookUpdates]);
+    await Promise.allSettled([pollingBatchLoop, ...webhookUpdates]);
 
     try {
       await closeDatabase();
@@ -173,12 +174,17 @@ async function startPolling() {
       await bot.api.deleteWebhook({ drop_pending_updates: false });
       if (shuttingDown) return;
       console.log("[bot] starting Telegram long polling");
-      await bot.start({
+      pollingBatchLoop = bot.start({
         onStart: () => {
           runtimeHealth.setTelegramReceiverActive(true);
           console.log("[bot] Telegram polling is active; updates can be received.");
         }
       });
+      try {
+        await pollingBatchLoop;
+      } finally {
+        pollingBatchLoop = null;
+      }
 
       runtimeHealth.setTelegramReceiverActive(false);
       if (!shuttingDown) {
