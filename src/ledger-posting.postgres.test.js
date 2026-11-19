@@ -1771,6 +1771,39 @@ test("blocked customers cannot open simulated investments or reserve new withdra
   assert.equal((await displayedBalances(owner))[0], "50.00000000");
 });
 
+test("reviewer revocation committed before release authorization prevents posting", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(699);
+  const reviewer = await createSimulationWallet(700);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(available.id, "14");
+  const request = await reserveWithdrawal(pool, customer, "revoke-before-release", "5");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const revoker = await pool.connect();
+  try {
+    await revoker.query("BEGIN");
+    await revoker.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+    // The revocation transaction holds the reviewer row lock until it commits.
+    await revoker.query("COMMIT");
+  } catch (error) {
+    await revoker.query("ROLLBACK");
+    throw error;
+  } finally {
+    revoker.release();
+  }
+  await assert.rejects(
+    cancelAsSimulationReviewer(pool, reviewer, request.id), /Unauthorized simulation reviewer/
+  );
+  assert.equal((await pool.query(
+    "SELECT status FROM simulation_withdrawals WHERE id = $1", [request.id]
+  )).rows[0].status, "reserved");
+  assert.equal((await displayedBalances(customer))[0], "9.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
 test("concurrent authorized reviewers release one blocked customer's hold exactly once", { skip: !enabled }, async () => {
   const { reserveWithdrawal, cancelAsSimulationReviewer } =
     await import("../test-support/simulated-withdrawal.js");
