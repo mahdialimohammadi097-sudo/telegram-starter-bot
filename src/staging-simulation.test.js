@@ -114,6 +114,8 @@ test("staging schema preflight checks every supported withdrawal state", async (
     for (const state of ["reserved", "cancelled", "pending_receipt", "paid"]) {
       assert.ok(sql.includes(`LIKE '%${state}%'`), `missing constraint check for ${state}`);
     }
+    assert.ok(sql.includes("'status'"), "withdrawal status column must be checked");
+    assert.ok(sql.includes("HAVING COUNT(*) = 7"), "all seven required withdrawal columns must exist");
     checkedConstraint = true;
     return { rows: [{ extended_columns: true, payout_state_constraint: true }] };
   } };
