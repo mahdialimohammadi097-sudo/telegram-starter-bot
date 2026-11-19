@@ -171,6 +171,10 @@ jobs:
                   try: payloads.append(json.loads(item.get("text","")))
                   except json.JSONDecodeError: pass
           if not payloads:
+              print("DIAGNOSTIC: MCP response envelope keys:", sorted(result.keys()))
+              print("DIAGNOSTIC: MCP content types:", [item.get("type") for item in result.get("content",[]) if isinstance(item,dict)])
+              print("DIAGNOSTIC: MCP structuredContent present:", "structuredContent" in result)
+              print("DIAGNOSTIC: MCP tool isError:", result.get("isError",False))
               print("PASS: list_bots MCP call completed; inventory structure not recognized.")
               sys.exit(0)
           def scan(value):
