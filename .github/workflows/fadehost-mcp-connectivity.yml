@@ -379,10 +379,11 @@ jobs:
               print("Variables response field names:",sorted(result.keys()))
               def find_names(obj):
                   if isinstance(obj,dict):
-                      for k in ("variables","env","items","data"):
+                      for k in ("names","variables","env","items","data"):
                           if k in obj:return find_names(obj[k])
                       return list(obj.keys())
                   if isinstance(obj,list):
+                      if all(isinstance(item,str) for item in obj):return obj
                       names=[]
                       for item in obj:
                           if isinstance(item,dict):
