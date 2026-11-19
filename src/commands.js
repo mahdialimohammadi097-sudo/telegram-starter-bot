@@ -241,6 +241,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       });
     });
     bot.callbackQuery(/^sim_hold:([1-9]\d{0,9}):(\d{1,18}\.\d{8})$/, async ctx => {
+      if (ctx.chat?.type !== "private" || ctx.chat.id !== ctx.from.id) {
+        return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
+      }
       await ctx.answerCallbackQuery();
       try {
         const { rows: [user] } = await pool.query(
@@ -262,6 +265,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
   if (cancelTestWithdrawal) {
     bot.callbackQuery(/^sim_cancel_hold:([1-9]\d{0,18})$/, async ctx => {
+      if (ctx.chat?.type !== "private" || ctx.chat.id !== ctx.from.id) {
+        return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
+      }
       await ctx.answerCallbackQuery();
       try {
         const { rows: [user] } = await pool.query(
