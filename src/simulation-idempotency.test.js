@@ -20,3 +20,9 @@ test("malformed identifiers and unsupported operations fail closed", () => {
     assert.throws(() => simulationRequestKey(...args));
   }
 });
+
+test("unsafe JavaScript numeric IDs are rejected instead of silently rounding", () => {
+  assert.throws(() => simulationRequestKey("investment", Number.MAX_SAFE_INTEGER + 1, 10), /Unsafe numeric/);
+  assert.throws(() => simulationRequestKey("withdrawal", 10, Number.MAX_SAFE_INTEGER + 1), /Unsafe numeric/);
+  assert.equal(simulationRequestKey("investment", "9007199254740993", "10"), "telegram-investment:9007199254740993:10");
+});
