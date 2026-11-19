@@ -56,9 +56,9 @@ test("fully marked isolated staging exposes synthetic writers", async () => {
 test("simulation rejects production bot and mismatched bot identity", async () => {
   const pool = { query() { throw new Error("must not query"); } };
   const env = { PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it" };
-  await assert.rejects(createStagingSimulationHandlers(pool, env, "PROFINO1bot"), /separate authenticated staging Telegram bot/);
+  await assert.rejects(createStagingSimulationHandlers(pool, env, "PROFINO1bot"), /Production Telegram bot cannot activate simulation writers/);
   await assert.rejects(createStagingSimulationHandlers(pool, env, "other_bot"), /separate authenticated staging Telegram bot/);
-  await assert.rejects(createStagingSimulationHandlers(pool, { ...env, PROFINO_STAGING_BOT_USERNAME: "PROFINO1bot" }, "PROFINO1bot"), /separate authenticated staging Telegram bot/);
+  await assert.rejects(createStagingSimulationHandlers(pool, { ...env, PROFINO_STAGING_BOT_USERNAME: "PROFINO1bot" }, "PROFINO1bot"), /Production Telegram bot cannot activate simulation writers/);
 });
 
 test("simulation rejects wrong staging database identity before enabling writers", async () => {
