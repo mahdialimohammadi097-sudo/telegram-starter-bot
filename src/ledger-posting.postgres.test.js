@@ -2048,3 +2048,44 @@ test("concurrent customer and reviewer cancellations release one extended hold",
   assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "0.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+
+test("reviewer revocation committed before release cannot move a destination-bound hold", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer, cancelWithdrawal } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1751);
+  const reviewer = await createSimulationWallet(1752);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "13");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(
+    pool, customer, "revoke-before-release-1", "5", "0x6666666666666666666666666666666666666666"
+  );
+  const revoker = await pool.connect();
+  try {
+    await revoker.query("BEGIN");
+    await revoker.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+    await revoker.query("COMMIT");
+  } catch (error) {
+    await revoker.query("ROLLBACK");
+    throw error;
+  } finally {
+    revoker.release();
+  }
+  const results = await Promise.allSettled([
+    cancelAsSimulationReviewer(pool, reviewer, request.id),
+    cancelAsSimulationReviewer(pool, reviewer, request.id)
+  ]);
+  assert.equal(results.every(x => x.status === "rejected" && /Unauthorized simulation reviewer/.test(x.reason.message)), true);
+  const { rows: [held] } = await pool.query(
+    "SELECT status, release_id FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(held.status, "reserved");
+  assert.equal(held.release_id, null);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "5.00000000");
+  await cancelWithdrawal(pool, customer, request.id);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "13.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
