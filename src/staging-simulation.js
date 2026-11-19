@@ -8,6 +8,10 @@ import {
 // The database itself must also be explicitly marked as isolated staging.
 export async function createStagingSimulationHandlers(pool, env = process.env, authenticatedBotUsername = null) {
   if (env.PROFINO_SIMULATION_MODE !== "isolated-staging") return {};
+  // A production bot is never a staging simulator, regardless of its environment labels.
+  if (String(authenticatedBotUsername || "").toLowerCase() === "profino1bot") {
+    throw new Error("Production Telegram bot cannot activate simulation writers");
+  }
   if (env.PROFINO_DEPLOYMENT_ENV !== "staging") {
     throw new Error("Simulation requires explicit staging deployment");
   }
