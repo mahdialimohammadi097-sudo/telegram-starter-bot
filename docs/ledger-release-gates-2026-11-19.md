@@ -91,3 +91,26 @@ Latest independently checked workflow: https://github.com/mahdialimohammadi097-s
 5. Verify economic backing/liquidity and compliance requirements for advertised guaranteed returns, and obtain explicit owner release authorization.
 
 The historical evidence sections above describe earlier branch states and must not be interpreted as the latest CI result.
+
+## Fresh pull-request dependency audit — 2026-11-19
+
+Read directly from GitHub PR metadata (all **open, unmerged** at inspection time):
+
+| PR | Base | Head | Draft |
+| --- | --- | --- | --- |
+| #31 | main | feature/phase2-financial-foundation-clean | yes |
+| #32 | main | feature/referral-invite-link-foundation | yes |
+| #35 | main | feature/ledger-posting-foundation | yes |
+| #36 | feature/ledger-posting-foundation | feature/ledger-posting-postgres17-tests | yes |
+| #42 | feature/ledger-posting-postgres17-tests | feature/ledger-posting-integrity-tests | yes |
+| #45 | feature/phase2-financial-foundation-clean | feature/security-error-logs-after-financial-audit | yes |
+| #46 | feature/security-error-logs-after-financial-audit | feature/security-startup-diagnostics-after-audit | yes |
+| #49 | feature/ledger-posting-integrity-tests | feature/ledger-production-contract | yes |
+| #50 | feature/ledger-production-contract | feature/simulated-deposit-wallet | yes |
+| #51 | feature/simulated-deposit-wallet | feature/integrated-postgres-matrix | yes |
+| #54 | main | feature/post-edit-session-guard | no |
+| #57 | feature/integrated-postgres-matrix | audit/ledger-release-gates-20261119 | yes |
+
+**Integration implications:** #35 -> #36 -> #42 -> #49 -> #50 -> #51 -> #57 is a stacked chain; #31 -> #45 -> #46 is a separate stack; #32 and #54 target main. Do not merge child PRs independently, assume the stacks are compatible, or move live financial code into main without a complete cumulative-diff/security review and exact-candidate CI.
+
+Latest verified audit-branch CI run before this documentation change: https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44563034962 (success). This PR metadata check is **not** a code-level review of all changed files or a verified deploy.
