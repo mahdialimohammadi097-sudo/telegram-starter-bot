@@ -200,6 +200,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
   // Only the offline test harness supplies a simulation writer.
   if (openTestInvestment) {
     bot.callbackQuery(/^sim_open:([A-Z]+):(\d+)$/, async ctx => {
+      if (ctx.chat?.type !== "private" || ctx.chat.id !== ctx.from.id) {
+        return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
+      }
       const [, name, amount] = ctx.match;
       if (!settlementExamples(name).some(example => example.amount === amount) || !ctx.callbackQuery.message) {
         return ctx.answerCallbackQuery({ text: "Invalid simulation selection.", show_alert: true });
@@ -224,6 +227,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
   if (reserveTestWithdrawal) {
     bot.command("testwithdraw", async ctx => {
+      if (ctx.chat?.type !== "private" || ctx.chat.id !== ctx.from.id) {
+        return ctx.reply("Use the staging bot in a private chat for test withdrawals.");
+      }
       const amount = ctx.match.trim();
       if (!/^\d{1,18}(?:\.\d{1,8})?$/.test(amount) || toUsdtUnitsExact(amount) === 0n) {
         return ctx.reply("Use /testwithdraw followed by a positive test USDT amount with up to 8 decimal places.");
