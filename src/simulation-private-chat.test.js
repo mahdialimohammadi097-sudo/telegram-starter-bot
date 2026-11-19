@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { isPrivateSimulationChat } from "./simulation-chat-safety.js";
 
 test("all simulation financial entry points reject non-private chats before any write", () => {
   const source = readFileSync(new URL("./commands.js", import.meta.url), "utf8");
@@ -15,5 +16,21 @@ test("all simulation financial entry points reject non-private chats before any 
     assert.notEqual(index, -1, "missing handler " + start);
     const next = source.slice(index, index + 450);
     assert.match(next, /ctx\.chat\?\.type !== "private" \|\| ctx\.chat\.id !== ctx\.from\.id/, start);
+  }
+});
+
+test("private-chat guard accepts only a matching authenticated sender", () => {
+  assert.equal(isPrivateSimulationChat({ from: { id: 123 }, chat: { id: 123, type: "private" } }), true);
+  for (const ctx of [
+    null,
+    {},
+    { from: { id: 123 }, chat: { id: -100, type: "supergroup" } },
+    { from: { id: 123 }, chat: { id: 123, type: "group" } },
+    { from: { id: 123 }, chat: { id: 456, type: "private" } },
+    { from: { id: 0 }, chat: { id: 0, type: "private" } },
+    { from: { id: "123" }, chat: { id: "123", type: "private" } },
+    { from: { id: 123 } }
+  ]) {
+    assert.equal(isPrivateSimulationChat(ctx), false);
   }
 });
