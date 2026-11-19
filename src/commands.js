@@ -207,7 +207,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         "SELECT id FROM users WHERE telegram_id = $1 AND status = 'active'", [ctx.from.id]
       );
       if (!user) return ctx.answerCallbackQuery({ text: "Send /start first.", show_alert: true });
-      const key = "telegram-preview:" + ctx.callbackQuery.message.message_id;
+      const key = "telegram-preview:" + user.id + ":" + ctx.callbackQuery.message.message_id;
       await ctx.answerCallbackQuery();
       try {
         const id = await openTestInvestment(user.id, key, name + " " + amount);
@@ -241,7 +241,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         );
         if (!user) return ctx.reply("Send /start first.");
         const [, messageId, amount] = ctx.match;
-        const request = await reserveTestWithdrawal(user.id, "telegram-withdraw:" + messageId, amount);
+        const request = await reserveTestWithdrawal(user.id, "telegram-withdraw:" + user.id + ":" + messageId, amount);
         return ctx.reply("Simulated withdrawal #" + request.id + " is " + request.status + ".", {
           reply_markup: new Keyboard().text("Withdraw").text("My Wallet").row().text("⬅ Main Menu").resized()
         });
