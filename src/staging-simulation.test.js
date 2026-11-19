@@ -165,3 +165,18 @@ test("simulation refuses a production-looking database even when marked as stagi
     /visibly identify an isolated test environment/
   );
 });
+
+test("staging database label must be a separate name segment, not hidden in production text", async () => {
+  const pool = { query() { throw new Error("must not query"); } };
+  const env = {
+    PROFINO_SIMULATION_MODE: "isolated-staging",
+    PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot"
+  };
+  for (const database of ["production_stagingbackup", "latestproductiontest", "customer_sandboxcopy"]) {
+    await assert.rejects(
+      createStagingSimulationHandlers(pool, { ...env, PROFINO_STAGING_DATABASE_NAME: database }, "profino_staging_test_bot"),
+      /visibly identify an isolated test environment/
+    );
+  }
+});
