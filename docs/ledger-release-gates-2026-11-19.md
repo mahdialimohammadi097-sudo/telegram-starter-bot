@@ -21,6 +21,7 @@ These are code-level observations, **not** proof of production safety or economi
 ## Additional hardening on this branch
 - Exact USDT parsing now rejects unsafe integer JavaScript numbers; decimal strings remain exact.
 - Ledger account ID normalization now rejects non-safe numeric IDs rather than silently rounding them; decimal-string identifiers remain supported.
+- Ledger account identifiers are additionally restricted to the PostgreSQL signed BIGINT range and bounded input length; regression tests cover the upper boundary and out-of-range values.
 - Added focused unit regression tests for both precision hazards.
 - Added PostgreSQL regression coverage for opposite-direction concurrent transfers.
 - **All newly added tests remain unverified until an actual CI run or local test execution is recorded.**
