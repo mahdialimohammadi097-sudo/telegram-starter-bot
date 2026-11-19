@@ -255,15 +255,15 @@ async function main() {
   if (shuttingDown) return;
   console.log("[admin-ops] audit log schema ready.");
 
-  // Register handlers only after the database and isolated-staging guard are verified.
-  const simulationHandlers = await createStagingSimulationHandlers(pool);
-  registerCommands(bot, simulationHandlers);
-
   const me = await retryUntilAvailable(() => bot.api.getMe(), "Telegram API authentication");
   if (shuttingDown) return;
   botUsername = me.username;
   runtimeHealth.setTelegramApiConnected(true);
   console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
+
+  // Never register financial simulation handlers before verifying bot identity and isolated DB.
+  const simulationHandlers = await createStagingSimulationHandlers(pool, process.env, me.username);
+  registerCommands(bot, simulationHandlers);
 
   await sendStartupReport(me.username);
 
