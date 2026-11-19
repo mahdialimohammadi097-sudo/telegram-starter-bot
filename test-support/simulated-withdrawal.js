@@ -17,7 +17,7 @@ export async function reserveWithdrawal(pool, userId, key, amount) {
   if (toUsdtUnitsExact(amount) <= 0n) throw new Error("Withdrawal must be positive");
   const normalized = formatUsdt(amount);
   return withLedgerTransaction(pool, async client => {
-    const owner = await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
+    const owner = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!owner.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
       "SELECT id, amount, status FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
