@@ -144,6 +144,11 @@ jobs:
               print("SKIP: list_bots requires arguments; no automatic call made.")
               sys.exit(0)
           print("PASS: list_bots accepts an empty argument object.")
+          for candidate in ("list_app_deployments","get_bot_logs","get_live_stats"):
+              matches=[t for e in events if isinstance(e,dict) for t in e.get("result",{}).get("tools",[]) if t.get("name")==candidate]
+              if matches:
+                  schema=matches[0].get("inputSchema",{})
+                  print("READ-ONLY TOOL SCHEMA:",candidate,"required:",schema.get("required",[]),"properties:",sorted(schema.get("properties",{}).keys()))
           PY
           curl --fail --silent --show-error --max-time 25 --output "$result_file" \
             --request POST 'https://api.fadehost.com/mcp' \
