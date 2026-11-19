@@ -1699,6 +1699,7 @@ test("concurrent blocked-customer cancellations release a simulated hold exactly
     "SELECT count(*)::int AS count FROM ledger_transactions WHERE transaction_type = 'sim-withdraw-release' AND reference_id = $1 AND status = 'posted'", [String(request.id)]
   );
   assert.equal(posted.count, 1);
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
 
 test("blocked customer may release an existing simulated hold without creating new financial activity", { skip: !enabled }, async () => {
