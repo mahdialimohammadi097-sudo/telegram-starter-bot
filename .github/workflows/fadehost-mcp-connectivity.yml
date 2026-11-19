@@ -333,3 +333,64 @@ jobs:
           print("PASS: Production health readiness confirmed.")
           PY
           test "$status" = "200"
+
+      - name: Verify runtime configuration presence without revealing values
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,subprocess,sys
+          def rpc(method,params,id):
+              data=json.dumps({"jsonrpc":"2.0","id":id,"method":method,"params":params})
+              p=subprocess.run(["curl","--silent","--show-error","--max-time","25","-X","POST","https://api.fadehost.com/mcp",
+                 "-H","Authorization: Bearer "+os.environ["FADEHOST_TOKEN"],
+                 "-H","Content-Type: application/json","-H","Accept: application/json, text/event-stream",
+                 "--data-binary","@-"],input=data,text=True,capture_output=True,timeout=30)
+              if p.returncode: raise RuntimeError("MCP transport unavailable")
+              try: events=[json.loads(p.stdout)]
+              except json.JSONDecodeError:
+                  events=[]
+                  for line in p.stdout.splitlines():
+                      if line.startswith("data: "):
+                          try: events.append(json.loads(line[6:]))
+                          except json.JSONDecodeError: pass
+              messages=[m for m in events if isinstance(m,dict) and m.get("id")==id]
+              if not messages or "error" in messages[0]: raise RuntimeError("MCP error")
+              return messages[0].get("result",{})
+          def payload(result):
+              if result.get("isError"): raise RuntimeError("FadeHost tool error")
+              value=result.get("structuredContent")
+              if value is not None:return value
+              for item in result.get("content",[]):
+                  if item.get("type")=="text":
+                      try:return json.loads(item.get("text",""))
+                      except json.JSONDecodeError:pass
+              return None
+          bots=payload(rpc("tools/call",{"name":"list_bots","arguments":{}},31))
+          entries=bots.get("bots",[]) if isinstance(bots,dict) else []
+          bot=next((b for b in entries if isinstance(b,dict) and b.get("name")=="telegram-bot"),None)
+          if not bot or not isinstance(bot.get("id"),str):raise RuntimeError("PROFINO bot unavailable")
+          result=payload(rpc("tools/call",{"name":"list_app_variables","arguments":{"app":bot["id"]}},32))
+          print("PASS: FadeHost application variables inventory read authorized")
+          print("Variables payload type:",type(result).__name__)
+          if isinstance(result,dict):
+              print("Variables response field names:",sorted(result.keys()))
+              def find_names(obj):
+                  if isinstance(obj,dict):
+                      for k in ("variables","env","items","data"):
+                          if k in obj:return find_names(obj[k])
+                      return list(obj.keys())
+                  if isinstance(obj,list):
+                      names=[]
+                      for item in obj:
+                          if isinstance(item,dict):
+                              name=item.get("key") or item.get("name")
+                              if isinstance(name,str):names.append(name)
+                      return names
+                  return []
+              names=set(find_names(result))
+              for key in ("DATABASE_URL","TELEGRAM_BOT_TOKEN","TELEGRAM_MODE","PORT"):
+                  print("Configured variable",key+":",key in names)
+          PY
