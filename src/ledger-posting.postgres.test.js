@@ -154,6 +154,48 @@ test("row locks prevent concurrent AVAILABLE overdrafts", {
 });
 
 
+test("opposite concurrent transfers lock accounts consistently without deadlock", {
+  skip: !enabled
+}, async () => {
+  const accountA = await createAccount("AVAILABLE");
+  const accountB = await createAccount("AVAILABLE");
+  await seedAvailableBalance(accountA, "10");
+  await seedAvailableBalance(accountB, "10");
+
+  const transfer = (debit, credit, key) => postLedgerTransaction({
+    pool,
+    transactionType: "cross-account-test",
+    idempotencyKey: key,
+    entries: [
+      { account_id: debit, entry_type: "debit", amount: "3", currency: "USDT" },
+      { account_id: credit, entry_type: "credit", amount: "3", currency: "USDT" }
+    ]
+  });
+
+  const [forward, reverse] = await Promise.all([
+    transfer(accountA, accountB, "opposite-transfer-forward"),
+    transfer(accountB, accountA, "opposite-transfer-reverse")
+  ]);
+  assert.equal(forward.posted, true);
+  assert.equal(reverse.posted, true);
+  assert.notEqual(forward.transactionId, reverse.transactionId);
+
+  const balances = await pool.query(
+    `SELECT la.id::text AS id,
+            trim_scale(SUM(CASE WHEN le.entry_type = 'credit'
+                                THEN le.amount ELSE -le.amount END))::text AS balance
+       FROM ledger_accounts la
+       JOIN ledger_entries le ON le.account_id = la.id
+       JOIN ledger_transactions lt ON lt.id = le.transaction_id
+      WHERE la.id = ANY($1::bigint[]) AND lt.status = 'posted'
+      GROUP BY la.id`,
+    [[accountA, accountB]]
+  );
+  assert.equal(balances.rowCount, 2);
+  for (const row of balances.rows) assert.equal(row.balance, "10");
+});
+
+
 test("PostgreSQL rolls back the whole journal when an entry insert fails", {
   skip: !enabled
 }, async () => {
