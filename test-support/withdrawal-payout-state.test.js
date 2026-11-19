@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { confirmTestnetWithdrawal, submitSimulatedWithdrawal } from "./simulated-withdrawal.js";
+import { confirmTestnetWithdrawal, submitSimulatedWithdrawal, recoverSimulatedWithdrawals } from "./simulated-withdrawal.js";
 
 for (const scenario of [
   { status: "reserved", submitted_hash: null, error: /must be submitted before receipt confirmation/ },
@@ -41,6 +41,15 @@ for (const sender of [undefined, null, {}, "not a function"]) {
       submitSimulatedWithdrawal(pool, "7", "0x" + "a".repeat(64), sender),
       /Simulation transport sender required/
     );
+    assert.equal(queries, 0);
+  });
+}
+
+for (const transport of [null, {}, { hasTransaction: async () => false }, { send: async () => {} }]) {
+  test("recovery refuses an incomplete transport before querying pending withdrawals", async () => {
+    let queries = 0;
+    const pool = { async query() { queries++; throw new Error("unexpected database read"); } };
+    await assert.rejects(recoverSimulatedWithdrawals(pool, transport), /requires a queryable, send-capable transport/);
     assert.equal(queries, 0);
   });
 }
