@@ -17,10 +17,14 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
       expectedBot.toLowerCase() === "profino1bot") {
     throw new Error("Simulation requires a separate authenticated staging Telegram bot");
   }
+  const expectedDatabase = String(env.PROFINO_STAGING_DATABASE_NAME || "").trim();
+  if (!expectedDatabase || expectedDatabase.toLowerCase() === "profino-db") {
+    throw new Error("Simulation requires an explicitly named staging database");
+  }
   const { rows: [marker] } = await pool.query(
-    "SELECT current_setting('profino.environment', true) AS environment"
+    "SELECT current_setting('profino.environment', true) AS environment, current_database() AS database_name"
   );
-  if (marker?.environment !== "isolated-staging") {
+  if (marker?.environment !== "isolated-staging" || marker.database_name !== expectedDatabase) {
     throw new Error("Simulation requires an independently marked isolated staging database");
   }
   const { rows } = await pool.query(
