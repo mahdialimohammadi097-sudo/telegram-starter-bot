@@ -202,3 +202,57 @@ jobs:
           scan(payloads)
           print("PASS: list_bots read-only request completed; sensitive fields withheld.")
           PY
+
+      - name: Inspect PROFINO deployments (sanitized metadata only)
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          output="$(mktemp)"
+          trap 'rm -f "$output"' EXIT
+          curl --fail --silent --show-error --max-time 25 --output "$output" \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_app_deployments","arguments":{"app":"telegram-bot"}}}'
+          python3 - "$output" <<'PY'
+          import json,sys
+          body=open(sys.argv[1],encoding="utf-8").read()
+          try: messages=[json.loads(body)]
+          except json.JSONDecodeError:
+              messages=[]
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try: messages.append(json.loads(line[6:]))
+                      except json.JSONDecodeError: pass
+          matches=[m for m in messages if isinstance(m,dict) and m.get("id")==4]
+          if not matches or "error" in matches[0]:
+              print("FAIL: Deployment query returned an MCP error; details withheld.");sys.exit(1)
+          result=matches[0].get("result",{})
+          if result.get("isError"):
+              print("FAIL: Deployment tool returned an error; details withheld.");sys.exit(1)
+          payload=result.get("structuredContent")
+          if payload is None:
+              for item in result.get("content",[]):
+                  if item.get("type")=="text":
+                      try: payload=json.loads(item.get("text",""))
+                      except json.JSONDecodeError: pass
+          print("PASS: Deployment tool responded successfully.")
+          print("Deployment payload type:",type(payload).__name__)
+          if isinstance(payload,dict):
+              print("Deployment response keys:",sorted(payload.keys()))
+              for key in ("deployments","items","results","data"):
+                  if isinstance(payload.get(key),list):
+                      entries=payload[key]
+                      print("Deployment records:",len(entries))
+                      for entry in entries[:5]:
+                          if isinstance(entry,dict):
+                              print("Deployment record keys:",sorted(entry.keys()))
+                              for field in ("status","state","conclusion"):
+                                  if isinstance(entry.get(field),str) and entry[field].lower() in ("success","succeeded","failed","running","pending","queued","completed","error","active","deployed"):
+                                      print("Deployment",field+":",entry[field])
+          elif isinstance(payload,list):
+              print("Deployment records:",len(payload))
+          PY
