@@ -1771,6 +1771,38 @@ test("blocked customers cannot open simulated investments or reserve new withdra
   assert.equal((await displayedBalances(owner))[0], "50.00000000");
 });
 
+test("concurrent authorized reviewers release one blocked customer's hold exactly once", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(696);
+  const reviewerA = await createSimulationWallet(697);
+  const reviewerB = await createSimulationWallet(698);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(available.id, "20");
+  const request = await reserveWithdrawal(pool, customer, "dual-review-release", "8");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true), ($2, true)", [reviewerA, reviewerB]);
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [customer]);
+  const results = await Promise.all([
+    cancelAsSimulationReviewer(pool, reviewerA, request.id),
+    cancelAsSimulationReviewer(pool, reviewerB, request.id)
+  ]);
+  assert.equal(String(results[0]), String(results[1]));
+  const { rows: [state] } = await pool.query(
+    "SELECT status, release_id, cancelled_by_reviewer FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(state.status, "cancelled");
+  assert.equal(String(state.release_id), String(results[0]));
+  assert.ok([String(reviewerA), String(reviewerB)].includes(String(state.cancelled_by_reviewer)));
+  assert.equal((await displayedBalances(customer))[0], "20.00000000");
+  const { rows: [posted] } = await pool.query(
+    "SELECT count(*)::int AS count FROM ledger_transactions WHERE transaction_type = 'sim-withdraw-release' AND reference_id = $1 AND status = 'posted'", [String(request.id)]
+  );
+  assert.equal(posted.count, 1);
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
 test("active reviewer may safely release a blocked customer's existing simulated hold", { skip: !enabled }, async () => {
   const { reserveWithdrawal, cancelAsSimulationReviewer } =
     await import("../test-support/simulated-withdrawal.js");
