@@ -194,6 +194,10 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
       "SELECT * FROM simulation_withdrawals WHERE id = $1 FOR UPDATE", [id]
     );
     if (!request?.destination || request.status === "cancelled") throw new Error("No payable withdrawal");
+    if (request.status !== "pending_receipt" && request.status !== "paid") {
+      throw new Error("Withdrawal must be submitted before receipt confirmation");
+    }
+    if (!request.submitted_hash) throw new Error("Withdrawal submission hash missing");
     const { event } = readTestnetWithdrawalReceipt(observation, expected, {
       sender: treasury.sender, recipient: request.destination, amount: request.amount
     });
