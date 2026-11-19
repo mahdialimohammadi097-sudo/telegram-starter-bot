@@ -176,6 +176,9 @@ export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload 
 // After a restart, process a bounded page. The transport must deduplicate identical
 // payloads by hash, including if lookup lags or a previous submit lost its reply.
 export async function recoverSimulatedWithdrawals(pool, transport, afterId = "0") {
+  if (!transport || typeof transport.hasTransaction !== "function" || typeof transport.send !== "function") {
+    throw new Error("Simulation recovery requires a queryable, send-capable transport");
+  }
   const { rows } = await pool.query(
     `SELECT id, submitted_hash AS hash, amount, destination, simulation_payload AS payload
      FROM simulation_withdrawals WHERE status = 'pending_receipt' AND simulation_payload IS NOT NULL
