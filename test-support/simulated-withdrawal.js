@@ -146,6 +146,8 @@ export function simulationWithdrawalReview(pool) {
 // The offline caller supplies a prepared transaction hash and a fake transport.
 // Commit the claim before submission: an ambiguous response can only be reconciled by hash.
 export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload = null) {
+  // Reject invalid transports before persisting an irreversible submission claim.
+  if (typeof send !== "function") throw new Error("Simulation transport sender required");
   if (payload !== null) {
     // Synthetic transport identity only. There is no chain signer in this harness.
     if (!Buffer.isBuffer(payload) || payload.length === 0 ||
