@@ -269,6 +269,10 @@ jobs:
           if not isinstance(bot_id,str) or not bot_id.startswith("bot_"):
               print("FAIL: PROFINO internal ID missing");sys.exit(1)
           print("PROFINO internal bot ID verified: yes (value withheld)")
+          for key in ("repo","runtime"):
+              value=bot.get(key)
+              if isinstance(value,str):
+                  print("PROFINO bot",key+":",value[:120] if key=="runtime" else "configured")
           deployments=call("list_app_deployments",{"app":bot_id},22)
           if deployments is not None:
               print("PASS: deployment query authorized")
@@ -277,6 +281,7 @@ jobs:
                   for k in ("deployments","items","data","results"):
                       if isinstance(deployments.get(k),list):
                           print("Deployment record count:",len(deployments[k]))
+                          print("Deployment record field names:", sorted(deployments[k][0].keys()) if deployments[k] and isinstance(deployments[k][0],dict) else [])
                           for item in deployments[k][:3]:
                               if isinstance(item,dict):
                                   for field in ("status","state"):
@@ -290,4 +295,14 @@ jobs:
                   print("Read-only inventory",tool,"available:",result is not None)
                   if isinstance(result,dict):
                       print("Inventory",tool,"top-level keys:",sorted(result.keys()))
+                      for field in ("count",):
+                          if isinstance(result.get(field),int):
+                              print("Inventory",tool,field+":",result[field])
+                      for field in ("servers","instances"):
+                          if isinstance(result.get(field),list):
+                              print("Inventory",tool,field,"records:",len(result[field]))
+                              for item in result[field][:5]:
+                                  if isinstance(item,dict):
+                                      print("Inventory",tool,"record fields:",sorted(item.keys()))
+                                      print("Inventory",tool,"status:",item.get("status","unknown"))
           PY
