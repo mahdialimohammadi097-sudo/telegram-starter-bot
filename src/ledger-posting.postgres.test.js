@@ -1676,6 +1676,29 @@ test("offline queue reports the reserve shortage and drains overdue investments 
   assert.deepEqual(await displayedBalances(owner), ["158.96000000", "0.00000000", "0.00000000"]);
 });
 
+test("suspended reviewer is denied by the simulation service even with active reviewer membership", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(682);
+  const reviewer = await createSimulationWallet(683);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(available.id, "8");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(pool, customer, "suspended-reviewer", "3");
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [reviewer]);
+  await assert.rejects(
+    cancelAsSimulationReviewer(pool, reviewer, request.id), /Unauthorized simulation reviewer/
+  );
+  const { rows: [state] } = await pool.query(
+    "SELECT status, release_id FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(state.status, "reserved");
+  assert.equal(state.release_id, null);
+  assert.equal((await displayedBalances(customer))[0], "5.00000000");
+});
+
 test("revoked reviewer cannot replay a completed simulated withdrawal release", { skip: !enabled }, async () => {
   const { reserveWithdrawal, cancelAsSimulationReviewer, simulationWithdrawalReview } =
     await import("../test-support/simulated-withdrawal.js");
