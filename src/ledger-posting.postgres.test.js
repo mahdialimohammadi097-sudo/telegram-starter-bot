@@ -2136,3 +2136,35 @@ test("in-flight reviewer release serializes with revocation of its grant", { ski
   assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "6.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+test("staging Telegram adapters complete synthetic investment and withdrawal lifecycle", { skip: !enabled }, async () => {
+  const { createStagingSimulationHandlers } = await import("./staging-simulation.js");
+  const owner = await createSimulationWallet(8950);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  await seedAvailableBalance(available.id, "50");
+  const isolated = {
+    query(sql, params) {
+      if (sql.includes("current_setting('profino.environment'")) {
+        return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] });
+      }
+      return pool.query(sql, params);
+    },
+    connect: () => pool.connect()
+  };
+  const handlers = await createStagingSimulationHandlers(isolated, {
+    PROFINO_SIMULATION_MODE: "isolated-staging",
+    PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot",
+    PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot");
+  const investmentId = await handlers.openTestInvestment(owner, "telegram-staging-investment", "STARTER 10");
+  assert.equal(await handlers.openTestInvestment(owner, "telegram-staging-investment", "STARTER 10"), investmentId);
+  const hold = await handlers.reserveTestWithdrawal(owner, "telegram-staging-withdraw", "15");
+  assert.equal(String((await handlers.listTestHolds(owner))[0].id), String(hold.id));
+  const journal = await handlers.cancelTestWithdrawal(owner, hold.id);
+  assert.equal(await handlers.cancelTestWithdrawal(owner, hold.id), journal);
+  assert.equal((await handlers.listTestHolds(owner)).length, 0);
+  assert.deepEqual(await displayedBalances(owner), ["40.00000000", "10.00000000", "0.00000000"]);
+});
