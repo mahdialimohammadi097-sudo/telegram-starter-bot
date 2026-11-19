@@ -1990,3 +1990,32 @@ test("reviewer read access ends immediately after grant revocation", { skip: !en
   assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "3.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+
+test("blocking a reviewer revokes extended withdrawal read and release access", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, simulationWithdrawalReview, cancelWithdrawal } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1731);
+  const reviewer = await createSimulationWallet(1732);
+  const telegramId = 981732;
+  await pool.query("UPDATE users SET telegram_id = $2 WHERE id = $1", [reviewer, telegramId]);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "9");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(
+    pool, customer, "blocked-reviewer-read-1", "4", "0x4444444444444444444444444444444444444444"
+  );
+  const review = simulationWithdrawalReview(pool);
+  assert.equal((await review.inspect(telegramId, request.id)).status, "reserved");
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [reviewer]);
+  assert.deepEqual((await review.list(telegramId, 0)).holds, []);
+  assert.equal(await review.inspect(telegramId, request.id), undefined);
+  await assert.rejects(review.release(telegramId, request.id), /Unauthorized simulation reviewer/);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "4.00000000");
+  const released = await cancelWithdrawal(pool, customer, request.id);
+  assert.equal(await cancelWithdrawal(pool, customer, request.id), released);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "9.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
