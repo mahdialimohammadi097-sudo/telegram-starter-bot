@@ -31,6 +31,9 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
       !/^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/.test(expectedDatabase)) {
     throw new Error("Simulation requires an explicitly named staging database");
   }
+  if (!/staging|test|sandbox/i.test(expectedDatabase)) {
+    throw new Error("Simulation database name must visibly identify an isolated test environment");
+  }
   const { rows: [marker] } = await pool.query(
     "SELECT current_setting('profino.environment', true) AS environment, current_database() AS database_name"
   );
