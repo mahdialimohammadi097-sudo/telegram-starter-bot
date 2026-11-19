@@ -2089,3 +2089,50 @@ test("reviewer revocation committed before release cannot move a destination-bou
   assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "13.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+
+test("in-flight reviewer release serializes with revocation of its grant", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1761);
+  const reviewer = await createSimulationWallet(1762);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "14");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(
+    pool, customer, "inflight-revoke-1", "6", "0x7777777777777777777777777777777777777777"
+  );
+  const revoker = await pool.connect();
+  let release;
+  try {
+    await revoker.query("BEGIN");
+    await revoker.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+    let settled = false;
+    release = cancelAsSimulationReviewer(pool, reviewer, request.id).then(
+      value => { settled = true; return { status: "fulfilled", value }; },
+      reason => { settled = true; return { status: "rejected", reason }; }
+    );
+    await revoker.query("SELECT pg_sleep(0.15)");
+    assert.equal(settled, false, "release must wait for reviewer grant lock");
+    await revoker.query("COMMIT");
+  } catch (error) {
+    await revoker.query("ROLLBACK");
+    if (release) await release;
+    throw error;
+  } finally {
+    revoker.release();
+  }
+  const outcome = await release;
+  assert.equal(outcome.status, "rejected");
+  assert.match(outcome.reason.message, /Unauthorized simulation reviewer/);
+  const { rows: [held] } = await pool.query(
+    "SELECT status, release_id FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(held.status, "reserved");
+  assert.equal(held.release_id, null);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "8.00000000");
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "6.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
