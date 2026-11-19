@@ -440,7 +440,7 @@ jobs:
                       try:return json.loads(item.get("text",""))
                       except json.JSONDecodeError:pass
               return None
-          import shlex
+          import shlex, re
           bots=payload(rpc("tools/call",{"name":"list_bots","arguments":{}},41))
           entries=bots.get("bots",[]) if isinstance(bots,dict) else []
           matches=[b for b in entries if isinstance(b,dict) and b.get("name")=="telegram-bot"]
@@ -465,7 +465,9 @@ jobs:
           values=list(strings(result))
           if result.get("isError"):
               combined=" ".join(values).lower()
-              print("Host command rejected; matched reasons:",[w for w in ("paid","upgrade","permission","timeout","not allowed","plan","not found") if w in combined])
+              message=" ".join(values).replace(os.environ["FADEHOST_TOKEN"], "[secret]")
+              message=re.sub(r"https?://\\S+|postgres(?:ql)?://\\S+|[A-Za-z0-9_./+|=-]{24,}", "[redacted]", message)
+              print("Host command rejection:", message[:500])
               raise SystemExit(1)
           found=False
           for value in values:
