@@ -1676,6 +1676,39 @@ test("offline queue reports the reserve shortage and drains overdue investments 
   assert.deepEqual(await displayedBalances(owner), ["158.96000000", "0.00000000", "0.00000000"]);
 });
 
+test("revoked reviewer cannot replay a completed simulated withdrawal release", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer, simulationWithdrawalReview } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(680);
+  const reviewer = await createSimulationWallet(681);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(available.id, "10");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const telegramId = 8810232681;
+  await pool.query("UPDATE users SET telegram_id = $1, status = 'active' WHERE id = $2", [telegramId, reviewer]);
+  const request = await reserveWithdrawal(pool, customer, "revoke-after-release", "3");
+  const released = await cancelAsSimulationReviewer(pool, reviewer, request.id);
+  assert.equal(await cancelAsSimulationReviewer(pool, reviewer, request.id), released);
+
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  await assert.rejects(
+    cancelAsSimulationReviewer(pool, reviewer, request.id), /Unauthorized simulation reviewer/
+  );
+  await assert.rejects(
+    simulationWithdrawalReview(pool).release(telegramId, request.id), /Unauthorized simulation reviewer/
+  );
+  const { rows: [state] } = await pool.query(
+    "SELECT status, release_id, cancelled_by_reviewer FROM simulation_withdrawals WHERE id = $1",
+    [request.id]
+  );
+  assert.equal(state.status, "cancelled");
+  assert.equal(String(state.release_id), String(released));
+  assert.equal(String(state.cancelled_by_reviewer), String(reviewer));
+  assert.equal((await displayedBalances(customer))[0], "10.00000000");
+});
+
 test("reviewer and customer cancellations share one release and preserve the original actor", { skip: !enabled }, async t => {
   const { reserveWithdrawal, cancelWithdrawal, cancelAsSimulationReviewer, simulationWithdrawalReview } = await import("../test-support/simulated-withdrawal.js");
   const customer = await createSimulationWallet(650);
