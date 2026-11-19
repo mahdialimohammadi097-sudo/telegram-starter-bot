@@ -788,7 +788,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       const keyboard = new Keyboard();
       const terms = listPreviewPlans().map(plan => {
         keyboard.text("Preview " + plan.name).row();
-        return plan.name + " · " + plan.days + " days";
+        return plan.name + " · " + plan.days + " days · " + plan.profitPercent + "% example profit · " + plan.feePercent + "% settlement fee";
       });
       keyboard.text("⬅ Main Menu").resized();
       return ctx.reply(["INVESTMENT PLANS · SIMULATION", ...terms,
