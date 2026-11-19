@@ -1838,7 +1838,7 @@ test("one finalized testnet event settles exactly one destination-bound withdraw
   const second = await reserve("outbound-2");
   // Both competing requests must have a recorded synthetic submission before a receipt can settle either.
   await submitSimulatedWithdrawal(pool, first.id, sample.expected.txHash, async () => {});
-  await submitSimulatedWithdrawal(pool, second.id, sample.expected.txHash, async () => {});
+  await submitSimulatedWithdrawal(pool, second.id, "0x" + "ab".repeat(32), async () => {});
   const confirm = request => confirmTestnetWithdrawal(pool, request.id, sample.observation, sample.expected, treasury);
   const results = await Promise.allSettled([confirm(first), confirm(second)]);
   assert.equal(results.filter(row => row.status === "fulfilled").length, 1);
@@ -1846,8 +1846,8 @@ test("one finalized testnet event settles exactly one destination-bound withdraw
   const loser = winner === first ? second : first;
   assert.equal(await confirm(winner), results.find(row => row.status === "fulfilled").value);
   await assert.rejects(cancelWithdrawal(pool, owner, winner.id), /cannot be cancelled/);
-  await cancelWithdrawal(pool, owner, loser.id);
-  assert.equal((await displayedBalances(owner))[0], "1.00000000");
+  await assert.rejects(cancelWithdrawal(pool, owner, loser.id), /cannot be cancelled/);
+  assert.equal((await displayedBalances(owner))[0], "0.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
 
