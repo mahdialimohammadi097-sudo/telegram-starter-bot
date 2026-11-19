@@ -41,7 +41,9 @@ test("fully marked isolated staging exposes synthetic writers", async () => {
   const pool = { async query(sql) {
     return { rows: sql.includes("current_setting")
       ? [{ environment: "isolated-staging", database_name: "profino_staging_it" }]
-      : [{ investments: true, withdrawals: true, reviewers: true }] };
+      : sql.includes("pg_attribute")
+        ? [{ extended_columns: true, payout_state_constraint: true }]
+        : [{ investments: true, withdrawals: true, reviewers: true }] };
   } };
   const handlers = await createStagingSimulationHandlers(pool, {
     PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
@@ -66,4 +68,16 @@ test("simulation rejects wrong staging database identity before enabling writers
   const env = { PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it" };
   await assert.rejects(createStagingSimulationHandlers(pool, env, "profino_staging_test_bot"), /independently marked isolated staging database/);
   await assert.rejects(createStagingSimulationHandlers(pool, { ...env, PROFINO_STAGING_DATABASE_NAME: "profino-db" }, "profino_staging_test_bot"), /explicitly named staging database/);
+});
+
+test("simulation refuses legacy withdrawal schema lacking payout state", async () => {
+  const pool = { async query(sql) {
+    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] };
+    if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
+    return { rows: [{ extended_columns: false, payout_state_constraint: false }] };
+  } };
+  await assert.rejects(createStagingSimulationHandlers(pool, {
+    PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot"), /Incompatible staging withdrawal schema/);
 });
