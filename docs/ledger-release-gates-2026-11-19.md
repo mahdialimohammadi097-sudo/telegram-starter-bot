@@ -62,3 +62,10 @@ In a new isolated implementation branch based on the audited integration candida
 ## Latest documentation-only commit validation
 - Branch commit `58543675136847bec11cac68bff90708f501fcf3` passed GitHub Actions run https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44555299682 on Node.js 22, 24 and 26 with PostgreSQL 17.
 - No production DB schema, live funds, or deployment settings were modified by this audit PR.
+
+## Suspended simulation reviewer authorization — verified 2026-11-19
+- Direct simulation reviewer release now requires both an active reviewer membership and an active `users.status`, with PostgreSQL shared row locks on both authorization rows.
+- Regression test: a blocked user retaining active simulation reviewer membership cannot release a reserved simulated withdrawal; request state and balance remain unchanged.
+- Commit `187bcb47c9dcac266bb9efb6c827bdedaca54fef`; CI https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44555821157 concluded success.
+- Node.js 22/24/26 + PostgreSQL 17: 121 passed, 0 failed, 0 skipped **per job**. Focused PostgreSQL run on Node.js 22: 35 passed, 0 failed, 0 skipped (overlapping tests).
+- This authorization fix is for the **simulation-only** reviewer service, not a live withdrawal approval system.
