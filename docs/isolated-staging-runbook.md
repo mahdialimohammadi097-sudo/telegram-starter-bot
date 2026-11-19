@@ -15,6 +15,7 @@ The production bot `@PROFINO1bot` and the production database must not be used f
    - `PROFINO_SIMULATION_MODE=isolated-staging`
    - `PROFINO_STAGING_BOT_USERNAME=<actual separate bot username>`
    - `PROFINO_STAGING_DATABASE_NAME=<actual separate database name>`
+   - `PROFINO_PRODUCTION_DATABASE_NAME=<actual production database name>` (recommended extra guard: must not equal staging database; never use production credentials in staging)
    - `TELEGRAM_BOT_TOKEN=<staging bot token>`
    - `DATABASE_URL=<isolated staging PostgreSQL URL>`
 6. Run `node scripts/staging-simulation-preflight.js` **in staging**. It only reads the database and calls Telegram `getMe`; it does not send messages or post ledger entries. A PASS confirms identity, marker, required tables and adapter availability, **not** end-to-end correctness.
