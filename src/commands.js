@@ -4,6 +4,7 @@ import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { InlineKeyboard, Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 import { simulationRequestKey } from "./simulation-idempotency.js";
+import { isPrivateSimulationChat } from "./simulation-chat-safety.js";
 import { pool } from "./database.js";
 import { getWalletBalances, getSimulationReceipt, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt, toUsdtUnitsExact } from "./ledger-safety.js";
@@ -200,7 +201,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
   // Only the offline test harness supplies a simulation writer.
   if (openTestInvestment) {
     bot.callbackQuery(/^sim_open:([A-Z]+):(\d+)$/, async ctx => {
-      if (ctx.chat?.type !== "private" || ctx.chat.id !== ctx.from.id) {
+      if (!isPrivateSimulationChat(ctx)) {
         return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
       }
       const [, name, amount] = ctx.match;
@@ -227,7 +228,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
   if (reserveTestWithdrawal) {
     bot.command("testwithdraw", async ctx => {
-      if (ctx.chat?.type !== "private" || ctx.chat.id !== ctx.from.id) {
+      if (!isPrivateSimulationChat(ctx)) {
         return ctx.reply("Use the staging bot in a private chat for test withdrawals.");
       }
       const amount = ctx.match.trim();
@@ -241,7 +242,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       });
     });
     bot.callbackQuery(/^sim_hold:([1-9]\d{0,9}):(\d{1,18}\.\d{8})$/, async ctx => {
-      if (ctx.chat?.type !== "private" || ctx.chat.id !== ctx.from.id) {
+      if (!isPrivateSimulationChat(ctx)) {
         return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
       }
       await ctx.answerCallbackQuery();
@@ -265,7 +266,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
   if (cancelTestWithdrawal) {
     bot.callbackQuery(/^sim_cancel_hold:([1-9]\d{0,18})$/, async ctx => {
-      if (ctx.chat?.type !== "private" || ctx.chat.id !== ctx.from.id) {
+      if (!isPrivateSimulationChat(ctx)) {
         return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
       }
       await ctx.answerCallbackQuery();
