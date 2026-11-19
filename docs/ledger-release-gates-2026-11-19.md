@@ -18,6 +18,13 @@ Status: **review only; NOT authorized for live money movement**.
 
 These are code-level observations, **not** proof of production safety or economic backing.
 
+## Additional hardening on this branch
+- Exact USDT parsing now rejects unsafe integer JavaScript numbers; decimal strings remain exact.
+- Ledger account ID normalization now rejects non-safe numeric IDs rather than silently rounding them; decimal-string identifiers remain supported.
+- Added focused unit regression tests for both precision hazards.
+- Added PostgreSQL regression coverage for opposite-direction concurrent transfers.
+- **All newly added tests remain unverified until an actual CI run or local test execution is recorded.**
+
 ## Required gates before merge and production release
 - [ ] Re-run Node.js test matrix and PostgreSQL 17 integration suite on the **exact** intended merge commit; report pass/fail/skip counts, including zero unexplained skips.
 - [ ] Verify full ledger contract and trigger definitions against target database with read-only catalog queries; do not infer production constraints from test fixtures.
