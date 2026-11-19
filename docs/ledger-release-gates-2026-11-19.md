@@ -114,3 +114,17 @@ Read directly from GitHub PR metadata (all **open, unmerged** at inspection time
 **Integration implications:** #35 -> #36 -> #42 -> #49 -> #50 -> #51 -> #57 is a stacked chain; #31 -> #45 -> #46 is a separate stack; #32 and #54 target main. Do not merge child PRs independently, assume the stacks are compatible, or move live financial code into main without a complete cumulative-diff/security review and exact-candidate CI.
 
 Latest verified audit-branch CI run before this documentation change: https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44563034962 (success). This PR metadata check is **not** a code-level review of all changed files or a verified deploy.
+
+## Cross-branch overlap inspection — 2026-11-19
+
+Compared GitHub's changed-filename lists for PR #54 (base `main`) and PR #57 (base `feature/integrated-postgres-matrix`). **Seven overlapping changed paths**:
+`.github/workflows/validate.yml`, `src/ledger-posting.js`, `src/ledger-posting.postgres.test.js`, `src/ledger-posting.test.js`, `src/ledger-safety.test.js`, `test-support/simulated-investment.js`, `test-support/simulated-withdrawal.js`.
+
+Fetched the actual file contents at both heads for three paths and verified they differ:
+- `src/ledger-posting.js`: PR #54 head blob `5e3f780`, audit head blob `0520e7b`.
+- `test-support/simulated-withdrawal.js`: PR #54 head blob `fc20507`, audit head blob `4f7e213`. **Substantial implementation divergence**: 10,920 versus 6,540 characters. This requires a semantic reconciliation, not a blind overwrite or automatic assumption of compatibility.
+- `src/ledger-safety.js`: PR #54 head blob `d6eda0d`, audit head blob `5dbd05e`. This path is not listed as a changed file in PR #57 relative to its base? The audit branch has its own precision hardening and the branch heads still differ.
+
+The seven-path overlap is a **potential integration risk**, not proof of Git merge conflicts. Comparing file lengths/hashes does not establish which implementation is correct. Do not cherry-pick, force-merge, or replace either branch's withdrawal service without inspecting the complete diff, call sites, migrations, and tests.
+
+Next: inspect semantic differences in the withdrawal service and ledger APIs, design an isolated integration candidate, run both branches' tests on the exact combined tree, and review authorization and balance invariants. No live funds.
