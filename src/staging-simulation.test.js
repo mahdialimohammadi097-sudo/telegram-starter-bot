@@ -105,3 +105,22 @@ test("simulation refuses payout constraint when required columns are missing", a
     PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
   }, "profino_staging_test_bot"), /Incompatible staging withdrawal schema/);
 });
+
+test("staging schema preflight checks every supported withdrawal state", async () => {
+  let checkedConstraint = false;
+  const pool = { async query(sql) {
+    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] };
+    if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
+    for (const state of ["reserved", "cancelled", "pending_receipt", "paid"]) {
+      assert.ok(sql.includes(`LIKE '%${state}%'`), `missing constraint check for ${state}`);
+    }
+    checkedConstraint = true;
+    return { rows: [{ extended_columns: true, payout_state_constraint: true }] };
+  } };
+  const handlers = await createStagingSimulationHandlers(pool, {
+    PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot");
+  assert.equal(checkedConstraint, true);
+  assert.equal(typeof handlers.reserveTestWithdrawal, "function");
+});
