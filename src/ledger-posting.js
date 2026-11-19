@@ -7,7 +7,7 @@ function normalizeAccountId(value) {
     throw new TypeError("Unsafe numeric ledger account id; provide a decimal string");
   }
   const id = String(value ?? "").trim();
-  if (!/^[1-9][0-9]*$/.test(id) || BigInt(id) > 9223372036854775807n) {
+  if (!/^[1-9][0-9]{0,18}$/.test(id) || BigInt(id) > 9223372036854775807n) {
     throw new TypeError("Invalid ledger account id");
   }
   return BigInt(id).toString();
