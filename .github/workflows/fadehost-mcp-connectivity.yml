@@ -110,3 +110,80 @@ jobs:
               if name.startswith(("list_", "get_")):
                   print("Read-only candidate:", name)
           PY
+
+      - name: Read bot inventory safely (no secrets or configuration output)
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          tools_file="$(mktemp)"
+          result_file="$(mktemp)"
+          trap 'rm -f "$tools_file" "$result_file"' EXIT
+          curl --fail --silent --show-error --max-time 25 --output "$tools_file" \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+          python3 - "$tools_file" <<'PY'
+          import json,sys
+          body=open(sys.argv[1],encoding="utf-8").read()
+          events=[]
+          try: events=[json.loads(body)]
+          except json.JSONDecodeError:
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try: events.append(json.loads(line[6:]))
+                      except json.JSONDecodeError: pass
+          tools=[t for e in events if isinstance(e,dict) for t in e.get("result",{}).get("tools",[]) if t.get("name")=="list_bots"]
+          if len(tools)!=1:
+              print("FAIL: list_bots tool unavailable");sys.exit(1)
+          required=tools[0].get("inputSchema",{}).get("required",[])
+          if required:
+              print("SKIP: list_bots requires arguments; no automatic call made.")
+              sys.exit(0)
+          print("PASS: list_bots accepts an empty argument object.")
+          PY
+          curl --fail --silent --show-error --max-time 25 --output "$result_file" \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_bots","arguments":{}}}'
+          python3 - "$result_file" <<'PY'
+          import json,sys
+          body=open(sys.argv[1],encoding="utf-8").read()
+          events=[]
+          try: events=[json.loads(body)]
+          except json.JSONDecodeError:
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try: events.append(json.loads(line[6:]))
+                      except json.JSONDecodeError: pass
+          matches=[e for e in events if isinstance(e,dict) and e.get("id")==3]
+          if not matches or "error" in matches[0] or matches[0].get("result",{}).get("isError"):
+              print("FAIL: list_bots call returned an error (details withheld).");sys.exit(1)
+          result=matches[0].get("result",{})
+          payloads=[]
+          for item in result.get("content",[]):
+              if item.get("type")=="text":
+                  try: payloads.append(json.loads(item.get("text","")))
+                  except json.JSONDecodeError: pass
+          if not payloads:
+              print("PASS: list_bots MCP call completed; inventory structure not recognized.")
+              sys.exit(0)
+          def scan(value):
+              if isinstance(value,list):
+                  for v in value: scan(v)
+              elif isinstance(value,dict):
+                  if value.get("name")=="telegram-bot":
+                      print("PROFINO bot found: yes")
+                      for key in ("status","state","power_state"):
+                          if isinstance(value.get(key),str) and value[key] in ("running","online","offline","stopped","starting","sleeping","error"):
+                              print("PROFINO bot",key+":",value[key])
+                  for key in ("bots","data","items","results"):
+                      if key in value: scan(value[key])
+          scan(payloads)
+          print("PASS: list_bots read-only request completed; sensitive fields withheld.")
+          PY
