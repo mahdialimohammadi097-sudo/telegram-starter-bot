@@ -52,7 +52,6 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
     ) AS extended_columns,
     EXISTS (
       SELECT 1 FROM pg_constraint c
-      JOIN pg_attribute a ON a.attrelid = c.conrelid
       WHERE c.conrelid = 'simulation_withdrawals'::regclass
         AND c.contype = 'c' AND pg_get_constraintdef(c.oid) LIKE '%pending_receipt%'
     ) AS payout_state_constraint
