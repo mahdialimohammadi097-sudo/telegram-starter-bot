@@ -1827,7 +1827,7 @@ test("transfer receipts reject a balanced release journal that debits another us
 });
 
 test("one finalized testnet event settles exactly one destination-bound withdrawal", { skip: !enabled }, async () => {
-  const { reserveWithdrawal, confirmTestnetWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const { reserveWithdrawal, submitSimulatedWithdrawal, confirmTestnetWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
   const sample = JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url), "utf8"));
   const owner = await createSimulationWallet(738);
   const { rows: [available] } = await pool.query("SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]);
@@ -1836,6 +1836,9 @@ test("one finalized testnet event settles exactly one destination-bound withdraw
   const reserve = key => reserveWithdrawal(pool, owner, key, "1", sample.expected.recipient);
   const first = await reserve("outbound-1");
   const second = await reserve("outbound-2");
+  // Both competing requests must have a recorded synthetic submission before a receipt can settle either.
+  await submitSimulatedWithdrawal(pool, first.id, sample.expected.txHash, async () => {});
+  await submitSimulatedWithdrawal(pool, second.id, sample.expected.txHash, async () => {});
   const confirm = request => confirmTestnetWithdrawal(pool, request.id, sample.observation, sample.expected, treasury);
   const results = await Promise.allSettled([confirm(first), confirm(second)]);
   assert.equal(results.filter(row => row.status === "fulfilled").length, 1);
