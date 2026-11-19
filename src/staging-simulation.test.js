@@ -81,3 +81,27 @@ test("simulation refuses legacy withdrawal schema lacking payout state", async (
     PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
   }, "profino_staging_test_bot"), /Incompatible staging withdrawal schema/);
 });
+
+test("simulation refuses extended columns without a four-state payout constraint", async () => {
+  const pool = { async query(sql) {
+    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] };
+    if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
+    return { rows: [{ extended_columns: true, payout_state_constraint: false }] };
+  } };
+  await assert.rejects(createStagingSimulationHandlers(pool, {
+    PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot"), /Incompatible staging withdrawal schema/);
+});
+
+test("simulation refuses payout constraint when required columns are missing", async () => {
+  const pool = { async query(sql) {
+    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] };
+    if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
+    return { rows: [{ extended_columns: false, payout_state_constraint: true }] };
+  } };
+  await assert.rejects(createStagingSimulationHandlers(pool, {
+    PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot"), /Incompatible staging withdrawal schema/);
+});
