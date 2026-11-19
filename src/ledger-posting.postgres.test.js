@@ -2166,5 +2166,5 @@ test("staging Telegram adapters complete synthetic investment and withdrawal lif
   const journal = await handlers.cancelTestWithdrawal(owner, hold.id);
   assert.equal(await handlers.cancelTestWithdrawal(owner, hold.id), journal);
   assert.equal((await handlers.listTestHolds(owner)).length, 0);
-  assert.deepEqual(await displayedBalances(owner), ["40.00000000", "10.00000000", "0.00000000"]);
+  assert.deepEqual(await displayedBalances(owner), ["40.00000000", "10.00000000", "0.00000000", "0.00000000"]);
 });
