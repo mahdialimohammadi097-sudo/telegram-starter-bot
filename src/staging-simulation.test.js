@@ -151,3 +151,17 @@ test("simulation rejects ambiguous staging database identifiers before querying"
     );
   }
 });
+
+test("simulation refuses a production-looking database even when marked as staging", async () => {
+  const pool = { query() { throw new Error("must not query production-looking database"); } };
+  const env = {
+    PROFINO_SIMULATION_MODE: "isolated-staging",
+    PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot",
+    PROFINO_STAGING_DATABASE_NAME: "customer_finance"
+  };
+  await assert.rejects(
+    createStagingSimulationHandlers(pool, env, "profino_staging_test_bot"),
+    /visibly identify an isolated test environment/
+  );
+});
