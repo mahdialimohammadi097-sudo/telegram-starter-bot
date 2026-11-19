@@ -132,8 +132,8 @@ test("simulation rejects a staging database configured as production", async () 
   await assert.rejects(createStagingSimulationHandlers(pool, {
     PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging",
     PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot",
-    PROFINO_STAGING_DATABASE_NAME: "customer_finance",
-    PROFINO_PRODUCTION_DATABASE_NAME: "CUSTOMER_FINANCE"
+    PROFINO_STAGING_DATABASE_NAME: "customer_staging_finance",
+    PROFINO_PRODUCTION_DATABASE_NAME: "CUSTOMER_STAGING_FINANCE"
   }, "profino_staging_test_bot"), /must differ from configured production database/);
 });
 
