@@ -170,6 +170,8 @@ jobs:
               if item.get("type")=="text":
                   try: payloads.append(json.loads(item.get("text","")))
                   except json.JSONDecodeError: pass
+          if isinstance(result.get("structuredContent"), (dict,list)):
+              payloads.append(result["structuredContent"])
           if not payloads:
               print("DIAGNOSTIC: MCP response envelope keys:", sorted(result.keys()))
               print("DIAGNOSTIC: MCP content types:", [item.get("type") for item in result.get("content",[]) if isinstance(item,dict)])
@@ -188,6 +190,10 @@ jobs:
                               print("PROFINO bot",key+":",value[key])
                   for key in ("bots","data","items","results"):
                       if key in value: scan(value[key])
+          print("DIAGNOSTIC: inventory parsed payload types:", [type(x).__name__ for x in payloads])
+          for payload in payloads:
+              if isinstance(payload,dict):
+                  print("DIAGNOSTIC: inventory top-level keys:", sorted(payload.keys()))
           scan(payloads)
           print("PASS: list_bots read-only request completed; sensitive fields withheld.")
           PY
