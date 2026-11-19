@@ -1963,3 +1963,30 @@ test("revoking reviewer grant prevents destination-bound hold release", { skip: 
   assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "11.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+
+test("reviewer read access ends immediately after grant revocation", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, simulationWithdrawalReview } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1721);
+  const reviewer = await createSimulationWallet(1722);
+  const telegramId = 981722;
+  await pool.query("UPDATE users SET telegram_id = $2 WHERE id = $1", [reviewer, telegramId]);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "8");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(
+    pool, customer, "reviewer-read-1", "3", "0x3333333333333333333333333333333333333333"
+  );
+  const review = simulationWithdrawalReview(pool);
+  assert.equal((await review.list(telegramId, 0)).holds.some(x => String(x.id) === String(request.id)), true);
+  assert.equal((await review.inspect(telegramId, request.id)).status, "reserved");
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  assert.equal((await review.list(telegramId, 0)).holds.length, 0);
+  assert.equal(await review.inspect(telegramId, request.id), undefined);
+  await assert.rejects(review.release(telegramId, request.id), /Unauthorized simulation reviewer/);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "3.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
