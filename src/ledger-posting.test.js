@@ -41,6 +41,20 @@ test("ledger account identifiers must not lose JavaScript numeric precision", ()
   ]), /Unsafe numeric ledger account id/);
 });
 
+test("ledger account identifiers stay within PostgreSQL signed bigint range", () => {
+  const entries = [
+    { account_id: "9223372036854775807", entry_type: "debit", amount: "1", currency: "USDT" },
+    { account_id: "2", entry_type: "credit", amount: "1", currency: "USDT" }
+  ];
+  assert.equal(normalizeEntries(entries)[0].account_id, "9223372036854775807");
+  assert.throws(() => normalizeEntries([
+    { ...entries[0], account_id: "9223372036854775808" }, entries[1]
+  ]), /Invalid ledger account id/);
+  assert.throws(() => normalizeEntries([
+    { ...entries[0], account_id: "9".repeat(1000) }, entries[1]
+  ]), /Invalid ledger account id/);
+});
+
 test("rejects unbalanced entries", () => {
   assert.throws(() => normalizeEntries([
     { account_id: "1", entry_type: "debit", amount: "2", currency: "USDT" },
