@@ -73,7 +73,10 @@ export async function cancelAsSimulationReviewer(pool, reviewerId, id) {
 
 async function releaseAsReviewer(client, reviewerId, id) {
   const reviewer = await client.query(
-    "SELECT user_id FROM simulation_reviewers WHERE user_id = $1 AND active FOR SHARE", [reviewerId]
+    `SELECT r.user_id FROM simulation_reviewers r
+     JOIN users u ON u.id = r.user_id
+     WHERE r.user_id = $1 AND r.active AND u.status = 'active'
+     FOR SHARE OF r, u`, [reviewerId]
   );
   if (!reviewer.rowCount) throw new Error("Unauthorized simulation reviewer");
   const { rows: [request] } = await client.query(
