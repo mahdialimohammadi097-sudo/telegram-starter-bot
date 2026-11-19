@@ -1900,3 +1900,37 @@ test("restarted simulation recovers the exact saved payload after a pre-send sto
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
   await recoverSimulatedWithdrawals(pool, { hasTransaction: () => assert.fail("Settled payout was rescanned") });
 });
+
+
+test("extended withdrawal rejects blocked customers and suspended reviewers", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1701);
+  const reviewer = await createSimulationWallet(1702);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "12");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const destination = "0x1111111111111111111111111111111111111111";
+  const request = await reserveWithdrawal(pool, customer, "auth-extended-1", "5", destination);
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [customer]);
+  await assert.rejects(
+    reserveWithdrawal(pool, customer, "auth-extended-1", "5", destination), /Unknown user/
+  );
+  await assert.rejects(
+    reserveWithdrawal(pool, customer, "auth-extended-2", "1", destination), /Unknown user/
+  );
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [reviewer]);
+  await assert.rejects(
+    cancelAsSimulationReviewer(pool, reviewer, request.id), /Unauthorized simulation reviewer/
+  );
+  const { rows: [hold] } = await pool.query(
+    "SELECT status, destination FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(hold.status, "reserved");
+  assert.equal(hold.destination, destination);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "7.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
