@@ -39,6 +39,27 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
   if (!rows[0]?.investments || !rows[0]?.withdrawals || !rows[0]?.reviewers) {
     throw new Error("Staging simulation tables are missing; run isolated staging setup");
   }
+  // The older ledger review branch supports only reserved/cancelled. Refuse to
+  // activate against that incompatible schema instead of silently losing payout state.
+  const { rows: [compatibility] } = await pool.query(`
+    SELECT EXISTS (
+      SELECT 1 FROM pg_attribute
+      WHERE attrelid = 'simulation_withdrawals'::regclass
+        AND attname IN ('submitted_hash', 'simulation_payload', 'destination',
+                        'payout_event', 'payout_id', 'clearing_id')
+        AND attnum > 0 AND NOT attisdropped
+      GROUP BY attrelid HAVING COUNT(*) = 6
+    ) AS extended_columns,
+    EXISTS (
+      SELECT 1 FROM pg_constraint c
+      JOIN pg_attribute a ON a.attrelid = c.conrelid
+      WHERE c.conrelid = 'simulation_withdrawals'::regclass
+        AND c.contype = 'c' AND pg_get_constraintdef(c.oid) LIKE '%pending_receipt%'
+    ) AS payout_state_constraint
+  `);
+  if (!compatibility?.extended_columns || !compatibility.payout_state_constraint) {
+    throw new Error("Incompatible staging withdrawal schema; migration review required");
+  }
   return {
     openTestInvestment: (userId, key, selection) =>
       openSimulatedInvestment(pool, userId, key, selection),
