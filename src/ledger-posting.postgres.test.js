@@ -1771,6 +1771,30 @@ test("blocked customers cannot open simulated investments or reserve new withdra
   assert.equal((await displayedBalances(owner))[0], "50.00000000");
 });
 
+test("active reviewer may safely release a blocked customer's existing simulated hold", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(694);
+  const reviewer = await createSimulationWallet(695);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(available.id, "15");
+  const request = await reserveWithdrawal(pool, customer, "blocked-customer-review-release", "6");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [customer]);
+  const releaseId = await cancelAsSimulationReviewer(pool, reviewer, request.id);
+  assert.equal(await cancelAsSimulationReviewer(pool, reviewer, request.id), releaseId);
+  const { rows: [state] } = await pool.query(
+    "SELECT status, release_id, cancelled_by_reviewer FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(state.status, "cancelled");
+  assert.equal(String(state.release_id), String(releaseId));
+  assert.equal(String(state.cancelled_by_reviewer), String(reviewer));
+  assert.equal((await displayedBalances(customer))[0], "15.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
 test("reviewer read permissions require both active account and active reviewer grant", { skip: !enabled }, async () => {
   const { reserveWithdrawal, simulationWithdrawalReview } =
     await import("../test-support/simulated-withdrawal.js");
