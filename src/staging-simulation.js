@@ -52,9 +52,9 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
       SELECT 1 FROM pg_attribute
       WHERE attrelid = 'simulation_withdrawals'::regclass
         AND attname IN ('submitted_hash', 'simulation_payload', 'destination',
-                        'payout_event', 'payout_id', 'clearing_id')
+                        'payout_event', 'payout_id', 'clearing_id', 'status')
         AND attnum > 0 AND NOT attisdropped
-      GROUP BY attrelid HAVING COUNT(*) = 6
+      GROUP BY attrelid HAVING COUNT(*) = 7
     ) AS extended_columns,
     EXISTS (
       SELECT 1 FROM pg_constraint c
