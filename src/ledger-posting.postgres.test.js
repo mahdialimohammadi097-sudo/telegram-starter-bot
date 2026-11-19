@@ -1934,7 +1934,7 @@ test("restarted simulation recovers the exact saved payload after a pre-send sto
   assert.equal(await settle(), await settle());
   assert.equal(formatUsdt((await getWalletBalances(pool, owner)).WITHDRAWAL_HOLD), "0.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
-  await recoverSimulatedWithdrawals(pool, { hasTransaction: () => assert.fail("Settled payout was rescanned") });
+  await recoverSimulatedWithdrawals(pool, { hasTransaction: () => assert.fail("Settled payout was rescanned"), send: () => assert.fail("Settled payout was resent") });
 });
 
 
