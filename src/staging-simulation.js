@@ -21,7 +21,7 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
       expectedBot.toLowerCase() === "profino1bot") {
     throw new Error("Simulation requires a separate authenticated staging Telegram bot");
   }
-  const expectedDatabase = String(env.PROFINO_STAGING_DATABASE_NAME || "").trim();
+  const expectedDatabase = String(env.PROFINO_STAGING_DATABASE_NAME || "");
   // A staging database name must be distinct from the production database, not merely labeled staging.
   if (env.PROFINO_PRODUCTION_DATABASE_NAME &&
       expectedDatabase.toLowerCase() === String(env.PROFINO_PRODUCTION_DATABASE_NAME).trim().toLowerCase()) {
