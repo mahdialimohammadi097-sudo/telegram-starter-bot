@@ -14,6 +14,16 @@ export const pool = new Pool({
   ssl: false,
 });
 
+// An idle PostgreSQL client may emit an error after the connection is lost.
+// Without a pool error listener, Node.js treats this as an uncaught error and exits.
+// pg removes the failed idle client from the pool; future queries can reconnect.
+pool.on("error", (error) => {
+  console.error("[database] idle PostgreSQL client error:", {
+    code: error?.code ?? "unknown",
+    message: error?.message ?? "unknown"
+  });
+});
+
 export async function testDatabaseConnection() {
   const result = await pool.query("SELECT NOW() AS server_time");
   return result.rows[0];
