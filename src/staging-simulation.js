@@ -27,7 +27,8 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
       expectedDatabase.toLowerCase() === String(env.PROFINO_PRODUCTION_DATABASE_NAME).trim().toLowerCase()) {
     throw new Error("Simulation staging database must differ from configured production database");
   }
-  if (!expectedDatabase || expectedDatabase.toLowerCase() === "profino-db") {
+  if (!expectedDatabase || expectedDatabase.toLowerCase() === "profino-db" ||
+      !/^[a-zA-Z_][a-zA-Z0-9_-]{0,62}$/.test(expectedDatabase)) {
     throw new Error("Simulation requires an explicitly named staging database");
   }
   const { rows: [marker] } = await pool.query(
