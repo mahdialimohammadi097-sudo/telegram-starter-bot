@@ -7,7 +7,7 @@ Status: **review only; NOT authorized for live money movement**.
 - Reviewed PR metadata and changed-file lists for #35, #42, #49, #50 and #51. All remain open drafts in the audit snapshot. PR #54 (integrated release) is open and unmerged.
 - Reviewed the production `main` `src/commands.js`: Deposit and Withdraw are explicitly disabled; Investment Plans, My Investments and Transaction History return placeholder text.
 - Prior FadeHost MCP read-only GitHub Actions run 44547249430 concluded success. This is connectivity evidence only, not a financial integration test.
-- Added a new PostgreSQL regression test for concurrent opposite-direction AVAILABLE transfers on this audit branch. **It has not been executed yet.** Prior PR descriptions reporting passing suites are historical claims, not fresh results.
+- Added a new PostgreSQL regression test for concurrent opposite-direction AVAILABLE transfers on this audit branch. **Subsequently executed and passed in CI**, as recorded below. Prior PR descriptions reporting passing suites remain historical claims, not fresh results.
 
 ## Observed ledger safeguards in candidate
 1. `normalizeEntries` uses exact 8-decimal USDT units and checks balanced debit/credit entries.
@@ -24,10 +24,10 @@ These are code-level observations, **not** proof of production safety or economi
 - Ledger account identifiers are additionally restricted to the PostgreSQL signed BIGINT range and bounded input length; regression tests cover the upper boundary and out-of-range values.
 - Added focused unit regression tests for both precision hazards.
 - Added PostgreSQL regression coverage for opposite-direction concurrent transfers.
-- **All newly added tests remain unverified until an actual CI run or local test execution is recorded.**
+- **The tests added through commit `8cdc0f0` were subsequently verified in CI run `44555009608` (120/120 per matrix job, zero skipped).**
 
 ## Required gates before merge and production release
-- [ ] Re-run Node.js test matrix and PostgreSQL 17 integration suite on the **exact** intended merge commit; report pass/fail/skip counts, including zero unexplained skips.
+- [ ] Re-run Node.js test matrix and PostgreSQL 17 integration suite on the **exact** intended merge commit; report pass/fail/skip counts, including zero unexplained skips. **Progress:** branch head `5854367` passed CI run `44555299682` on all three Node.js versions; this is not yet an intended merge commit.
 - [ ] Verify full ledger contract and trigger definitions against target database with read-only catalog queries; do not infer production constraints from test fixtures.
 - [ ] Test concurrent distinct-key debits, identical-key replay, conflicting-key replay, commit failure, rollback failure, and ledger immutability against an isolated PostgreSQL 17 instance.
 - [ ] Confirm role and row-level authorization boundaries for every customer and administrator path; add negative tests for cross-user access and suspended users.
@@ -58,3 +58,7 @@ In a new isolated implementation branch based on the audited integration candida
 - Node.js 22, 24 and 26 / PostgreSQL 17: 120 tests passed per matrix job; 0 failed and 0 skipped.
 - Focused PostgreSQL suite on Node.js 22: 34 passed, 0 failed, 0 skipped; this repeats a subset of the main suite.
 - This proves simulated-review behavior on the tested commit, not the authorization or readiness of live withdrawals.
+
+## Latest documentation-only commit validation
+- Branch commit `58543675136847bec11cac68bff90708f501fcf3` passed GitHub Actions run https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44555299682 on Node.js 22, 24 and 26 with PostgreSQL 17.
+- No production DB schema, live funds, or deployment settings were modified by this audit PR.
