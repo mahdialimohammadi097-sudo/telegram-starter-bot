@@ -51,3 +51,10 @@ In a new isolated implementation branch based on the audited integration candida
 - Focused PostgreSQL test command on Node.js 22: 33 passed, 0 failed, 0 skipped (overlaps the main suite).
 - Node.js 22 production-dependency audit and synthetic wallet backup/restore replay both succeeded.
 - These results establish CI success for the audited commit, **not** production readiness, a verified production restore, or authorization for live customer funds.
+
+## Verified reviewer revocation regression — 2026-11-19
+- Commit `8cdc0f02d9eb5eb1361f517fed4515a4ab3d76d3`: added PostgreSQL test ensuring revoked simulation reviewers cannot replay a completed release through either direct service or Telegram review adapter.
+- GitHub Actions run: https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44555009608
+- Node.js 22, 24 and 26 / PostgreSQL 17: 120 tests passed per matrix job; 0 failed and 0 skipped.
+- Focused PostgreSQL suite on Node.js 22: 34 passed, 0 failed, 0 skipped; this repeats a subset of the main suite.
+- This proves simulated-review behavior on the tested commit, not the authorization or readiness of live withdrawals.
