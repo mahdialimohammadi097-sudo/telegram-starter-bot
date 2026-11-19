@@ -30,8 +30,10 @@ PR #54 enforces the presence of `submitted_hash` in `pending_receipt` and `paid`
 - [x] Port active customer and active reviewer authorization checks into PR #54-derived PR #58.
 - [x] Verify PR #58 authorization and concurrency tests under Node 22/24/26 with PostgreSQL 17 (CI run 579).
 - [ ] Rebase/integrate the ledger-safety changes from PR #57 without overwriting the PR #54 schema.
-- [x] Exercise the extended withdrawal schema against PostgreSQL in integrated synthetic tests; staging adapters now use the real catalog compatibility query.\n- [x] Add negative tests for missing payout columns and missing payout-state constraints.\n- [ ] Add an explicit migration rehearsal from the narrower legacy schema to the four-state schema; do not apply to production.
-- [x] Run the current integrated PostgreSQL CI and restore drill (commit a4ae163, all four workflow runs successful).\n- [ ] Independently verify final merged branch, reconciliation, and release checks after dependency integration.
+- [x] Exercise the extended withdrawal schema against PostgreSQL in integrated synthetic tests; staging adapters now use the real catalog compatibility query.
+- [x] Add negative tests for missing payout columns and missing payout-state constraints.
+- [x] Add an explicit migration rehearsal from the narrower legacy schema to the four-state schema; tested by `src/withdrawal-migration-rehearsal.postgres.test.js` against disposable PostgreSQL, not production.
+- [x] Run the current integrated PostgreSQL CI and restore drill (commit `54f40b86`, all five workflow runs successful on 2026-11-19).\n- [ ] Independently verify final merged branch, reconciliation, and release checks after dependency integration.
 - [ ] Independent security review, migration/rollback rehearsal, backup/restore, and explicit production approval.
 
 **Release decision: NO-GO** for live financial operations. This matrix describes synthetic test infrastructure, not a production schema migration plan.
