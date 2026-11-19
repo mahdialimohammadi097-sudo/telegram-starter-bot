@@ -2168,3 +2168,42 @@ test("staging Telegram adapters complete synthetic investment and withdrawal lif
   assert.equal((await handlers.listTestHolds(owner)).length, 0);
   assert.deepEqual(await displayedBalances(owner), ["40.00000000", "10.00000000", "0.00000000", "0.00000000"]);
 });
+
+test("staging reviewer releases synthetic withdrawal once and revoked reviewer cannot repeat", { skip: !enabled }, async () => {
+  const { createStagingSimulationHandlers } = await import("./staging-simulation.js");
+  const customer = await createSimulationWallet(8951);
+  const reviewer = await createSimulationWallet(8952);
+  const reviewerTelegram = "9989512";
+  await pool.query("UPDATE users SET telegram_id = $2 WHERE id = $1", [reviewer, reviewerTelegram]);
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "25");
+  const isolated = {
+    query(sql, params) {
+      if (sql.includes("current_setting('profino.environment'")) {
+        return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] });
+      }
+      return pool.query(sql, params);
+    },
+    connect: () => pool.connect()
+  };
+  const handlers = await createStagingSimulationHandlers(isolated, {
+    PROFINO_SIMULATION_MODE: "isolated-staging",
+    PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot",
+    PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot");
+  const hold = await handlers.reserveTestWithdrawal(customer, "telegram-review-release", "8");
+  const queue = await handlers.testWithdrawalReview.list(reviewerTelegram, "0");
+  assert.ok(queue.holds.some(row => String(row.id) === String(hold.id)));
+  assert.equal((await handlers.testWithdrawalReview.inspect(reviewerTelegram, hold.id)).status, "reserved");
+  const release = await handlers.testWithdrawalReview.release(reviewerTelegram, hold.id);
+  assert.ok(release);
+  assert.equal((await handlers.testWithdrawalReview.inspect(reviewerTelegram, hold.id)).status, "cancelled");
+  assert.deepEqual(await displayedBalances(customer), ["25.00000000", "0.00000000", "0.00000000", "0.00000000"]);
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  assert.deepEqual((await handlers.testWithdrawalReview.list(reviewerTelegram, "0")).holds, []);
+  await assert.rejects(handlers.testWithdrawalReview.release(reviewerTelegram, hold.id), /Unauthorized/);
+});
