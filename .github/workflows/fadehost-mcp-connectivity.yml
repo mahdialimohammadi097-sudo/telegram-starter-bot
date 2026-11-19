@@ -330,6 +330,11 @@ jobs:
                   print("Health",key+":",state[key])
           if not state.get("ready",False):
               print("FAIL: Health endpoint not ready");sys.exit(1)
+          expected={"database":"connected","telegram":"connected","telegramApi":"connected","telegramReceiver":"active"}
+          failures=[k for k,v in expected.items() if state.get(k)!=v]
+          if failures:
+              print("FAIL: Required production health checks not satisfied:",", ".join(failures))
+              sys.exit(1)
           print("PASS: Production health readiness confirmed.")
           PY
           test "$status" = "200"
@@ -394,4 +399,9 @@ jobs:
               names=set(find_names(result))
               for key in ("DATABASE_URL","TELEGRAM_BOT_TOKEN","TELEGRAM_MODE","PORT"):
                   print("Configured variable",key+":",key in names)
+              missing=sorted({"DATABASE_URL","TELEGRAM_BOT_TOKEN"}-names)
+              if missing:
+                  print("FAIL: required runtime variable names missing:",", ".join(missing))
+                  sys.exit(1)
+              print("PASS: Required PROFINO runtime variable names configured")
           PY
