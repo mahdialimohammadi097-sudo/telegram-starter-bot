@@ -306,3 +306,30 @@ jobs:
                                       print("Inventory",tool,"record fields:",sorted(item.keys()))
                                       print("Inventory",tool,"status:",item.get("status","unknown"))
           PY
+
+      - name: Verify public health endpoint and database readiness (sanitized)
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(mktemp)"
+          trap 'rm -f "$response"' EXIT
+          status="$(curl --silent --show-error --max-time 20 --output "$response" --write-out '%{http_code}' 'https://telegram-bot-d23e.fadehost.app/healthz')" || {
+            echo "FAIL: PROFINO health endpoint unreachable"
+            exit 1
+          }
+          echo "PROFINO health HTTP status: $status"
+          python3 - "$response" <<'PY'
+          import json,sys
+          try:
+              state=json.load(open(sys.argv[1],encoding="utf-8"))
+          except (ValueError,OSError):
+              print("FAIL: Health endpoint returned invalid JSON");sys.exit(1)
+          print("Health response field names:",sorted(state.keys()))
+          for key in ("ready","databaseReady","telegramApiConnected","telegramReceiverActive"):
+              if isinstance(state.get(key),bool):
+                  print("Health",key+":",str(state[key]).lower())
+          if not state.get("ready",False):
+              print("FAIL: Health endpoint not ready");sys.exit(1)
+          print("PASS: Production health readiness confirmed.")
+          PY
+          test "$status" = "200"
