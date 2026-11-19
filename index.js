@@ -3,6 +3,7 @@
 
 import { Bot } from "grammy";
 import { registerCommands } from "./src/commands.js";
+import { createStagingSimulationHandlers } from "./src/staging-simulation.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
 import { startScheduler } from "./src/scheduler.js";
 import { ensurePostHistorySchema } from "./src/post-history.js";
@@ -129,7 +130,6 @@ if (mode === "webhook") {
   // stop() confirms the current polling offset. Leave the unconfirmed tail for the next receiver.
   bot.use((_ctx, next) => shuttingDown ? undefined : next());
 }
-registerCommands(bot);
 
 bot.catch((error) => {
   console.error("[bot] update handler error:", safeDiagnosticCode(error?.error ?? error));
@@ -254,6 +254,10 @@ async function main() {
   await ensureAdminOpsSchema();
   if (shuttingDown) return;
   console.log("[admin-ops] audit log schema ready.");
+
+  // Register handlers only after the database and isolated-staging guard are verified.
+  const simulationHandlers = await createStagingSimulationHandlers(pool);
+  registerCommands(bot, simulationHandlers);
 
   const me = await retryUntilAvailable(() => bot.api.getMe(), "Telegram API authentication");
   if (shuttingDown) return;
