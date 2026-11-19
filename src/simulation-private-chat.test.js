@@ -15,7 +15,7 @@ test("all simulation financial entry points reject non-private chats before any 
     const index = source.indexOf(start);
     assert.notEqual(index, -1, "missing handler " + start);
     const next = source.slice(index, index + 450);
-    assert.match(next, /ctx\.chat\?\.type !== "private" \|\| ctx\.chat\.id !== ctx\.from\.id/, start);
+    assert.match(next, /!isPrivateSimulationChat\(ctx\)/, start);
   }
 });
 
