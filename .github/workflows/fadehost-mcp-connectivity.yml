@@ -67,3 +67,46 @@ jobs:
               print("FAIL: No valid MCP initialize response. Response content withheld.")
               sys.exit(1)
           PY
+
+      - name: Discover available FadeHost read-only tools (names only)
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          status="$(curl --silent --show-error --max-time 25 --output "$response_file" --write-out '%{http_code}' \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')" || { echo "::error::FadeHost tools/list request failed."; exit 1; }
+          echo "FadeHost tools/list HTTP status: $status"
+          if [ "$status" != "200" ]; then
+            echo "::error::Tool discovery returned HTTP $status (response withheld)."
+            exit 1
+          fi
+          python3 - "$response_file" <<'PY'
+          import json, sys
+          body = open(sys.argv[1], encoding="utf-8").read()
+          messages = []
+          try:
+              messages.append(json.loads(body))
+          except json.JSONDecodeError:
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try:
+                          messages.append(json.loads(line[6:]))
+                      except json.JSONDecodeError:
+                          pass
+          results = [m.get("result") for m in messages if isinstance(m, dict) and m.get("id") == 2]
+          if not results or not isinstance(results[0], dict) or not isinstance(results[0].get("tools"), list):
+              print("FAIL: No valid MCP tools/list response; content withheld.")
+              sys.exit(1)
+          names = [t.get("name", "") for t in results[0]["tools"] if isinstance(t, dict)]
+          print("PASS: MCP tools/list returned", len(names), "tools.")
+          for name in sorted(names):
+              if name.startswith(("list_", "get_")):
+                  print("Read-only candidate:", name)
+          PY
