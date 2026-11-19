@@ -128,3 +128,24 @@ Fetched the actual file contents at both heads for three paths and verified they
 The seven-path overlap is a **potential integration risk**, not proof of Git merge conflicts. Comparing file lengths/hashes does not establish which implementation is correct. Do not cherry-pick, force-merge, or replace either branch's withdrawal service without inspecting the complete diff, call sites, migrations, and tests.
 
 Next: inspect semantic differences in the withdrawal service and ledger APIs, design an isolated integration candidate, run both branches' tests on the exact combined tree, and review authorization and balance invariants. No live funds.
+
+## Semantic comparison of withdrawal services and schemas — 2026-11-19
+
+Read the complete `test-support/simulated-withdrawal.js` and `test-support/withdrawal-schema.js` from `feature/post-edit-session-guard` (#54 head) and `audit/ledger-release-gates-20261119` (#57 head).
+
+**Shared behavior:** both reserve USDT in a WITHDRAWAL_HOLD journal, support customer cancellation and authorized reviewer release, serialize reservation via a user row lock, and use ledger idempotency keys.
+
+**Security delta in audit #57:** `reserveWithdrawal` requires `users.status='active'` before even returning an existing request key; reviewer release joins active reviewer membership with active user status and locks both authorization rows `FOR SHARE OF r,u`. The #54 service only checks user existence on reservation and only active reviewer membership on direct reviewer release. Both branches' Telegram reviewer list/inspect paths already require active user and membership.
+
+**Feature delta in #54:** optional EVM-style destination validation and idempotent destination comparison; synthetic testnet claim/submission with payload hash, retry/recovery transport, and testnet receipt verification/payout journal into a clearing account. These are testnet/synthetic facilities, **not permission for real token transfers**. The #57 service does not implement these APIs.
+
+**Schema delta:** #54 permits `reserved`, `cancelled`, `pending_receipt`, `paid`, with `submitted_hash`, `simulation_payload`, `destination`, `payout_event`, `payout_id`, `clearing_id`, and associated checks/references. #57 permits only `reserved` and `cancelled` and lacks those fields. This is a real **schema and lifecycle incompatibility** if code is blindly transplanted across branches.
+
+**Safe integration requirements:**
+1. Decide explicitly whether the testnet submission/recovery/receipt feature belongs in the release candidate; keep it isolated and disabled for production funds.
+2. If retained, adopt the complete extended schema, corresponding reconciliation rules and negative tests for `pending_receipt`/`paid` (especially cancellation, replay, and out-of-order receipt), not just extra service functions.
+3. Port active-customer and active-reviewer authorization checks from #57 to the extended service, preserving row-lock ordering and idempotency checks.
+4. Ensure wallet and Telegram command callers use compatible signatures and destination semantics.
+5. Run complete integration suites of both branches on an isolated combined tree; inspect SQL migrations and exact intended merge commit. No direct production changes.
+
+**Decision:** semantic conflict confirmed; integration not yet performed. Preserve both implementations until tests and review establish a safe combined contract.
