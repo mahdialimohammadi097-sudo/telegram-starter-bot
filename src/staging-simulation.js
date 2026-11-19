@@ -6,10 +6,16 @@ import {
 
 // Never activate synthetic writers in an ordinary production deployment.
 // The database itself must also be explicitly marked as isolated staging.
-export async function createStagingSimulationHandlers(pool, env = process.env) {
+export async function createStagingSimulationHandlers(pool, env = process.env, authenticatedBotUsername = null) {
   if (env.PROFINO_SIMULATION_MODE !== "isolated-staging") return {};
   if (env.PROFINO_DEPLOYMENT_ENV !== "staging") {
     throw new Error("Simulation requires explicit staging deployment");
+  }
+  const expectedBot = String(env.PROFINO_STAGING_BOT_USERNAME || "").replace(/^@/, "").trim();
+  if (!expectedBot || !authenticatedBotUsername ||
+      expectedBot.toLowerCase() !== String(authenticatedBotUsername).toLowerCase() ||
+      expectedBot.toLowerCase() === "profino1bot") {
+    throw new Error("Simulation requires a separate authenticated staging Telegram bot");
   }
   const { rows: [marker] } = await pool.query(
     "SELECT current_setting('profino.environment', true) AS environment"
