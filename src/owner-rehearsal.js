@@ -22,6 +22,7 @@ export function registerOwnerRehearsal(bot, {
     let sandbox;
     try {
       const { rows: [production] } = await productionPool.query("SELECT current_database() AS name");
+      if (!production?.name) throw new Error("Production database identity unavailable");
       sandbox = createPool({
         connectionString: env.PROFINO_TEST_DATABASE_URL, max: 1,
         connectionTimeoutMillis: 10000, query_timeout: 15000
