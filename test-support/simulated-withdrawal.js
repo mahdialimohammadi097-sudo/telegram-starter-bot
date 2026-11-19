@@ -23,7 +23,7 @@ export async function reserveWithdrawal(pool, userId, key, amount, destination =
   destination = destination?.toLowerCase() ?? null;
   const normalized = formatUsdt(amount);
   return withLedgerTransaction(pool, async client => {
-    const owner = await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
+    const owner = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!owner.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
       "SELECT id, amount, status, destination FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
@@ -81,7 +81,10 @@ export async function cancelAsSimulationReviewer(pool, reviewerId, id) {
 
 async function releaseAsReviewer(client, reviewerId, id) {
   const reviewer = await client.query(
-    "SELECT user_id FROM simulation_reviewers WHERE user_id = $1 AND active FOR SHARE", [reviewerId]
+    "SELECT r.user_id FROM simulation_reviewers r
+     JOIN users u ON u.id = r.user_id
+     WHERE r.user_id = $1 AND r.active AND u.status = 'active'
+     FOR SHARE OF r, u", [reviewerId]
   );
   if (!reviewer.rowCount) throw new Error("Unauthorized simulation reviewer");
   const { rows: [request] } = await client.query(
