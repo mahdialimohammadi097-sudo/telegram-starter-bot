@@ -7,7 +7,7 @@ Status: **review only; NOT authorized for live money movement**.
 - Reviewed PR metadata and changed-file lists for #35, #42, #49, #50 and #51. All remain open drafts in the audit snapshot. PR #54 (integrated release) is open and unmerged.
 - Reviewed the production `main` `src/commands.js`: Deposit and Withdraw are explicitly disabled; Investment Plans, My Investments and Transaction History return placeholder text.
 - Prior FadeHost MCP read-only GitHub Actions run 44547249430 concluded success. This is connectivity evidence only, not a financial integration test.
-- **No new PostgreSQL integration test was executed in this audit.** Prior PR descriptions reporting passing suites are historical claims, not fresh results.
+- Added a new PostgreSQL regression test for concurrent opposite-direction AVAILABLE transfers on this audit branch. **It has not been executed yet.** Prior PR descriptions reporting passing suites are historical claims, not fresh results.
 
 ## Observed ledger safeguards in candidate
 1. `normalizeEntries` uses exact 8-decimal USDT units and checks balanced debit/credit entries.
