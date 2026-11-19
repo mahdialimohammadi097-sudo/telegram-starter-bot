@@ -43,3 +43,11 @@ These are code-level observations, **not** proof of production safety or economi
 
 ## Suggested next engineering action
 In a new isolated implementation branch based on the audited integration candidate, add or extend PostgreSQL tests for concurrent distinct-key withdrawals and rollback failure, then run the full CI matrix. Do not modify production data or deployment settings.
+
+## Verified CI evidence — 2026-11-19
+- Workflow run: https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44554139368
+- Commit: `c71f12167a29dd06ba22080db864ff24f9cbc435` (the run predates any later documentation-only changes).
+- Node.js 22, 24 and 26 with PostgreSQL 17: 119 tests passed, 0 failed, 0 skipped **per matrix job**.
+- Focused PostgreSQL test command on Node.js 22: 33 passed, 0 failed, 0 skipped (overlaps the main suite).
+- Node.js 22 production-dependency audit and synthetic wallet backup/restore replay both succeeded.
+- These results establish CI success for the audited commit, **not** production readiness, a verified production restore, or authorization for live customer funds.
