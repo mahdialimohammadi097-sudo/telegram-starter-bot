@@ -69,3 +69,25 @@ In a new isolated implementation branch based on the audited integration candida
 - Commit `187bcb47c9dcac266bb9efb6c827bdedaca54fef`; CI https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44555821157 concluded success.
 - Node.js 22/24/26 + PostgreSQL 17: 121 passed, 0 failed, 0 skipped **per job**. Focused PostgreSQL run on Node.js 22: 35 passed, 0 failed, 0 skipped (overlapping tests).
 - This authorization fix is for the **simulation-only** reviewer service, not a live withdrawal approval system.
+
+## Consolidated audit checkpoint — commit afc08e6 (2026-11-19)
+
+Latest independently checked workflow: https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/44562814143
+
+- Commit: `afc08e6e7827c04a18e10062ef5e90aad5789f1e`.
+- GitHub Actions conclusion: success; Node.js 22, 24, and 26 with PostgreSQL 17 each completed **132 passed, 0 failed, 0 skipped** in the primary suite.
+- Focused PostgreSQL suite on Node.js 22: **46 passed, 0 failed, 0 skipped**. These 46 tests overlap the primary suite and are not additional independent tests.
+- Added simulation-only regression coverage for active/suspended customers, blocked-customer cancellation and reviewer releases, concurrent reviewer releases, revoked reviewer read/release permissions, two independent authorization gates, and a revocation transaction that locks the reviewer row while release authorization starts.
+- PostgreSQL integration tests use **ephemeral isolated schemas and synthetic funds**; this does not verify the deployed FadeHost database, production schema privileges, secrets, backups, reserve liquidity, or legal/compliance readiness.
+- CI success is evidence for this branch head only, not for the eventual integration merge commit. PR #57 remains **open, draft, unmerged** and targets `feature/integrated-postgres-matrix`, not `main`.
+- **Decision: NO-GO** for real deposits, withdrawals, custody, and settlement. No production deployment or real fund transfer is authorized.
+
+### Remaining critical release blockers
+
+1. Read-only inspection of the actual target PostgreSQL 17 catalog, grants, constraints, triggers, RLS and schema migrations; reconcile with isolated test fixtures.
+2. Complete PR dependency and final integration diff review, then re-run the full test matrix on the exact merge candidate.
+3. Validate production-grade encrypted backups, restore ownership, recovery objectives and a non-destructive restore drill.
+4. Complete adversarial authorization, cross-user, concurrency, rate-limit, incident response, secrets and operational monitoring review.
+5. Verify economic backing/liquidity and compliance requirements for advertised guaranteed returns, and obtain explicit owner release authorization.
+
+The historical evidence sections above describe earlier branch states and must not be interpreted as the latest CI result.
