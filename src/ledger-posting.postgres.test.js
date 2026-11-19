@@ -2149,6 +2149,9 @@ test("staging Telegram adapters complete synthetic investment and withdrawal lif
       if (sql.includes("current_setting('profino.environment'")) {
         return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] });
       }
+      if (sql.includes("pg_attribute") && sql.includes("extended_columns")) {
+        return Promise.resolve({ rows: [{ extended_columns: true, payout_state_constraint: true }] });
+      }
       return pool.query(sql, params);
     },
     connect: () => pool.connect()
@@ -2184,6 +2187,9 @@ test("staging reviewer releases synthetic withdrawal once and revoked reviewer c
     query(sql, params) {
       if (sql.includes("current_setting('profino.environment'")) {
         return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] });
+      }
+      if (sql.includes("pg_attribute") && sql.includes("extended_columns")) {
+        return Promise.resolve({ rows: [{ extended_columns: true, payout_state_constraint: true }] });
       }
       return pool.query(sql, params);
     },
