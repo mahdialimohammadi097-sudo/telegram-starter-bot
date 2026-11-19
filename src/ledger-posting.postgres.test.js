@@ -1771,6 +1771,37 @@ test("blocked customers cannot open simulated investments or reserve new withdra
   assert.equal((await displayedBalances(owner))[0], "50.00000000");
 });
 
+test("reviewer read permissions require both active account and active reviewer grant", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, simulationWithdrawalReview } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(692);
+  const reviewer = await createSimulationWallet(693);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(available.id, "10");
+  const request = await reserveWithdrawal(pool, customer, "reviewer-two-gates", "2");
+  const telegramId = 8810232693;
+  await pool.query("UPDATE users SET telegram_id = $1 WHERE id = $2", [telegramId, reviewer]);
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const review = simulationWithdrawalReview(pool);
+  const visible = async () => (await review.list(telegramId, 0)).holds.some(
+    row => String(row.id) === String(request.id)
+  );
+  assert.equal(await visible(), true);
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [reviewer]);
+  assert.equal(await visible(), false);
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  await pool.query("UPDATE users SET status = 'active' WHERE id = $1", [reviewer]);
+  assert.equal(await visible(), false);
+  assert.equal(await review.inspect(telegramId, request.id), undefined);
+  await assert.rejects(review.release(telegramId, request.id), /Unauthorized simulation reviewer/);
+  await pool.query("UPDATE simulation_reviewers SET active = true WHERE user_id = $1", [reviewer]);
+  assert.equal(await visible(), true);
+  assert.ok(await review.inspect(telegramId, request.id));
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
 test("revoked simulation reviewer loses read access to customer holds", { skip: !enabled }, async () => {
   const { reserveWithdrawal, simulationWithdrawalReview } =
     await import("../test-support/simulated-withdrawal.js");
