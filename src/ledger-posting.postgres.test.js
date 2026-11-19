@@ -1934,3 +1934,32 @@ test("extended withdrawal rejects blocked customers and suspended reviewers", { 
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
 
+
+
+test("revoking reviewer grant prevents destination-bound hold release", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer, cancelWithdrawal } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1711);
+  const reviewer = await createSimulationWallet(1712);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "11");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const destination = "0x2222222222222222222222222222222222222222";
+  const request = await reserveWithdrawal(pool, customer, "revoked-grant-1", "4", destination);
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  await assert.rejects(
+    cancelAsSimulationReviewer(pool, reviewer, request.id), /Unauthorized simulation reviewer/
+  );
+  const { rows: [before] } = await pool.query(
+    "SELECT status, release_id, destination FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(before.status, "reserved");
+  assert.equal(before.release_id, null);
+  assert.equal(before.destination, destination);
+  const released = await cancelWithdrawal(pool, customer, request.id);
+  assert.equal(await cancelWithdrawal(pool, customer, request.id), released);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "11.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
