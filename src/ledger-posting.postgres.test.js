@@ -477,7 +477,7 @@ test("a stored sub-unit balance cannot be silently rounded during posting", {
 });
 
 async function createSimulationWallet(id) {
-  const { rows: [user] } = await pool.query("INSERT INTO users (id) VALUES ($1) RETURNING id", [id]);
+  const { rows: [user] } = await pool.query("INSERT INTO users (id, status) VALUES ($1, 'active') RETURNING id", [id]);
   await pool.query(
     `INSERT INTO ledger_accounts (user_id, account_code, account_type)
      SELECT $1, 'simulation:' || $1::bigint::text || ':' || kind, kind
