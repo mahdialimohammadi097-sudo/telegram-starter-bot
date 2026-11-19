@@ -19,7 +19,7 @@ test("simulation refuses database without isolated staging marker", async () => 
   const pool = { async query() { return { rows: [{ environment: null }] }; } };
   await assert.rejects(
     createStagingSimulationHandlers(pool, {
-      PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot"
+      PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
     }, "profino_staging_test_bot"), /independently marked isolated staging database/
   );
 });
@@ -27,12 +27,12 @@ test("simulation refuses database without isolated staging marker", async () => 
 test("simulation refuses incomplete staging schema", async () => {
   const pool = { async query(sql) {
     return { rows: sql.includes("current_setting")
-      ? [{ environment: "isolated-staging" }]
+      ? [{ environment: "isolated-staging", database_name: "profino_staging_it" }]
       : [{ investments: true, withdrawals: false, reviewers: true }] };
   } };
   await assert.rejects(
     createStagingSimulationHandlers(pool, {
-      PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot"
+      PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
     }, "profino_staging_test_bot"), /tables are missing/
   );
 });
@@ -40,11 +40,11 @@ test("simulation refuses incomplete staging schema", async () => {
 test("fully marked isolated staging exposes synthetic writers", async () => {
   const pool = { async query(sql) {
     return { rows: sql.includes("current_setting")
-      ? [{ environment: "isolated-staging" }]
+      ? [{ environment: "isolated-staging", database_name: "profino_staging_it" }]
       : [{ investments: true, withdrawals: true, reviewers: true }] };
   } };
   const handlers = await createStagingSimulationHandlers(pool, {
-    PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot"
+    PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
   }, "profino_staging_test_bot");
   for (const key of ["openTestInvestment", "reserveTestWithdrawal",
     "cancelTestWithdrawal", "listTestHolds"]) {
@@ -55,8 +55,15 @@ test("fully marked isolated staging exposes synthetic writers", async () => {
 
 test("simulation rejects production bot and mismatched bot identity", async () => {
   const pool = { query() { throw new Error("must not query"); } };
-  const env = { PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot" };
+  const env = { PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it" };
   await assert.rejects(createStagingSimulationHandlers(pool, env, "PROFINO1bot"), /separate authenticated staging Telegram bot/);
   await assert.rejects(createStagingSimulationHandlers(pool, env, "other_bot"), /separate authenticated staging Telegram bot/);
   await assert.rejects(createStagingSimulationHandlers(pool, { ...env, PROFINO_STAGING_BOT_USERNAME: "PROFINO1bot" }, "PROFINO1bot"), /separate authenticated staging Telegram bot/);
+});
+
+test("simulation rejects wrong staging database identity before enabling writers", async () => {
+  const pool = { async query() { return { rows: [{ environment: "isolated-staging", database_name: "profino_production" }] }; } };
+  const env = { PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it" };
+  await assert.rejects(createStagingSimulationHandlers(pool, env, "profino_staging_test_bot"), /independently marked isolated staging database/);
+  await assert.rejects(createStagingSimulationHandlers(pool, { ...env, PROFINO_STAGING_DATABASE_NAME: "profino-db" }, "profino_staging_test_bot"), /explicitly named staging database/);
 });
