@@ -1,3 +1,4 @@
+import { registerOwnerRehearsal } from "./owner-rehearsal.js";
 import { listPreviewPlans, settlementExamples } from "./plan-preview.js";
 import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 
@@ -197,6 +198,8 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
     return next();
   });
+
+  registerOwnerRehearsal(bot, { productionPool: pool, ownerId: ADMIN_ID, getLanguage: getAdminLanguage });
 
   // Only the offline test harness supplies a simulation writer.
   if (openTestInvestment) {
