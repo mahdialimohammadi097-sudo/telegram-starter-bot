@@ -2019,3 +2019,32 @@ test("blocking a reviewer revokes extended withdrawal read and release access", 
   assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "9.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+
+test("concurrent customer and reviewer cancellations release one extended hold", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1741);
+  const reviewer = await createSimulationWallet(1742);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "10");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const destination = "0x5555555555555555555555555555555555555555";
+  const request = await reserveWithdrawal(pool, customer, "concurrent-release-1", "6", destination);
+  const [customerRelease, reviewerRelease] = await Promise.all([
+    cancelWithdrawal(pool, customer, request.id),
+    cancelAsSimulationReviewer(pool, reviewer, request.id)
+  ]);
+  assert.equal(String(customerRelease), String(reviewerRelease));
+  const { rows: [final] } = await pool.query(
+    "SELECT status, release_id, destination FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(final.status, "cancelled");
+  assert.equal(String(final.release_id), String(customerRelease));
+  assert.equal(final.destination, destination);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "10.00000000");
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "0.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
