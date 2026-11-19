@@ -2207,3 +2207,30 @@ test("staging reviewer releases synthetic withdrawal once and revoked reviewer c
   assert.deepEqual((await handlers.testWithdrawalReview.list(reviewerTelegram, "0")).holds, []);
   await assert.rejects(handlers.testWithdrawalReview.release(reviewerTelegram, hold.id), /Unauthorized/);
 });
+
+test("isolated withdrawal fixture enforces all four states and payout linkage", { skip: !enabled }, async () => {
+  const { rows: [catalog] } = await pool.query(`
+    SELECT
+      (SELECT count(*) = 6 FROM pg_attribute
+       WHERE attrelid = 'simulation_withdrawals'::regclass
+         AND attname IN ('submitted_hash', 'simulation_payload', 'destination',
+                         'payout_event', 'payout_id', 'clearing_id')
+         AND attnum > 0 AND NOT attisdropped) AS extended_columns,
+      EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'simulation_withdrawals'::regclass
+          AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%pending_receipt%'
+      ) AS payout_state_constraint
+  `);
+  assert.equal(catalog.extended_columns, true);
+  assert.equal(catalog.payout_state_constraint, true);
+  const { rows: [statuses] } = await pool.query(`
+    SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+    WHERE conrelid = 'simulation_withdrawals'::regclass
+      AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%pending_receipt%'
+      AND pg_get_constraintdef(oid) LIKE '%cancelled%'
+      AND pg_get_constraintdef(oid) LIKE '%paid%'
+    LIMIT 1
+  `);
+  assert.ok(statuses, "withdrawal status constraint must retain all four lifecycle states");
+});
