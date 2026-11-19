@@ -1771,6 +1771,32 @@ test("blocked customers cannot open simulated investments or reserve new withdra
   assert.equal((await displayedBalances(owner))[0], "50.00000000");
 });
 
+test("revoked simulation reviewer loses read access to customer holds", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, simulationWithdrawalReview } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(690);
+  const reviewer = await createSimulationWallet(691);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(available.id, "10");
+  const request = await reserveWithdrawal(pool, customer, "reviewer-revoke-read", "2");
+  const telegramId = 8810232691;
+  await pool.query("UPDATE users SET telegram_id = $1 WHERE id = $2", [telegramId, reviewer]);
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const review = simulationWithdrawalReview(pool);
+  assert.ok((await review.list(telegramId, 0)).holds.some(row => String(row.id) === String(request.id)));
+  assert.ok(await review.inspect(telegramId, request.id));
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  assert.deepEqual(await review.list(telegramId, 0), { holds: [], next: null });
+  assert.equal(await review.inspect(telegramId, request.id), undefined);
+  await assert.rejects(review.release(telegramId, request.id), /Unauthorized simulation reviewer/);
+  assert.equal((await pool.query(
+    "SELECT status FROM simulation_withdrawals WHERE id = $1", [request.id]
+  )).rows[0].status, "reserved");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
 test("suspended simulation reviewer cannot list or inspect pending customer holds", { skip: !enabled }, async () => {
   const { reserveWithdrawal, simulationWithdrawalReview } =
     await import("../test-support/simulated-withdrawal.js");
