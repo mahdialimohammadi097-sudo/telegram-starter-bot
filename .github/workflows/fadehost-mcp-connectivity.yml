@@ -1,0 +1,64 @@
+name: FadeHost MCP Read-Only Connectivity Test
+
+on:
+  push:
+    branches:
+      - test/fadehost-mcp-readonly-connection
+    paths:
+      - .github/workflows/fadehost-mcp-connectivity.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify FadeHost MCP initialize (no server changes)
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FADEHOST_TOKEN:-}" ]; then
+            echo "::error::FADEHOST_TOKEN secret is missing or empty."
+            exit 1
+          fi
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          http_status="$(curl --silent --show-error --max-time 25 \
+            --output "$response_file" --write-out '%{http_code}' \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"PROFINO GitHub connectivity check","version":"1.0"}}}' \
+            )" || { echo "::error::Could not reach FadeHost MCP."; exit 1; }
+          echo "FadeHost MCP HTTP status: $http_status"
+          if [ "$http_status" != "200" ]; then
+            echo "::error::MCP initialize failed (HTTP $http_status). Response withheld to protect sensitive data."
+            exit 1
+          fi
+          python3 - "$response_file" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              body = f.read()
+          messages = []
+          try:
+              messages.append(json.loads(body))
+          except json.JSONDecodeError:
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try:
+                          messages.append(json.loads(line[6:]))
+                      except json.JSONDecodeError:
+                          pass
+          if any(isinstance(msg, dict) and msg.get("id") == 1 and isinstance(msg.get("result"), dict) and "protocolVersion" in msg["result"] for msg in messages):
+              print("PASS: FadeHost MCP authenticated and initialized successfully (read-only handshake).")
+          else:
+              print("FAIL: No valid MCP initialize response. Response content withheld.")
+              sys.exit(1)
+          PY
