@@ -3,6 +3,7 @@ import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 
 import { InlineKeyboard, Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
+import { simulationRequestKey } from "./simulation-idempotency.js";
 import { pool } from "./database.js";
 import { getWalletBalances, getSimulationReceipt, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt, toUsdtUnitsExact } from "./ledger-safety.js";
@@ -207,7 +208,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         "SELECT id FROM users WHERE telegram_id = $1 AND status = 'active'", [ctx.from.id]
       );
       if (!user) return ctx.answerCallbackQuery({ text: "Send /start first.", show_alert: true });
-      const key = "telegram-preview:" + user.id + ":" + ctx.callbackQuery.message.message_id;
+      const key = simulationRequestKey("investment", user.id, ctx.callbackQuery.message.message_id);
       await ctx.answerCallbackQuery();
       try {
         const id = await openTestInvestment(user.id, key, name + " " + amount);
@@ -241,7 +242,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         );
         if (!user) return ctx.reply("Send /start first.");
         const [, messageId, amount] = ctx.match;
-        const request = await reserveTestWithdrawal(user.id, "telegram-withdraw:" + user.id + ":" + messageId, amount);
+        const request = await reserveTestWithdrawal(user.id, simulationRequestKey("withdrawal", user.id, messageId), amount);
         return ctx.reply("Simulated withdrawal #" + request.id + " is " + request.status + ".", {
           reply_markup: new Keyboard().text("Withdraw").text("My Wallet").row().text("⬅ Main Menu").resized()
         });
