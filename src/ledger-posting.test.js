@@ -26,6 +26,21 @@ test("rejects non-USDT, invalid account ids and excessive precision", () => {
   ]), /eight decimal places/);
 });
 
+test("ledger account identifiers must not lose JavaScript numeric precision", () => {
+  const valid = normalizeEntries([
+    { account_id: "9007199254740993", entry_type: "debit", amount: "1", currency: "USDT" },
+    { account_id: "2", entry_type: "credit", amount: "1", currency: "USDT" }
+  ]);
+  assert.equal(valid[0].account_id, "9007199254740993");
+  assert.throws(() => normalizeEntries([
+    { account_id: 9007199254740993, entry_type: "debit", amount: "1", currency: "USDT" },
+    { account_id: "2", entry_type: "credit", amount: "1", currency: "USDT" }
+  ]), /Unsafe numeric ledger account id/);
+  assert.throws(() => canonicalEntries([
+    { account_id: Infinity, entry_type: "debit", amount: "1", currency: "USDT" }
+  ]), /Unsafe numeric ledger account id/);
+});
+
 test("rejects unbalanced entries", () => {
   assert.throws(() => normalizeEntries([
     { account_id: "1", entry_type: "debit", amount: "2", currency: "USDT" },
