@@ -1676,6 +1676,32 @@ test("offline queue reports the reserve shortage and drains overdue investments 
   assert.deepEqual(await displayedBalances(owner), ["158.96000000", "0.00000000", "0.00000000"]);
 });
 
+test("blocked customers cannot replay previously accepted simulation creation keys", { skip: !enabled }, async () => {
+  const { openSimulatedInvestment } = await import("../test-support/simulated-investment.js");
+  const { reserveWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const owner = await createSimulationWallet(685);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  await seedAvailableBalance(available.id, "50");
+  const investmentId = await openSimulatedInvestment(pool, owner, "before-block", "SMART 25");
+  const withdrawal = await reserveWithdrawal(pool, owner, "before-block", "5");
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [owner]);
+  await assert.rejects(
+    openSimulatedInvestment(pool, owner, "before-block", "SMART 25"), /Unknown user/
+  );
+  await assert.rejects(
+    reserveWithdrawal(pool, owner, "before-block", "5"), /Unknown user/
+  );
+  assert.equal((await pool.query(
+    "SELECT count(*)::int AS count FROM simulation_investments WHERE id = $1", [investmentId]
+  )).rows[0].count, 1);
+  assert.equal((await pool.query(
+    "SELECT status FROM simulation_withdrawals WHERE id = $1", [withdrawal.id]
+  )).rows[0].status, "reserved");
+  assert.equal((await displayedBalances(owner))[0], "20.00000000");
+});
+
 test("blocked customers cannot open simulated investments or reserve new withdrawals", { skip: !enabled }, async () => {
   const { openSimulatedInvestment } = await import("../test-support/simulated-investment.js");
   const { reserveWithdrawal } = await import("../test-support/simulated-withdrawal.js");
