@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { confirmTestnetWithdrawal } from "./simulated-withdrawal.js";
+import { confirmTestnetWithdrawal, submitSimulatedWithdrawal } from "./simulated-withdrawal.js";
 
 for (const scenario of [
   { status: "reserved", submitted_hash: null, error: /must be submitted before receipt confirmation/ },
@@ -32,3 +32,15 @@ for (const scenario of [
   assert.equal(queries.includes("COMMIT"), false);
   assert.equal(discarded, false);
 });
+
+for (const sender of [undefined, null, {}, "not a function"]) {
+  test("submission refuses an invalid transport without writing to database", async () => {
+    let queries = 0;
+    const pool = { async query() { queries++; throw new Error("unexpected database write"); } };
+    await assert.rejects(
+      submitSimulatedWithdrawal(pool, "7", "0x" + "a".repeat(64), sender),
+      /Simulation transport sender required/
+    );
+    assert.equal(queries, 0);
+  });
+}
