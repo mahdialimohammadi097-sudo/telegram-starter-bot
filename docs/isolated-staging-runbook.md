@@ -14,7 +14,7 @@ The production bot `@PROFINO1bot` and the production database must not be used f
    - `PROFINO_DEPLOYMENT_ENV=staging`
    - `PROFINO_SIMULATION_MODE=isolated-staging`
    - `PROFINO_STAGING_BOT_USERNAME=<actual separate bot username>`
-   - `PROFINO_STAGING_DATABASE_NAME=<actual separate database name>` (name must contain `staging`, `test`, or `sandbox`; this is a supplementary fail-closed check, **not** proof of isolation)
+   - `PROFINO_STAGING_DATABASE_NAME=<actual separate database name>` (name must contain a separate underscore-delimited `staging`, `test`, or `sandbox` segment; this is a supplementary fail-closed check, **not** proof of isolation)
    - `PROFINO_PRODUCTION_DATABASE_NAME=<actual production database name>` (recommended extra guard: must not equal staging database; never use production credentials in staging)
    - `TELEGRAM_BOT_TOKEN=<staging bot token>`
    - `DATABASE_URL=<isolated staging PostgreSQL URL>`
