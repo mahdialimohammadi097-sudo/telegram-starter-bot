@@ -119,3 +119,15 @@ for (const invalid of [0, -1, 101, 1.5, "10"]) {
     await assert.rejects(findUnrecoverableSimulatedWithdrawals(pool, invalid), /Invalid diagnostic page size/);
   });
 }
+
+for (const corrupt of [Buffer.from("wrong"), Buffer.alloc(0), null]) {
+  test("recovery refuses corrupted persisted payload before transport access", async () => {
+    const payload = Buffer.from("original");
+    const hash = "0x" + (await import("node:crypto")).createHash("sha256").update(payload).digest("hex");
+    let calls = 0;
+    const pool = { async query() { return { rows: [{ id: "7", hash, payload: corrupt, amount: "1", destination: "0x" + "1".repeat(40) }] }; } };
+    const transport = { hasTransaction() { calls++; return false; }, send() { calls++; } };
+    await assert.rejects(recoverSimulatedWithdrawals(pool, transport), /payload hash mismatch/);
+    assert.equal(calls, 0);
+  });
+}
