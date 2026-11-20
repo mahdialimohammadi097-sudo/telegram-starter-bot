@@ -443,8 +443,8 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page,
   }
 }
 
-async function commitUserStatus(telegramId, newStatus, expectedStatus, version) {
-  const client = await pool.connect();
+export async function commitUserStatus(telegramId, newStatus, expectedStatus, version, dbPool = pool) {
+  const client = await dbPool.connect();
   let transactionOpen = false;
   let releaseError = null;
   try {
