@@ -406,7 +406,8 @@ jobs:
               print("PASS: Required PROFINO runtime variable names configured")
           PY
 
-      - name: Inspect production database catalog in a read-only transaction
+      - name: Inspect deployment and runtime health without exposing raw logs
+        if: always()
         shell: bash
         env:
           FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
@@ -440,45 +441,37 @@ jobs:
                       try:return json.loads(item.get("text",""))
                       except json.JSONDecodeError:pass
               return None
-          import shlex, re
-          bots=payload(rpc("tools/call",{"name":"list_bots","arguments":{}},41))
+          import re
+          bots=payload(rpc("tools/call",{"name":"list_bots","arguments":{}},51))
           entries=bots.get("bots",[]) if isinstance(bots,dict) else []
-          matches=[b for b in entries if isinstance(b,dict) and b.get("name")=="telegram-bot"]
-          if len(matches)!=1: raise RuntimeError("Cannot uniquely identify PROFINO")
-          specs=rpc("tools/list",{},42).get("tools",[])
-          tool=next((t for t in specs if t.get("name")=="run_app_command"),None)
-          if not tool: raise RuntimeError("Host command tool unavailable")
-          schema=tool.get("inputSchema",{})
-          print("Command tool required fields:",schema.get("required",[]))
-          props=schema.get("properties",{})
-          print("Command tool fields:",sorted(props))
-          if "app" not in props or "command" not in props: raise RuntimeError("Unrecognized host command schema")
-          source="import {pool} from './src/database.js';const r=await pool.query(\"SELECT table_name,column_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name LIKE 'ledger_%' ORDER BY 1,2\");console.log('PROFINO_SCHEMA='+JSON.stringify(r.rows));await pool.end();"
-          command="node --input-type=module -e "+shlex.quote(source)
-          if len(command)>500: raise RuntimeError("Command exceeds host limit")
-          result=rpc("tools/call",{"name":"run_app_command","arguments":{"app":matches[0]["id"],"command":command}},43)
-          def strings(value):
-              if isinstance(value,str): yield value
-              elif isinstance(value,list):
-                  for item in value: yield from strings(item)
-              elif isinstance(value,dict):
-                  for item in value.values(): yield from strings(item)
-          values=list(strings(result))
-          if result.get("isError"):
-              combined=" ".join(values).lower()
-              message=" ".join(values).replace(os.environ["FADEHOST_TOKEN"], "[secret]")
-              message=re.sub(r"https?://\\S+|postgres(?:ql)?://\\S+|[A-Za-z0-9_./+|=-]{24,}", "[redacted]", message)
-              print("Host command rejection:", message[:500])
-              raise SystemExit(1)
-          found=False
-          for value in values:
-              for line in value.splitlines():
-                  if line.startswith("PROFINO_SCHEMA="):
-                      data=json.loads(line.split("=",1)[1])
-                      print("PROFINO_DATABASE_SCHEMA",json.dumps(data))
-                      found=True
-          if not found:
-              print("Command result fields:", sorted(result.keys()))
-              print("Execution returned no verified schema result.")
-              raise SystemExit(1)
+          matches=[b for b in entries if b.get("name")=="telegram-bot"]
+          if len(matches)!=1:raise RuntimeError("Bot not uniquely identified")
+          print("Bot status:",matches[0].get("status"))
+          specs=rpc("tools/list",{},52).get("tools",[])
+          spec=next(t for t in specs if t.get("name")=="get_bot_logs")
+          props=spec.get("inputSchema",{}).get("properties",{})
+          print("Log tool schema:",json.dumps(spec.get("inputSchema",{})))
+          key=next((k for k in ("bot","app","bot_id","id") if k in props),None)
+          if not key:raise RuntimeError("Unrecognized logs tool schema")
+          result=rpc("tools/call",{"name":"get_bot_logs","arguments":{key:matches[0]["id"]}},53)
+          def strings(v):
+              if isinstance(v,str):yield v
+              elif isinstance(v,list):
+                  for x in v:yield from strings(x)
+              elif isinstance(v,dict):
+                  for x in v.values():yield from strings(x)
+          lines="\n".join(strings(result))
+          print("Logs tool error:",bool(result.get("isError")))
+          for label,phrase in (
+              ("Target commit observed","51a4627"),
+              ("HTTP listener observed","HTTP endpoints listening"),
+              ("Database connected observed","PostgreSQL connected successfully"),
+              ("Polling active observed","Telegram polling is active"),
+              ("Syntax failure observed","SyntaxError"),
+              ("Missing column observed","does not exist"),
+              ("Startup report observed","startup report delivered"),
+              ("Process exit observed","exited")):
+              print(label+":",phrase in lines)
+          for sha in sorted(set(re.findall(r"deployed ([a-f0-9]{7,40})",lines))):
+              print("Observed deployed commit:",sha)
           PY
