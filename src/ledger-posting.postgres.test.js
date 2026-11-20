@@ -1836,9 +1836,18 @@ test("one finalized testnet event settles exactly one destination-bound withdraw
   const reserve = key => reserveWithdrawal(pool, owner, key, "1", sample.expected.recipient);
   const first = await reserve("outbound-1");
   const second = await reserve("outbound-2");
+  const { createHash } = await import("node:crypto");
+  const payloadFor = request => Buffer.from("synthetic-withdrawal:" + request.id);
+  const hashFor = payload => "0x" + createHash("sha256").update(payload).digest("hex");
+  const firstPayload = payloadFor(first);
+  const firstHash = hashFor(firstPayload);
+  sample.expected.txHash = firstHash;
+  sample.observation.receipt.transactionHash = firstHash;
+  for (const log of sample.observation.receipt.logs) log.transactionHash = firstHash;
   // Both competing requests must have a recorded synthetic submission before a receipt can settle either.
-  await submitSimulatedWithdrawal(pool, first.id, sample.expected.txHash, async () => {});
-  await submitSimulatedWithdrawal(pool, second.id, "0x" + "ab".repeat(32), async () => {});
+  await submitSimulatedWithdrawal(pool, first.id, firstHash, async () => {}, firstPayload);
+  const secondPayload = payloadFor(second);
+  await submitSimulatedWithdrawal(pool, second.id, hashFor(secondPayload), async () => {}, secondPayload);
   const confirm = request => confirmTestnetWithdrawal(pool, request.id, sample.observation, sample.expected, treasury);
   const results = await Promise.allSettled([confirm(first), confirm(second)]);
   assert.equal(results.filter(row => row.status === "fulfilled").length, 1);
@@ -1856,7 +1865,9 @@ test("ambiguous simulated broadcast survives retries and settles by the original
     await import("../test-support/simulated-withdrawal.js");
   const sample = JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url), "utf8"));
   // Use a distinct synthetic transaction in the shared fixture database.
-  const txHash = "0x" + "8b".repeat(32);
+  const { createHash } = await import("node:crypto");
+  const payload = Buffer.from("synthetic-ambiguous-broadcast");
+  const txHash = "0x" + createHash("sha256").update(payload).digest("hex");
   sample.expected.txHash = txHash;
   sample.observation.receipt.transactionHash = txHash;
   for (const log of sample.observation.receipt.logs) log.transactionHash = txHash;
@@ -1872,11 +1883,13 @@ test("ambiguous simulated broadcast survives retries and settles by the original
     assert.equal(prepared.txHash, txHash);
     throw new Error("Network reply lost");
   };
-  const submit = () => submitSimulatedWithdrawal(pool, request.id, txHash, send);
+  const submit = () => submitSimulatedWithdrawal(pool, request.id, txHash, send, payload);
   const attempts = await Promise.allSettled([submit(), submit()]);
   assert.equal(attempts.filter(r => r.status === "rejected" && r.reason.message === "Network reply lost").length, 1);
   assert.equal(await submit(), txHash);
-  await assert.rejects(submitSimulatedWithdrawal(pool, request.id, "0x" + "9c".repeat(32), send), /mismatch/);
+  const conflictingPayload = Buffer.from("conflicting-synthetic-broadcast");
+  const conflictingHash = "0x" + createHash("sha256").update(conflictingPayload).digest("hex");
+  await assert.rejects(submitSimulatedWithdrawal(pool, request.id, conflictingHash, send, conflictingPayload), /mismatch/);
   assert.equal(broadcasts, 1);
   await assert.rejects(cancelWithdrawal(pool, owner, request.id), /cannot be cancelled/);
   const balances = await getWalletBalances(pool, owner);
