@@ -86,3 +86,15 @@ for (const alreadyKnown of [true, false]) {
     if (!alreadyKnown) assert.deepEqual(sent[0], { txHash: hash, amount: "1.00000000", destination: "0x" + "1".repeat(40), payload });
   });
 }
+
+for (const payload of [null, undefined, Buffer.alloc(0), "not bytes"]) {
+  test("submission rejects nonrecoverable payload before database write", async () => {
+    let writes = 0;
+    const pool = { async query() { writes++; throw new Error("unexpected database write"); } };
+    await assert.rejects(
+      submitSimulatedWithdrawal(pool, "7", "0x" + "a".repeat(64), async () => {}, payload),
+      /requires a nonempty recovery payload/
+    );
+    assert.equal(writes, 0);
+  });
+}
