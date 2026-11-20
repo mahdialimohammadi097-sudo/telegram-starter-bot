@@ -33,7 +33,7 @@ Telegram pushes updates to your app instead of the app asking. Set:
 | --- | --- |
 | `TELEGRAM_MODE` | `webhook` |
 | `WEBHOOK_URL` | the app's public https address, e.g. `https://my-bot.fadehost.app` |
-| `WEBHOOK_SECRET` | any random string (recommended); Telegram sends it with every update and the bot refuses updates without it |
+| `WEBHOOK_SECRET` | required in webhook mode; use a randomly generated value of 1–256 ASCII letters, digits, underscores or hyphens |
 | `PORT` | the port to listen on (set for you on FadeHost) |
 
 Telegram only delivers webhooks to ports 443, 80, 88 and 8443 over https with

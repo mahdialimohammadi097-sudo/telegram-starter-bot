@@ -1,0 +1,54 @@
+name: Verify PROFINO Telegram access
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [verify/profino-telegram-access]
+    paths: [.github/workflows/telegram-access.yml]
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify bot identity and channel permissions
+        env:
+          BOT_TOKEN: ${{ secrets.PROFINO_PRIMARY_BOT_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ.get("BOT_TOKEN")
+          if not token:
+              raise SystemExit("Configure PROFINO_PRIMARY_BOT_TOKEN and rerun this job.")
+
+          def telegram(method, **fields):
+              endpoint = f"https://api.telegram.org/bot{token}/{method}"
+              data = urllib.parse.urlencode(fields).encode()
+              try:
+                  with urllib.request.urlopen(endpoint, data=data, timeout=15) as response:
+                      payload = json.load(response)
+              except urllib.error.HTTPError as error:
+                  raise SystemExit(f"{method} returned HTTP {error.code}.") from None
+              except (OSError, ValueError):
+                  raise SystemExit(f"{method} did not return a valid response.") from None
+              if not payload.get("ok"):
+                  raise SystemExit(f"{method} was unsuccessful.")
+              return payload["result"]
+
+          bot = telegram("getMe")
+          if not bot["is_bot"] or bot["username"].lower() != "profino1bot":
+              raise SystemExit("The configured credential belongs to a different bot.")
+          print("Verified @PROFINO1bot.", flush=True)
+          member = telegram("getChatMember", chat_id="@PROFINO1", user_id=bot["id"])
+          print("Channel membership:", member["status"])
+          if member["status"] != "creator" and not member.get("can_post_messages"):
+              raise SystemExit("Channel posting permission is missing.")
+          print("Verified permission to post to @PROFINO1.")
+          PY

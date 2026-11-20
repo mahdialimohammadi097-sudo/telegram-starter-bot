@@ -53,3 +53,74 @@ test("includes the full table inventory and user-defined trigger definitions", (
   assert.ok(messages.some(message => message.includes("DATABASE INDEXES") && message.includes("users_pkey")));
   assert.ok(messages.some(message => message.includes("DATABASE TRIGGERS") && message.includes("check_ledger_balance")));
 });
+
+
+test("reports numeric precision, deferred constraints, and trigger enabled state", () => {
+  const messages = formatCoreSchema({
+    expectedTables: ["ledger_entries"],
+    tableInventory: ["ledger_entries"],
+    existingTables: ["ledger_entries"],
+    columns: [{
+      table_name: "ledger_entries",
+      column_name: "amount",
+      data_type: "numeric",
+      udt_name: "numeric",
+      is_nullable: "NO",
+      column_default: null,
+      numeric_precision: 30,
+      numeric_scale: 8,
+      is_identity: "NO",
+      is_generated: "NEVER"
+    }],
+    constraints: [{
+      table_name: "ledger_entries",
+      constraint_name: "ledger_balance_check",
+      constraint_type: "c",
+      definition: "CHECK (amount > 0)",
+      is_deferrable: true,
+      initially_deferred: true,
+      is_validated: true,
+      no_inherit: false
+    }],
+    indexes: [],
+    triggers: [{
+      table_name: "ledger_entries",
+      trigger_name: "ledger_balance_guard",
+      enabled_state: "O",
+      is_deferrable: true,
+      initially_deferred: true,
+      trigger_definition: "CREATE CONSTRAINT TRIGGER ledger_balance_guard DEFERRABLE INITIALLY DEFERRED",
+      function_name: "check_ledger_balance",
+      function_definition: "CREATE FUNCTION check_ledger_balance() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$"
+    }]
+  });
+
+  assert.ok(messages.some(message => message.includes("amount | numeric | nullable: NO | precision: 30 | scale: 8")));
+  assert.ok(messages.some(message => message.includes("deferrable: YES | initially deferred: YES | validated: YES")));
+  assert.ok(messages.some(message => message.includes("enabled state: O | deferrable: YES | initially deferred: YES")));
+});
+
+test("inspection includes the delegated ledger validator without executing it", async () => {
+  const { inspectCoreSchema } = await import("./database-diagnostics.js");
+  const definition = "CREATE FUNCTION validate_posted_transaction(bigint) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END; $$";
+  const statements = [];
+  const snapshot = await inspectCoreSchema({
+    async query(sql) {
+      statements.push(sql);
+      if (sql.includes("p.proname = 'validate_posted_transaction'")) {
+        return { rows: [{ function_name: "validate_posted_transaction", arguments: "p_transaction_id bigint", function_definition: definition }] };
+      }
+      return { rows: [] };
+    }
+  });
+  assert.ok(statements.every(sql => /^SELECT\b/.test(sql.trim())));
+  assert.ok(formatCoreSchema(snapshot).some(section =>
+    section.includes("LEDGER VALIDATION FUNCTIONS") && section.includes(definition)));
+});
+
+test("reports a missing delegated validator explicitly", async () => {
+  const { inspectCoreSchema } = await import("./database-diagnostics.js");
+  const snapshot = await inspectCoreSchema({ async query() { return { rows: [] }; } });
+  assert.ok(formatCoreSchema(snapshot).some(section =>
+    section.includes("validate_posted_transaction: NOT FOUND")));
+});
