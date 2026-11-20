@@ -1,3 +1,4 @@
+import { auditConfirmedDepositLedger } from './confirmed-deposit-ledger-audit.js';
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -99,6 +100,17 @@ test('ownership lock prevents reassignment until posting commits', { skip: !enab
   } finally { await writer.query('ROLLBACK'); writer.release(); }
 });
 
+test('ledger-first audit verifies a complete clean deposit set before fault fixtures are introduced', { skip: !enabled }, async () => {
+  const report = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', pageSize: 1,
+    resolveExpectedDeposits: async keys => keys.map(eventKey => ({ eventKey,
+      expected: expectedDeposit(Number(BigInt(eventKey.split(':')[2]))) })) });
+  assert.equal(report.scannedJournals, 3);
+  assert.equal(report.checkedEvents, 3);
+  assert.equal(report.scanComplete, true);
+  assert.equal(report.clean, true);
+  assert.deepEqual(report.findings, []);
+});
+
 const { reconcileConfirmedDeposits } = await import('./confirmed-deposit-reconciliation.js');
 const { postLedgerTransaction } = await import('./ledger-posting.js');
 const expectedDeposit = n => ({ evidence: evidence(n), availableAccountId: '2', assignments: [{
@@ -144,4 +156,43 @@ test('reconciliation catches duplicate event journals and pending entries', { sk
   assert.equal(report.matchedEvents, 0);
   assert.ok(report.findings.some(f => f.code === 'duplicate_journal'));
   assert.ok(report.findings.some(f => f.code === 'journal_not_posted'));
+});
+
+test('ledger-first audit scans all pages in read-only snapshot and finds unsupported and corrupt journals', { skip: !enabled }, async () => {
+  await pool.query(`INSERT INTO ledger_transactions(transaction_type,reference_id,idempotency_key,status)
+    VALUES ('confirmed-deposit','corrupt-ref','corrupt-key','pending')`);
+  const before = await count();
+  let sourceCalls = 0;
+  const report = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', pageSize: 2,
+    resolveExpectedDeposits: async keys => {
+      sourceCalls++;
+      return keys.map(eventKey => ({ eventKey, expected: eventKey === evidence(14).eventKey ? null :
+        expectedDeposit(Number(BigInt('0x'+eventKey.split(':')[2].slice(2)))) }));
+    } });
+  assert.ok(sourceCalls > 1);
+  assert.equal(report.scannedJournals, before);
+  assert.equal(report.scanComplete, true);
+  assert.equal(report.clean, false);
+  for (const code of ['unidentifiable_deposit_journal','unverified_deposit_event','duplicate_journal','ledger_entries_mismatch']) {
+    assert.ok(report.findings.some(f => f.code === code), code);
+  }
+  assert.equal(await count(), before);
+});
+test('ledger audit is a consistent snapshot across concurrent commits and a fresh run includes late commits', { skip: !enabled }, async () => {
+  let inserted = false;
+  const resolver = async keys => {
+    if (!inserted) {
+      inserted = true;
+      await post(88);
+    }
+    return keys.map(eventKey => ({ eventKey, expected: null }));
+  };
+  const before = await count();
+  const first = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', pageSize: 2, resolveExpectedDeposits: resolver });
+  assert.equal(first.scannedJournals, before);
+  const second = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', pageSize: 2, resolveExpectedDeposits: resolver });
+  assert.equal(second.scannedJournals, before + 1);
+  const limited = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', maxJournals: 1, resolveExpectedDeposits: resolver });
+  assert.equal(limited.scanComplete, false);
+  assert.equal(limited.clean, false);
 });

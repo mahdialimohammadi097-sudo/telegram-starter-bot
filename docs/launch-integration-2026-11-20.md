@@ -73,3 +73,20 @@ events only: this is not a full chain scan or orphan-journal audit, and events
 omitted by the source (or journals with both identifying fields corrupted) still
 require an independent persisted scanner/cursor and full reconciliation process.
 Production ownership and evidence adapters remain blocked on the catalog review.
+
+## Ledger-first evidence audit
+
+`src/confirmed-deposit-ledger-audit.js` scans suspected deposit journals, including
+records with a wrong type but recognizable event/reference prefix, and obtains
+expectations from an independent resolver. Unknown evidence and malformed
+identifiers produce findings; source errors or incomplete responses abort.
+It reuses exact reconciliation inside one READ ONLY, REPEATABLE READ transaction
+across every page. Concurrent commits are intentionally excluded from that
+snapshot and included in the next run starting from zero. A numeric sequence ID
+is never advertised as a durable cross-run cursor (commit order may differ).
+The scan has a configurable 1–5000 journal bound; truncation yields
+scanComplete=false and clean=false. This direction cannot detect a chain event
+missing from both the ledger and independent scanner; run both reconciliation
+directions. Fully erased type and identity markers require a broader ledger
+integrity audit. Independent chain/ownership storage and production wiring are
+still required, and no real financial flow has been enabled.
