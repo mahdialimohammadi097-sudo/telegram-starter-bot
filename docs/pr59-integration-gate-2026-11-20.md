@@ -19,6 +19,18 @@ Inspected `src/ledger-posting.js`, `src/wallet-balances.js`, `src/database.js`, 
 - **Outstanding release boundary:** `src/staging-simulation.js` intentionally rejects the production bot identity and requires a separate staging bot. The owner has authorized only one Telegram bot, so the isolated Telegram staging path cannot be used as written. Retain its fail-closed guard and use offline adapters and disposable databases; the final single-bot smoke test needs separate approval.
 - **Review limitation:** this is a targeted static inspection, not an independent security certification, production database inspection, or authorization to move money.
 
+
+## PR #57 ledger-safety reconciliation — code inspection
+
+Compared the PR #57 file patches with the current PR #59 branch. All four inspected safety changes are already present in the PR #59 code:
+
+- `src/ledger-posting.js`: rejects unsafe numeric account IDs and enforces the signed 64-bit ID bound.
+- `src/ledger-safety.js`: rejects unsafe integer JavaScript numbers in exact USDT parsing.
+- `test-support/simulated-investment.js`: locks only active user rows before simulated investment creation.
+- `test-support/simulated-withdrawal.js`: locks only active users on reservation and requires an active reviewer with a shared lock on both reviewer and user rows.
+
+**Scope limitation:** this establishes presence of the inspected security logic, not equivalence of every PR #57 test or independent verification of production schema. Do not merge PR #57's older two-state synthetic withdrawal schema into PR #59's extended four-state flow. Review remaining integration tests and dependency history before final merge.
+
 ## Required gates (not waived by green CI)
 
 1. The two files changed by PR #60 were compared and are byte-identical across `main` and this branch. The one-commit ancestry difference remains; reconcile history safely before merging. Avoid force pushes or blindly merging the 336-commit draft stack.
