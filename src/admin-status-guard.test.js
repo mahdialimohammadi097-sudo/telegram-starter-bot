@@ -70,3 +70,30 @@ test("admin status transaction rolls back if audit insertion fails", async () =>
   assert.equal(queries.includes("COMMIT"), false);
   assert.equal(released, true);
 });
+
+test("admin status transaction destroys a connection when rollback itself fails", async () => {
+  process.env.DATABASE_URL ??= "postgresql://localhost/profino_test";
+  const { commitUserStatus } = await import("./admin-ops.js");
+  const rollbackFailure = new Error("rollback unavailable");
+  let releaseArgument;
+  let commits = 0;
+  const client = {
+    async query(sql) {
+      if (sql === "BEGIN") return {};
+      if (sql === "ROLLBACK") throw rollbackFailure;
+      if (sql === "COMMIT") { commits++; return {}; }
+      if (sql.includes("xmin::text")) return { rowCount: 1, rows: [{ id: 9, status: "active", version: "12" }] };
+      if (sql.includes("FROM admin_users")) return { rowCount: 1, rows: [{ user_id: 1 }] };
+      if (sql.startsWith("UPDATE users")) return { rowCount: 1, rows: [{ id: 9, telegram_id: 123, status: "blocked" }] };
+      if (sql.includes("INSERT INTO admin_audit_logs")) throw new Error("audit unavailable");
+      throw new Error("Unexpected SQL");
+    },
+    release(error) { releaseArgument = error; }
+  };
+  await assert.rejects(
+    commitUserStatus("123", "blocked", "active", "12", { connect: async () => client }),
+    error => error.message === "audit unavailable" && error.rollbackError === rollbackFailure
+  );
+  assert.equal(commits, 0);
+  assert.equal(releaseArgument, rollbackFailure);
+});
