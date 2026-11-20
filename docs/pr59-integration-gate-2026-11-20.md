@@ -8,6 +8,17 @@
 - Five CI runs on `2d77dc2545b7912b12fb4361ee925a6dbea4c821` completed successfully (three JavaScript validation workflows and two PostgreSQL 17 restore drills).
 - No PR #59 review submissions or inline review threads were recorded at inspection time. An independent financial/security review is still outstanding.
 
+
+## Static financial and connection-security review (2026-11-20)
+
+Inspected `src/ledger-posting.js`, `src/wallet-balances.js`, `src/database.js`, and `src/staging-simulation.js` directly on the draft branch:
+
+- **Positive, code-level only:** the posting helper normalizes account IDs and eight-decimal USDT amounts, checks journal balance, serializes idempotency keys with transaction-scoped advisory locks, locks ledger account rows, checks projected AVAILABLE balances, and requires the pending-to-posted update to affect one row. This does not establish correctness of the actual deployed PostgreSQL constraints or every concurrent interleaving.
+- **Positive, code-level only:** the transaction wrapper attempts rollback on errors and discards a client when rollback itself fails; wallet balance queries count only posted ledger entries.
+- **Outstanding deployment-security finding:** `src/database.js` explicitly sets `ssl: false`. The private FadeHost network path and TLS support are not independently verified. Do not switch to insecure `rejectUnauthorized: false`; first obtain provider-specific TLS/private-network evidence and rehearse any connection change.
+- **Outstanding release boundary:** `src/staging-simulation.js` intentionally rejects the production bot identity and requires a separate staging bot. The owner has authorized only one Telegram bot, so the isolated Telegram staging path cannot be used as written. Retain its fail-closed guard and use offline adapters and disposable databases; the final single-bot smoke test needs separate approval.
+- **Review limitation:** this is a targeted static inspection, not an independent security certification, production database inspection, or authorization to move money.
+
 ## Required gates (not waived by green CI)
 
 1. The two files changed by PR #60 were compared and are byte-identical across `main` and this branch. The one-commit ancestry difference remains; reconcile history safely before merging. Avoid force pushes or blindly merging the 336-commit draft stack.
