@@ -3,7 +3,10 @@ name: Integration PostgreSQL financial test matrix
 on:
   push:
     branches:
-      - integration/retain-ledger-validator-20261120
+      - feature/integrated-postgres-matrix
+  pull_request:
+    branches:
+      - feature/simulated-deposit-wallet
   workflow_dispatch:
 
 permissions:
