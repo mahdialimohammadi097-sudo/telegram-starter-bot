@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { confirmTestnetWithdrawal, submitSimulatedWithdrawal, recoverSimulatedWithdrawals } from "./simulated-withdrawal.js";
+import { confirmTestnetWithdrawal, submitSimulatedWithdrawal, recoverSimulatedWithdrawals, findUnrecoverableSimulatedWithdrawals } from "./simulated-withdrawal.js";
 
 for (const scenario of [
   { status: "reserved", submitted_hash: null, error: /must be submitted before receipt confirmation/ },
@@ -96,5 +96,26 @@ for (const payload of [null, undefined, Buffer.alloc(0), "not bytes"]) {
       /requires a nonempty recovery payload/
     );
     assert.equal(writes, 0);
+  });
+}
+
+test("legacy withdrawal diagnostic only reads incomplete pending submissions", async () => {
+  let called = 0;
+  const pool = { async query(sql, params) {
+    called++;
+    assert.match(sql, /simulation_payload IS NULL/);
+    assert.match(sql, /octet_length\(simulation_payload\) = 0/);
+    assert.match(sql, /status = 'pending_receipt'/);
+    assert.deepEqual(params, [25]);
+    return { rows: [{ id: "7", hash: "0x" + "a".repeat(64) }] };
+  } };
+  assert.deepEqual(await findUnrecoverableSimulatedWithdrawals(pool, 25), [{ id: "7", hash: "0x" + "a".repeat(64) }]);
+  assert.equal(called, 1);
+});
+
+for (const invalid of [0, -1, 101, 1.5, "10"]) {
+  test("legacy diagnostic rejects invalid page size without database access", async () => {
+    const pool = { async query() { assert.fail("database must not be accessed"); } };
+    await assert.rejects(findUnrecoverableSimulatedWithdrawals(pool, invalid), /Invalid diagnostic page size/);
   });
 }
