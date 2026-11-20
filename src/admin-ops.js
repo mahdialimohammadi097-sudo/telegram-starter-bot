@@ -1,8 +1,12 @@
+import { postStatusLabel } from "./post-schedule.js";
+import { previewSettlement } from "./plan-preview.js";
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
 import { isConfirmationCurrent } from "./admin-status-guard.js";
 import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
-import { adminText } from "./admin-language.js";
+import { adminText, getAdminLanguage } from "./admin-language.js";
+import { rollbackTransaction } from "./transaction-safety.js";
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -11,16 +15,15 @@ function isSuperAdminPrivate(ctx) {
   return ctx.from?.id === SUPER_ADMIN_ID && ctx.chat?.type === "private";
 }
 
-async function getAdminLanguage(ctx) {
-  const result = await pool.query(
-    `SELECT ap.language
-     FROM users u
-     LEFT JOIN admin_preferences ap ON ap.user_id = u.id
-     WHERE u.telegram_id = $1
-     LIMIT 1`,
-    [ctx.from.id]
-  );
-  return result.rows[0]?.language === "fa" ? "fa" : "en";
+function userStatusLabel(status, language) {
+  if (language === "fa") {
+    switch (status) {
+      case "active": return "فعال";
+      case "blocked": return "مسدود";
+      case "pending": return "در انتظار";
+    }
+  }
+  return status.toUpperCase();
 }
 
 function formatDate(value, language = "en") {
@@ -32,11 +35,11 @@ function formatDate(value, language = "en") {
   }) + (language === "fa" ? " (UTC)" : " UTC");
 }
 
-function dashboardKeyboard(language = "en") {
+function dashboardKeyboard(language = "en", showQueue = false) {
   const labels = language === "fa"
     ? { overview: "نمای کلی", users: "کاربران", posts: "پست‌ها", activity: "فعالیت‌ها", language: "زبان", refresh: "بروزرسانی" }
     : { overview: "Overview", users: "Users", posts: "Posts", activity: "Activity", language: "Language", refresh: "Refresh" };
-  return new InlineKeyboard()
+  const keyboard = new InlineKeyboard()
     .text(labels.overview, "admin_home")
     .row()
     .text(labels.users, "admin_users:0")
@@ -45,50 +48,34 @@ function dashboardKeyboard(language = "en") {
     .text(labels.activity, "admin_logs")
     .text(labels.language, "admin_language")
     .text(labels.refresh, "admin_refresh");
+  if (showQueue) keyboard.row().text(adminText(language, "Settlement queue", "صف تسویه"), "admin_simqueue");
+  return keyboard;
 }
 
-async function recordAdminActivity(ctx, action, targetUserIdInput = null, details = {}) {
-  if (!isSuperAdminPrivate(ctx)) {
-    return { ok: false, error: "Super Admin private-chat check did not pass." };
-  }
+async function recordAdminActivity(ctx, action, targetTelegramId = null, details = {}) {
+  if (!isSuperAdminPrivate(ctx)) return { ok: false };
   try {
-    const admin = await pool.query(
-      `SELECT au.user_id
-       FROM admin_users au
-       JOIN users u ON u.id = au.user_id
-       WHERE u.telegram_id = $1 AND au.status = 'active'
-       LIMIT 1`,
-      [ctx.from.id]
-    );
-    if (!admin.rowCount) {
-      return { ok: false, error: "No active admin_users record is linked to this Telegram account." };
-    }
-
-    let targetUserId = null;
-    if (targetUserIdInput !== null && targetUserIdInput !== undefined) {
-      const target = await pool.query(
-        "SELECT id FROM users WHERE telegram_id = $1 LIMIT 1",
-        [targetUserIdInput]
-      );
-      targetUserId = target.rows[0]?.id ?? null;
-    }
-
     const result = await pool.query(
       `INSERT INTO admin_audit_logs
-        (admin_user_id, actor_telegram_id, action, target_user_id,
-         currency, metadata, details)
-       VALUES ($1, $2, $3, $4, 'USDT', $5::jsonb, $5::jsonb)
-       RETURNING id, created_at`,
-      [admin.rows[0].user_id, ctx.from.id, action, targetUserId, JSON.stringify(details)]
+         (admin_user_id, actor_telegram_id, action, target_user_id, currency, metadata, details)
+       SELECT au.user_id, owner.telegram_id, $2, target.id, 'USDT', $4::jsonb, $4::jsonb
+       FROM admin_users au
+       JOIN users owner ON owner.id = au.user_id
+       LEFT JOIN users target ON target.telegram_id = $3
+       WHERE owner.telegram_id = $1 AND au.role = 'owner' AND au.status = 'active'
+       LIMIT 1 FOR SHARE OF au, owner
+       RETURNING id`,
+      [ctx.from.id, action, targetTelegramId, JSON.stringify(details)]
     );
-    return { ok: result.rowCount === 1, id: result.rows[0]?.id };
+    return { ok: result.rowCount === 1 };
   } catch (error) {
-    console.error("[admin-ops] activity recording failed:", error.message);
-    return { ok: false, error: String(error?.message || error).slice(0, 500) };
+    const code = safeDiagnosticCode(error);
+    console.error("[admin-ops] activity recording failed:", code);
+    return { ok: false, code };
   }
 }
 
-async function showDashboard(ctx, edit = false) {
+async function showDashboard(ctx, edit = false, showQueue = false) {
   const language = await getAdminLanguage(ctx);
   const [users, posts] = await Promise.all([
     pool.query(`
@@ -148,13 +135,16 @@ async function showDashboard(ctx, edit = false) {
       ].join("\n");
 
   if (edit) {
-    return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language) });
+    return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language, showQueue) });
   }
-  return ctx.reply(message, { reply_markup: dashboardKeyboard(language) });
+  return ctx.reply(message, { reply_markup: dashboardKeyboard(language, showQueue) });
 }
 
-async function showUsers(ctx, page = 0, edit = false) {
-  const language = await getAdminLanguage(ctx);
+async function showUsers(ctx, requestedPage, language) {
+  const count = await pool.query("SELECT COUNT(*)::int AS total FROM users");
+  const total = count.rows[0].total;
+  const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
+  const page = Math.min(requestedPage, lastPage);
   const offset = page * PAGE_SIZE;
   const result = await pool.query(
     `SELECT telegram_id, username, first_name, status
@@ -163,16 +153,14 @@ async function showUsers(ctx, page = 0, edit = false) {
      LIMIT $1 OFFSET $2`,
     [PAGE_SIZE, offset]
   );
-  const count = await pool.query("SELECT COUNT(*)::int AS total FROM users");
-  const total = count.rows[0].total;
   const keyboard = new InlineKeyboard();
 
   for (const user of result.rows) {
     const name = [user.first_name, user.username ? "@" + user.username : null]
       .filter(Boolean).join(" · ") || String(user.telegram_id);
     keyboard.text(
-      (name + " — " + user.status.toUpperCase()).slice(0, 60),
-      "admin_user:" + user.telegram_id
+      (name + " — " + userStatusLabel(user.status, language)).slice(0, 60),
+      "admin_user:" + user.telegram_id + userPageSuffix(page)
     ).row();
   }
 
@@ -188,7 +176,7 @@ async function showUsers(ctx, page = 0, edit = false) {
           ? result.rows.map(user =>
               "شناسه: " + user.telegram_id +
               " | " + (user.username ? "@" + user.username : (user.first_name || "بدون نام")) +
-              " | " + user.status.toUpperCase()
+              " | " + userStatusLabel(user.status, language)
             ).join("\n")
           : "کاربری پیدا نشد.",
         "",
@@ -202,7 +190,7 @@ async function showUsers(ctx, page = 0, edit = false) {
           ? result.rows.map(user =>
               "ID: " + user.telegram_id +
               " | " + (user.username ? "@" + user.username : (user.first_name || "No name")) +
-              " | " + user.status.toUpperCase()
+              " | " + userStatusLabel(user.status, language)
             ).join("\n")
           : "No users found.",
         "",
@@ -210,11 +198,14 @@ async function showUsers(ctx, page = 0, edit = false) {
         "Search by Telegram ID: /user <telegram_id>"
       ].join("\n");
 
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
-  return ctx.reply(message, { reply_markup: keyboard });
+  return sendAdminScreen(ctx, message, keyboard, true);
 }
 
-async function showUser(ctx, telegramId, edit = false) {
+function userPageSuffix(page) {
+  return page > 0 ? ":" + page : "";
+}
+
+async function showUser(ctx, telegramId, edit = false, page = 0) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
     `SELECT id, telegram_id, username, first_name, last_name,
@@ -225,7 +216,10 @@ async function showUser(ctx, telegramId, edit = false) {
 
   if (!result.rowCount) {
     const message = language === "fa" ? "کاربر پیدا نشد." : "User not found.";
-    if (edit) return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language) });
+    if (edit) {
+      const keyboard = new InlineKeyboard().text(adminText(language, "Users", "کاربران"), "admin_users:" + page);
+      return sendAdminScreen(ctx, message, keyboard, true);
+    }
     return ctx.reply(message);
   }
 
@@ -238,7 +232,7 @@ async function showUser(ctx, telegramId, edit = false) {
         "شناسه تلگرام: " + user.telegram_id,
         "نام کاربری: " + (user.username ? "@" + user.username : "تنظیم نشده"),
         "نام: " + [user.first_name, user.last_name].filter(Boolean).join(" "),
-        "وضعیت: " + user.status.toUpperCase(),
+        "وضعیت: " + userStatusLabel(user.status, language),
         "کد معرف: " + (user.referral_code || "—"),
         "تاریخ عضویت: " + formatDate(user.created_at, language),
         "",
@@ -251,7 +245,7 @@ async function showUser(ctx, telegramId, edit = false) {
         "Telegram ID: " + user.telegram_id,
         "Username: " + (user.username ? "@" + user.username : "Not set"),
         "Name: " + [user.first_name, user.last_name].filter(Boolean).join(" "),
-        "Status: " + user.status.toUpperCase(),
+        "Status: " + userStatusLabel(user.status, language),
         "Referral code: " + (user.referral_code || "—"),
         "Registered: " + formatDate(user.created_at, language),
         "",
@@ -261,17 +255,17 @@ async function showUser(ctx, telegramId, edit = false) {
   const keyboard = new InlineKeyboard();
   if (Number(user.telegram_id) !== SUPER_ADMIN_ID) {
     if (user.status === "active") {
-      keyboard.text(language === "fa" ? "تعلیق کاربر" : "Suspend user", "admin_user_action:" + user.telegram_id + ":blocked");
+      keyboard.text(language === "fa" ? "تعلیق کاربر" : "Suspend user", "admin_user_action:" + user.telegram_id + ":blocked" + userPageSuffix(page));
     } else {
-      keyboard.text(language === "fa" ? "فعال‌سازی کاربر" : "Activate user", "admin_user_action:" + user.telegram_id + ":active");
+      keyboard.text(language === "fa" ? "فعال‌سازی کاربر" : "Activate user", "admin_user_action:" + user.telegram_id + ":active" + userPageSuffix(page));
     }
   }
+  keyboard.row().text(adminText(language, "Status history", "سابقه وضعیت"), "au:" + user.telegram_id + ":" + page);
   keyboard.row()
-    .text(language === "fa" ? "کاربران" : "Users", "admin_users:0")
+    .text(language === "fa" ? "کاربران" : "Users", "admin_users:" + page)
     .text(language === "fa" ? "داشبورد" : "Dashboard", "admin_home");
 
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
-  return ctx.reply(message, { reply_markup: keyboard });
+  return sendAdminScreen(ctx, message, keyboard, edit);
 }
 
 async function showPosts(ctx, edit = false) {
@@ -283,9 +277,7 @@ async function showPosts(ctx, edit = false) {
     ORDER BY status
   `);
   const lines = result.rows.map(row =>
-    language === "fa"
-      ? row.status.toUpperCase() + ": " + row.total
-      : row.status.toUpperCase() + ": " + row.total
+    postStatusLabel(row.status, language) + ": " + row.total
   );
   const message = language === "fa"
     ? [
@@ -310,46 +302,73 @@ async function showPosts(ctx, edit = false) {
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
-async function showAuditLog(ctx, edit = false) {
+function auditActionLabel(action, language) {
+  const labels = {
+    user_blocked: ["User suspended", "کاربر تعلیق شد"],
+    user_activated: ["User activated", "کاربر فعال شد"],
+    admin_dashboard_opened: ["Dashboard opened", "داشبورد باز شد"],
+    admin_user_lookup: ["User details opened", "جزئیات کاربر باز شد"],
+    admin_user_search: ["User search", "جست‌وجوی کاربر"],
+    admin_activity_viewed: ["Activity viewed", "گزارش فعالیت مشاهده شد"]
+  };
+  return Object.hasOwn(labels, action) ? adminText(language, ...labels[action]) : action.toUpperCase();
+}
+
+async function showAuditLog(ctx, beforeId = null, statusOnly = false, target = null, page = 0) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
-    `SELECT a.action, a.target_user_id, u.telegram_id AS target_telegram_id,
+    `SELECT a.id, a.action, a.target_user_id, u.telegram_id AS target_telegram_id,
             a.details, a.created_at
      FROM admin_audit_logs a
      LEFT JOIN users u ON u.id = a.target_user_id
+     WHERE ($1::numeric IS NULL OR a.id < least($1::numeric, 9223372036854775807)::bigint)
+       AND (NOT $2::boolean OR a.action IN ('user_blocked', 'user_activated'))
+       AND ($3::numeric IS NULL OR u.telegram_id = $3::numeric)
      ORDER BY a.id DESC
-     LIMIT 10`
+     LIMIT 11`, [beforeId, statusOnly, target]
   );
-  const lines = result.rows.map(row =>
+  const rows = result.rows.slice(0, 10);
+  const lines = rows.map(row =>
     formatDate(row.created_at, language) + "\n" +
-    row.action.toUpperCase() +
+    auditActionLabel(row.action, language) +
     (row.target_telegram_id
       ? (language === "fa" ? " | شناسه تلگرام: " : " | Telegram: ") + row.target_telegram_id
       : "") +
-    (row.details?.new_status
-      ? (language === "fa" ? " | وضعیت جدید: " : " | New status: ") + row.details.new_status.toUpperCase()
+    (row.details?.old_status && row.details?.new_status
+      ? " | " + userStatusLabel(row.details.old_status, language) + " → " + userStatusLabel(row.details.new_status, language)
+      : row.details?.new_status
+      ? (language === "fa" ? " | وضعیت جدید: " : " | New status: ") + userStatusLabel(row.details.new_status, language)
       : "")
   );
   const message = language === "fa"
     ? [
-        "پروفینو — گزارش فعالیت مدیر",
+        statusOnly ? "پروفینو — تغییرات وضعیت کاربران" : "پروفینو — گزارش فعالیت مدیر",
         "",
-        lines.length ? lines.join("\n\n") : "هنوز فعالیت مدیریتی ثبت نشده است."
+        lines.length ? lines.join("\n\n") : beforeId ? "رویداد قدیمی‌تری پیدا نشد." : statusOnly ? "هنوز تغییر وضعیتی ثبت نشده است." : "هنوز فعالیت مدیریتی ثبت نشده است."
       ].join("\n")
     : [
-        "PROFINO — ADMIN ACTIVITY AUDIT",
+        statusOnly ? "PROFINO — USER STATUS CHANGES" : "PROFINO — ADMIN ACTIVITY AUDIT",
         "",
-        lines.length ? lines.join("\n\n") : "No admin activity recorded yet."
+        lines.length ? lines.join("\n\n") : beforeId ? "No older activity found." : statusOnly ? "No user status changes recorded yet." : "No admin activity recorded yet."
       ].join("\n");
-  const keyboard = new InlineKeyboard().text(language === "fa" ? "بازگشت" : "Back", "admin_home");
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
-  return ctx.reply(message, { reply_markup: keyboard });
+  const keyboard = new InlineKeyboard();
+  const feed = target ? "au:" + target + ":" + page : statusOnly ? "admin_logs_status" : "admin_logs";
+  if (result.rows.length > rows.length) {
+    keyboard.text(adminText(language, "Older activity", "فعالیت‌های قدیمی‌تر"), feed + ":" + rows.at(-1).id).row();
+  }
+  if (beforeId) keyboard.text(adminText(language, "Latest activity", "آخرین فعالیت‌ها"), (target ? feed : feed + "_latest")).row();
+  if (target) keyboard.text(adminText(language, "User details", "جزئیات کاربر"), "admin_user:" + target + userPageSuffix(page)).row();
+  else if (statusOnly) keyboard.text(adminText(language, "All activity", "همه فعالیت‌ها"), "admin_logs_latest").row();
+  else keyboard.text(adminText(language, "User status changes", "تغییرات وضعیت کاربران"), "admin_logs_status").row();
+  keyboard.text(language === "fa" ? "بازگشت" : "Back", "admin_home");
+  const heading = target ? adminText(language, "Telegram ID: ", "شناسه تلگرام: ") + target + "\n\n" : "";
+  return sendAdminScreen(ctx, heading + message, keyboard, Boolean(ctx.callbackQuery && ctx.callbackQuery.data !== "admin_logs"));
 }
 
-async function confirmUserStatus(ctx, telegramId, newStatus) {
+async function confirmUserStatus(ctx, telegramId, newStatus, page) {
   const language = await getAdminLanguage(ctx);
   const result = await pool.query(
-    "SELECT telegram_id, status FROM users WHERE telegram_id = $1",
+    "SELECT telegram_id, status, xmin::text AS version FROM users WHERE telegram_id = $1",
     [telegramId]
   );
   if (!result.rowCount || Number(telegramId) === SUPER_ADMIN_ID) {
@@ -368,8 +387,8 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
 
   const action = newStatus === "active" ? "activate" : "suspend";
   const keyboard = new InlineKeyboard()
-    .text(language === "fa" ? "تأیید" : "Confirm", "admin_user_confirm:" + telegramId + ":" + newStatus + ":" + current.status)
-    .text(language === "fa" ? "انصراف" : "Cancel", "admin_user:" + telegramId);
+    .text(language === "fa" ? "تأیید" : "Confirm", "usc:" + telegramId + ":" + newStatus + ":" + current.status + ":" + current.version + userPageSuffix(page))
+    .text(language === "fa" ? "انصراف" : "Cancel", "admin_user:" + telegramId + userPageSuffix(page));
 
   await ctx.answerCallbackQuery();
   const message = language === "fa"
@@ -377,8 +396,8 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
         "تأیید " + (newStatus === "active" ? "فعال‌سازی" : "تعلیق") + " کاربر",
         "",
         "شناسه تلگرام: " + telegramId,
-        "وضعیت فعلی: " + current.status.toUpperCase(),
-        "وضعیت جدید: " + newStatus.toUpperCase(),
+        "وضعیت فعلی: " + userStatusLabel(current.status, language),
+        "وضعیت جدید: " + userStatusLabel(newStatus, language),
         "",
         "این عملیات هیچ وجهی را جابه‌جا یا تغییر نمی‌دهد."
       ].join("\n")
@@ -386,15 +405,15 @@ async function confirmUserStatus(ctx, telegramId, newStatus) {
         "CONFIRM USER " + action.toUpperCase(),
         "",
         "Telegram ID: " + telegramId,
-        "Current status: " + current.status.toUpperCase(),
+        "Current status: " + userStatusLabel(current.status, language),
         "New status: " + newStatus.toUpperCase(),
         "",
         "This does not move or alter funds."
       ].join("\n");
-  await ctx.editMessageText(message, { reply_markup: keyboard });
+  await sendAdminScreen(ctx, message, keyboard, true);
 }
 
-async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
+async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus, page, version) {
   const language = await getAdminLanguage(ctx);
   if (Number(telegramId) === SUPER_ADMIN_ID) {
     return ctx.answerCallbackQuery({
@@ -403,32 +422,52 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
     });
   }
 
+  // Older buttons have no row version. Refresh them without applying a change.
+  const changed = version && await commitUserStatus(telegramId, newStatus, expectedStatus, version);
+  const notice = changed
+    ? adminText(language, "User status updated.", "وضعیت کاربر به‌روزرسانی شد.")
+    : adminText(language, "This confirmation is outdated.", "این تأیید منقضی شده است.");
+  try {
+    await ctx.answerCallbackQuery({ text: notice, show_alert: !changed });
+  } catch (error) {
+    console.error("[admin-ops] status acknowledgement failed:", safeDiagnosticCode(error));
+  }
+  try {
+    await showUser(ctx, telegramId, true, page);
+  } catch (error) {
+    console.error("[admin-ops] updated user details unavailable:", safeDiagnosticCode(error));
+    await ctx.reply(notice + "\n" + adminText(language, "Reopen the user details to refresh.",
+      "برای مشاهدهٔ نتیجه، جزئیات کاربر را دوباره باز کنید.")).catch(error => {
+      console.error("[admin-ops] status notification failed:", safeDiagnosticCode(error));
+    });
+  }
+}
+
+async function commitUserStatus(telegramId, newStatus, expectedStatus, version) {
   const client = await pool.connect();
+  let transactionOpen = false;
+  let releaseError = null;
   try {
     await client.query("BEGIN");
+    transactionOpen = true;
     const locked = await client.query(
-      "SELECT id, status FROM users WHERE telegram_id = $1 FOR UPDATE",
+      "SELECT id, status, xmin::text AS version FROM users WHERE telegram_id = $1 FOR UPDATE",
       [telegramId]
     );
 
-    if (!locked.rowCount ||
+    if (!locked.rowCount || locked.rows[0].version !== version ||
         !isConfirmationCurrent(locked.rows[0].status, expectedStatus, newStatus)) {
       await client.query("ROLLBACK");
-      await ctx.answerCallbackQuery({
-        text: language === "fa"
-          ? "این تأیید منقضی شده است. جزئیات کاربر را دوباره باز کنید و تلاش کنید."
-          : "This confirmation is outdated. Reopen the user details and try again.",
-        show_alert: true
-      });
-      return;
+      transactionOpen = false;
+      return false;
     }
 
     const admin = await client.query(
       `SELECT au.user_id
        FROM admin_users au
        JOIN users u ON u.id = au.user_id
-       WHERE u.telegram_id = $1 AND au.status = 'active'
-       LIMIT 1`,
+       WHERE u.telegram_id = $1 AND au.role = 'owner' AND au.status = 'active'
+       LIMIT 1 FOR SHARE OF au, u`,
       [SUPER_ADMIN_ID]
     );
     if (!admin.rowCount) {
@@ -440,6 +479,9 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
       "UPDATE users SET status = $1 WHERE telegram_id = $2 AND status = $3 RETURNING id, telegram_id, status",
       [newStatus, telegramId, expectedStatus]
     );
+    if (updated.rowCount !== 1) {
+      throw new Error("User status update did not affect exactly one row.");
+    }
     const auditDetails = JSON.stringify({ old_status: oldStatus, new_status: newStatus });
 
     await client.query(
@@ -456,15 +498,16 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
       ]
     );
     await client.query("COMMIT");
-    await ctx.answerCallbackQuery({
-      text: language === "fa" ? "وضعیت کاربر به‌روزرسانی شد." : "User status updated."
-    });
-    await showUser(ctx, telegramId, true);
+    transactionOpen = false;
+    return true;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    if (transactionOpen) {
+      releaseError = await rollbackTransaction(client, error);
+      transactionOpen = false;
+    }
     throw error;
   } finally {
-    client.release();
+    client.release(releaseError);
   }
 }
 
@@ -509,22 +552,21 @@ export async function ensureAdminOpsSchema() {
     ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb
   `);
 
+  // Older local schemas lack fields used by both activity and status writers.
+  // Leave historical currency and metadata unknown rather than attributing them.
+  await pool.query(`
+    ALTER TABLE admin_audit_logs
+      ADD COLUMN IF NOT EXISTS currency TEXT,
+      ADD COLUMN IF NOT EXISTS metadata JSONB
+  `);
+
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created
     ON admin_audit_logs(id DESC)
   `);
 }
 
-async function showAdminLanguage(ctx, edit = false) {
-  const result = await pool.query(
-    `SELECT ap.language
-     FROM users u
-     LEFT JOIN admin_preferences ap ON ap.user_id = u.id
-     WHERE u.telegram_id = $1
-     LIMIT 1`,
-    [ctx.from.id]
-  );
-  const language = result.rows[0]?.language || "en";
+async function showAdminLanguage(ctx, language, edit = false) {
   const keyboard = new InlineKeyboard()
     .text((language === "en" ? "✓ " : "") + "English", "admin_language_set:en")
     .text((language === "fa" ? "✓ " : "") + "فارسی", "admin_language_set:fa")
@@ -533,18 +575,167 @@ async function showAdminLanguage(ctx, edit = false) {
   const message = language === "fa"
     ? "تنظیم زبان پنل مدیریت\n\nزبان موردنظر را انتخاب کنید. این تنظیم فقط روی پنل خصوصی ادمین اثر دارد؛ رابط کاربران PROFINO انگلیسی باقی می‌ماند."
     : "ADMIN PANEL LANGUAGE\n\nChoose the language for the private admin panel. This preference does not change the customer-facing PROFINO interface, which remains English.";
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  return sendAdminScreen(ctx, message, keyboard, edit);
+}
+
+async function sendAdminScreen(ctx, message, keyboard, edit) {
+  if (edit) {
+    try {
+      return await ctx.editMessageText(message, { reply_markup: keyboard });
+    } catch (error) {
+      if (error.error_code === 400 && /message is not modified/i.test(error.description || "")) return;
+      console.error("[admin-ops] admin screen edit failed:", safeDiagnosticCode(error));
+    }
+  }
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
-export function registerAdminOps(bot) {
+export function registerAdminOps(bot, { inspectTestQueue, testWithdrawalReview } = {}) {
+  if (testWithdrawalReview) {
+    async function showReview(ctx, id, afterId = "0") {
+      const edit = Boolean(ctx.callbackQuery);
+      if (!isSuperAdminPrivate(ctx)) {
+        return edit ? ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true }) : ctx.reply("Access denied.");
+      }
+      if (edit) await ctx.answerCallbackQuery();
+      const language = await getAdminLanguage(ctx);
+      const label = (en, fa) => adminText(language, en, fa);
+      const keyboard = new InlineKeyboard();
+      try {
+        if (!id) {
+          const page = await testWithdrawalReview.list(ctx.from.id, afterId);
+          for (const hold of page.holds) {
+            keyboard.text("#" + hold.id + " · " + hold.amount + " USDT", "admin_sim_inspect:" + hold.id).row();
+          }
+          if (page.next) keyboard.text(label("Next", "بعدی"), "admin_sim_holds:" + page.next).row();
+          if (afterId !== "0") keyboard.text(label("First page", "صفحه اول"), "admin_sim_holds:0").row();
+          keyboard.text(label("Dashboard", "داشبورد"), "admin_home");
+          const title = page.holds.length ? label("Select a reserved test withdrawal", "برداشت آزمایشی رزروشده را انتخاب کنید")
+            : label("No reviewable test withdrawals on this page.", "در این صفحه برداشت آزمایشی قابل بازبینی وجود ندارد.");
+          return sendAdminScreen(ctx, title, keyboard, edit);
+        }
+        if (!/^[1-9]\d{0,18}$/.test(id)) return ctx.reply(label("Usage: /reviewhold [id]", "روش استفاده: /reviewhold [id]"));
+        const hold = await testWithdrawalReview.inspect(ctx.from.id, id);
+        let message;
+        if (!hold) {
+          message = label("No reviewable test withdrawal found.", "برداشت آزمایشی قابل بازبینی پیدا نشد.");
+        } else if (hold.status === "reserved") {
+          keyboard.text(label("Confirm release", "تأیید آزادسازی"), "admin_sim_release:" + id).row();
+          message = label("Release test withdrawal #", "آزادسازی برداشت آزمایشی شماره ") + id + "\n" +
+            label("Amount returned to the customer's wallet: ", "مبلغ بازگشتی به کیف پول کاربر: ") + hold.amount + " USDT";
+        } else if (hold.status === "cancelled" && hold.journal_id) {
+          const actor = hold.cancelled_by_reviewer === null ? label("Customer", "صاحب حساب") :
+            label("Reviewer #", "بازبین شماره ") + hold.cancelled_by_reviewer;
+          message = [
+            label("Closed test withdrawal #", "برداشت آزمایشی بسته‌شده شماره ") + id,
+            label("Request amount: ", "مبلغ درخواست: ") + hold.amount + " USDT",
+            label("Cancelled by: ", "لغوکننده: ") + actor,
+            label("Release journal #", "سند آزادسازی شماره ") + hold.journal_id,
+            label("Journal time: ", "زمان ثبت سند: ") + hold.released_at.toISOString()
+          ].join("\n");
+        } else {
+          message = label("Release record unavailable. Check reconciliation.", "سند آزادسازی در دسترس نیست. تطبیق دفترکل را بررسی کنید.");
+        }
+        keyboard.text(label("Open requests", "درخواست‌های باز"), "admin_sim_holds:0");
+        return sendAdminScreen(ctx, message, keyboard, edit);
+      } catch (error) {
+        console.error("[admin-ops] simulated withdrawal review failed:", safeDiagnosticCode(error));
+        return ctx.reply(label("Unable to read test withdrawals.", "خواندن برداشت‌های آزمایشی ممکن نشد."));
+      }
+    }
+    bot.command("reviewhold", ctx => showReview(ctx, ctx.match.trim()));
+    bot.callbackQuery(/^admin_sim_holds:(\d{1,19})$/, ctx => showReview(ctx, null, ctx.match[1]));
+    bot.callbackQuery(/^admin_sim_inspect:([1-9]\d{0,18})$/, ctx => showReview(ctx, ctx.match[1]));
+    bot.callbackQuery(/^admin_sim_release:([1-9]\d{0,18})$/, async ctx => {
+      if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+      await ctx.answerCallbackQuery();
+      const language = await getAdminLanguage(ctx);
+      const id = ctx.match[1];
+      let journal;
+      try {
+        journal = await testWithdrawalReview.release(ctx.from.id, id);
+      } catch (error) {
+        console.error("[admin-ops] simulated release failed:", safeDiagnosticCode(error));
+        return ctx.reply(adminText(language, "Unable to confirm this release.", "تأیید آزادسازی ممکن نشد."));
+      }
+      return sendAdminScreen(ctx, adminText(language, "Test withdrawal #", "برداشت آزمایشی شماره ") + id +
+        adminText(language, " · release journal #", " · سند آزادسازی شماره ") + journal,
+        new InlineKeyboard().text(adminText(language, "View receipt", "مشاهده رسید"), "admin_sim_inspect:" + id)
+          .row().text(adminText(language, "Open requests", "درخواست‌های باز"), "admin_sim_holds:0"), true);
+    });
+  }
+
+  if (inspectTestQueue) {
+    async function showQueue(ctx) {
+      if (!isSuperAdminPrivate(ctx)) {
+        if (ctx.callbackQuery) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+        return ctx.reply("Access denied.");
+      }
+      if (ctx.callbackQuery) await ctx.answerCallbackQuery();
+      const language = await getAdminLanguage(ctx);
+      const label = (en, fa) => adminText(language, en, fa);
+      const keyboard = new InlineKeyboard();
+      let queue;
+      try {
+        queue = await inspectTestQueue();
+      } catch (error) {
+        console.error("[admin-ops] simulation queue failed:", safeDiagnosticCode(error));
+        keyboard.text(label("Retry", "تلاش دوباره"), "admin_simqueue")
+          .text(label("Dashboard", "داشبورد"), "admin_home");
+        return sendAdminScreen(ctx, label("Unable to read the simulation queue.", "خواندن صف آزمایشی ممکن نشد."),
+          keyboard, Boolean(ctx.callbackQuery));
+      }
+      const lines = [
+        label("Settlement simulation · test USDT", "شبیه‌سازی تسویه · تتر آزمایشی"),
+        label("Due investments: ", "سرمایه‌گذاری‌های سررسیدشده: ") + queue.due_count,
+        label("Reserve balance: ", "موجودی ذخیره: ") + queue.reserve_balance
+      ];
+      if (queue.first_id !== null) {
+        lines.push(label("First investment: #", "اولین سرمایه‌گذاری: #") + queue.first_id,
+          label("First settlement shortfall: ", "کسری اولین تسویه: ") + queue.first_shortfall,
+          label("Total shortfall: ", "کسری کل صف: ") + queue.total_shortfall);
+      }
+      keyboard.text(label("Refresh", "به‌روزرسانی"), "admin_simqueue")
+        .text(label("Dashboard", "داشبورد"), "admin_home");
+      return sendAdminScreen(ctx, lines.join("\n"), keyboard, Boolean(ctx.callbackQuery));
+    }
+    bot.command("simqueue", showQueue);
+    bot.callbackQuery("admin_simqueue", showQueue);
+  }
+
+  bot.command("planpreview", async ctx => {
+    if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
+    const language = await getAdminLanguage(ctx);
+    const plan = previewSettlement(ctx.match);
+    if (!plan) return ctx.reply(adminText(language,
+      "Example: /planpreview SMART 25\nPlans: STARTER, SMART, PRO\nAmounts: 10, 25, 50, 75, 100 USDT",
+      "نمونه: /planpreview SMART 25\nپلن‌ها: STARTER، SMART، PRO\nمبالغ: 10، 25، 50، 75، 100 USDT"));
+    return ctx.reply(adminText(language, [
+      "Settlement simulation · v1.0 · USDT",
+      plan.name + " · " + plan.days + " days",
+      "Principal: " + plan.amount,
+      "Modelled profit (" + plan.profitPercent + "%): " + plan.profit,
+      "Gross settlement: " + plan.gross,
+      "Fee (" + plan.feePercent + "% of gross): " + plan.fee,
+      "Net settlement: " + plan.payout
+    ].join("\n"), [
+      "شبیه‌سازی تسویه · نسخه ۱٫۰ · USDT",
+      plan.name + " · " + plan.days + " روز",
+      "اصل سرمایه: " + plan.amount,
+      "سود محاسباتی (" + plan.profitPercent + "٪): " + plan.profit,
+      "مبلغ ناخالص: " + plan.gross,
+      "کارمزد (" + plan.feePercent + "٪ از ناخالص): " + plan.fee,
+      "مبلغ خالص تسویه: " + plan.payout
+    ].join("\n")));
+  });
+
   bot.command("adminlanguage", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
     try {
-      await showAdminLanguage(ctx);
+      await showAdminLanguage(ctx, language);
     } catch (error) {
-      console.error("[admin-ops] language settings failed:", error);
+      console.error("[admin-ops] language settings failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."));
     }
   });
@@ -554,10 +745,10 @@ export function registerAdminOps(bot) {
     const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
-      await showAdminLanguage(ctx, true);
+      await showAdminLanguage(ctx, language, true);
     } catch (error) {
-      console.error("[admin-ops] language screen failed:", error);
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."), show_alert: true });
+      console.error("[admin-ops] language screen failed:", safeDiagnosticCode(error));
+      await ctx.reply(adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."));
     }
   });
 
@@ -576,12 +767,12 @@ export function registerAdminOps(bot) {
       if (!result.rowCount) {
         return ctx.answerCallbackQuery({ text: adminText(language, "Admin account is not registered.", "حساب مدیر ثبت نشده است."), show_alert: true });
       }
-      await ctx.answerCallbackQuery({ text: language === "fa" ? "زبان فارسی ذخیره شد." : "English preference saved." });
-      await showAdminLanguage(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] language preference update failed:", error);
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to save language preference.", "ذخیره تنظیم زبان ممکن نشد."), show_alert: true });
+      console.error("[admin-ops] language preference update failed:", safeDiagnosticCode(error));
+      return ctx.answerCallbackQuery({ text: adminText(language, "Unable to save language preference.", "ذخیره تنظیم زبان ممکن نشد."), show_alert: true });
     }
+    await ctx.answerCallbackQuery({ text: language === "fa" ? "زبان فارسی ذخیره شد." : "English preference saved." });
+    await showAdminLanguage(ctx, language, true);
   });
 
   bot.command("admin", async (ctx) => {
@@ -589,9 +780,9 @@ export function registerAdminOps(bot) {
     const language = await getAdminLanguage(ctx);
     await recordAdminActivity(ctx, "admin_dashboard_opened");
     try {
-      await showDashboard(ctx);
+      await showDashboard(ctx, false, Boolean(inspectTestQueue));
     } catch (error) {
-      console.error("[admin-ops] dashboard failed:", error);
+      console.error("[admin-ops] dashboard failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load the admin dashboard. Please try again.", "بارگذاری داشبورد مدیریت ممکن نشد. دوباره تلاش کنید."));
     }
   });
@@ -599,9 +790,9 @@ export function registerAdminOps(bot) {
   bot.command("adminstats", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    try { await showDashboard(ctx); }
+    try { await showDashboard(ctx, false, Boolean(inspectTestQueue)); }
     catch (error) {
-      console.error("[admin-ops] stats failed:", error);
+      console.error("[admin-ops] stats failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load admin statistics.", "بارگذاری آمار مدیریت ممکن نشد."));
     }
   });
@@ -616,7 +807,7 @@ export function registerAdminOps(bot) {
     await recordAdminActivity(ctx, "admin_user_lookup", telegramId);
     try { await showUser(ctx, telegramId); }
     catch (error) {
-      console.error("[admin-ops] user lookup failed:", error);
+      console.error("[admin-ops] user lookup failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load this user.", "بارگذاری اطلاعات این کاربر ممکن نشد."));
     }
   });
@@ -624,7 +815,7 @@ export function registerAdminOps(bot) {
   bot.command("usersearch", async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    const term = ctx.match?.trim();
+    const term = ctx.match?.trim().replace(/^@/, "");
     if (!term || term.length > 80) {
       return ctx.reply(language === "fa"
         ? "روش استفاده: /usersearch <شناسه تلگرام، نام کاربری یا نام>"
@@ -637,12 +828,12 @@ export function registerAdminOps(bot) {
         `SELECT telegram_id, username, first_name, last_name, status
          FROM users
          WHERE telegram_id::text = $1
-            OR COALESCE(username, '') ILIKE '%' || $1 || '%'
-            OR COALESCE(first_name, '') ILIKE '%' || $1 || '%'
-            OR COALESCE(last_name, '') ILIKE '%' || $1 || '%'
+            OR strpos(lower(username), lower($1)) > 0
+            OR strpos(lower(first_name), lower($1)) > 0
+            OR strpos(lower(last_name), lower($1)) > 0
          ORDER BY created_at DESC, id DESC
          LIMIT 10`,
-        [term.replace(/^@/, "")]
+        [term]
       );
 
       if (!result.rowCount) {
@@ -654,12 +845,12 @@ export function registerAdminOps(bot) {
         const name = [user.first_name, user.last_name].filter(Boolean).join(" ") ||
           (user.username ? "@" + user.username : (language === "fa" ? "بدون نام" : "No name"));
         keyboard.text(
-          (name + " — " + user.status.toUpperCase()).slice(0, 60),
+          (name + " — " + userStatusLabel(user.status, language)).slice(0, 60),
           "admin_user:" + user.telegram_id
         ).row();
         return (language === "fa" ? "شناسه: " : "ID: ") + user.telegram_id + " | " +
           (user.username ? "@" + user.username : name) +
-          " | " + user.status.toUpperCase();
+          " | " + userStatusLabel(user.status, language);
       });
 
       keyboard.text(language === "fa" ? "بازگشت" : "Back", "admin_home");
@@ -668,7 +859,7 @@ export function registerAdminOps(bot) {
         : "PROFINO — USER SEARCH\n\n" + lines.join("\n") + "\n\nShowing up to 10 matches.";
       return ctx.reply(message, { reply_markup: keyboard });
     } catch (error) {
-      console.error("[admin-ops] user search failed:", error);
+      console.error("[admin-ops] user search failed:", safeDiagnosticCode(error));
       return ctx.reply(language === "fa"
         ? "در حال حاضر جست‌وجوی کاربران ممکن نیست."
         : "Unable to search users right now.");
@@ -734,7 +925,9 @@ export function registerAdminOps(bot) {
       `);
       const membership = await pool.query(`
         SELECT u.id AS users_id, u.telegram_id,
-               (au.user_id IS NOT NULL) AS admin_record_exists
+               (au.user_id IS NOT NULL) AS admin_record_exists,
+               au.role AS admin_role,
+               au.status AS admin_status
         FROM users u
         LEFT JOIN admin_users au ON au.user_id = u.id
         WHERE u.telegram_id = $1
@@ -749,7 +942,15 @@ export function registerAdminOps(bot) {
       );
       const membershipLine = membership.rows.length
         ? "Super Admin users.id: " + membership.rows[0].users_id +
-          " | admin_users record exists: " + membership.rows[0].admin_record_exists
+          " | admin_users record exists: " + membership.rows[0].admin_record_exists +
+          " | role: " + (membership.rows[0].admin_role ?? "N/A") +
+          " | status: " + (membership.rows[0].admin_status ?? "N/A") +
+          " | active owner check: " + (
+            membership.rows[0].admin_role === "owner" &&
+            membership.rows[0].admin_status === "active"
+              ? "PASS"
+              : "NOT VERIFIED"
+          )
         : "Super Admin Telegram account is not present in users table.";
 
       await ctx.reply(
@@ -764,9 +965,9 @@ export function registerAdminOps(bot) {
           : "No CHECK constraints found.")
       );
     } catch (error) {
-      console.error("[admin-ops] schema diagnostic failed:", error);
+      console.error("[admin-ops] schema diagnostic failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to inspect admin audit schema. Diagnostic: ", "بررسی ساختار ممیزی مدیریت ممکن نشد. جزئیات: ") +
-        String(error?.message || error).slice(0, 500));
+        safeDiagnosticCode(error));
     }
   });
 
@@ -776,16 +977,18 @@ export function registerAdminOps(bot) {
     const auditWrite = await recordAdminActivity(ctx, "admin_activity_viewed");
     if (!auditWrite.ok) {
       await ctx.reply(
-        adminText(language, "AUDIT WRITE FAILED\nDiagnostic: ", "ثبت رویداد ممیزی ناموفق بود\nجزئیات: ") +
-        String(auditWrite.error || "No audit row returned").slice(0, 500)
+        auditWrite.code
+          ? adminText(language, "Could not record this activity. Diagnostic: ", "ثبت این فعالیت ممکن نشد. کد خطا: ") + auditWrite.code
+          : adminText(language, "Could not record this activity. Check the active owner membership.",
+            "ثبت این فعالیت ممکن نشد. دسترسی فعال مالک را بررسی کنید.")
       );
     }
     try { await showAuditLog(ctx); }
     catch (error) {
-      console.error("[admin-ops] audit log failed:", error);
+      console.error("[admin-ops] audit log failed:", safeDiagnosticCode(error));
       await ctx.reply(
         adminText(language, "Unable to load admin activity.\nDiagnostic: ", "بارگذاری فعالیت‌های مدیریت ممکن نشد\nجزئیات: ") +
-        String(error?.message || error).slice(0, 700)
+        safeDiagnosticCode(error)
       );
     }
   });
@@ -795,9 +998,9 @@ export function registerAdminOps(bot) {
     const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
-      await showDashboard(ctx, true);
+      await showDashboard(ctx, true, Boolean(inspectTestQueue));
     } catch (error) {
-      console.error("[admin-ops] dashboard refresh failed:", error);
+      console.error("[admin-ops] dashboard refresh failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to refresh.", "به‌روزرسانی ممکن نشد."), show_alert: true });
     }
   });
@@ -808,31 +1011,32 @@ export function registerAdminOps(bot) {
     try {
       const page = Number(ctx.callbackQuery.data.split(":")[1]);
       await ctx.answerCallbackQuery();
-      await showUsers(ctx, page, true);
+      await showUsers(ctx, page, language);
     } catch (error) {
-      console.error("[admin-ops] users list failed:", error);
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load users.", "بارگذاری کاربران ممکن نشد."), show_alert: true });
+      console.error("[admin-ops] users list failed:", safeDiagnosticCode(error));
+      await ctx.reply(adminText(language, "Unable to load users.", "بارگذاری کاربران ممکن نشد."));
     }
   });
 
-  bot.callbackQuery(/^admin_user:\d+$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user:\d+(?::\d{1,9})?$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     try {
       await ctx.answerCallbackQuery();
-      await showUser(ctx, ctx.callbackQuery.data.split(":")[1], true);
+      const [, telegramId, page] = ctx.callbackQuery.data.split(":");
+      await showUser(ctx, telegramId, true, Number(page || 0));
     } catch (error) {
-      console.error("[admin-ops] user details failed:", error);
-      await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load user.", "بارگذاری اطلاعات کاربر ممکن نشد."), show_alert: true });
+      console.error("[admin-ops] user details failed:", safeDiagnosticCode(error));
+      await ctx.reply(adminText(language, "Unable to load user.", "بارگذاری اطلاعات کاربر ممکن نشد."));
     }
   });
 
-  bot.callbackQuery(/^admin_user_action:\d+:(active|blocked)$/, async (ctx) => {
+  bot.callbackQuery(/^admin_user_action:\d+:(active|blocked)(?::\d{1,9})?$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const [, telegramId, status] = ctx.callbackQuery.data.split(":");
-    try { await confirmUserStatus(ctx, telegramId, status); }
+    const [, telegramId, status, page] = ctx.callbackQuery.data.split(":");
+    try { await confirmUserStatus(ctx, telegramId, status, Number(page || 0)); }
     catch (error) {
-      console.error("[admin-ops] status confirmation failed:", error);
+      console.error("[admin-ops] status confirmation failed:", safeDiagnosticCode(error));
       const language = await getAdminLanguage(ctx);
       await ctx.answerCallbackQuery({
         text: language === "fa" ? "آماده‌سازی تغییر وضعیت ممکن نشد." : "Unable to prepare status change.",
@@ -841,12 +1045,14 @@ export function registerAdminOps(bot) {
     }
   });
 
-  bot.callbackQuery(/^admin_user_confirm:\d+:(active|blocked):(active|blocked|pending)$/, async (ctx) => {
+  bot.callbackQuery([/^admin_user_confirm:\d+:(active|blocked):(active|blocked|pending)(?::\d{1,9})?$/, /^usc:\d{1,19}:(active|blocked):(active|blocked|pending):\d{1,10}(?::\d{1,9})?$/], async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const [, telegramId, status, expectedStatus] = ctx.callbackQuery.data.split(":");
-    try { await applyUserStatus(ctx, telegramId, status, expectedStatus); }
+    const [prefix, telegramId, status, expectedStatus, token, origin] = ctx.callbackQuery.data.split(":");
+    const version = prefix === "usc" ? token : undefined;
+    const page = version ? origin : token;
+    try { await applyUserStatus(ctx, telegramId, status, expectedStatus, Number(page || 0), version); }
     catch (error) {
-      console.error("[admin-ops] status update failed:", error);
+      console.error("[admin-ops] status update failed:", safeDiagnosticCode(error));
       const language = await getAdminLanguage(ctx);
       await ctx.answerCallbackQuery({
         text: language === "fa" ? "به‌روزرسانی وضعیت کاربر ممکن نشد." : "Unable to update user status.",
@@ -862,19 +1068,12 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showPosts(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] post overview failed:", error);
+      console.error("[admin-ops] post overview failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post overview.", "بارگذاری نمای کلی پست‌ها ممکن نشد."), show_alert: true });
     }
   });
 
-  bot.callbackQuery(/^admin_posthistory$/, async (ctx) => {
-    if (!isSuperAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
-    const language = await getAdminLanguage(ctx);
-    await ctx.answerCallbackQuery();
-    return ctx.reply(adminText(language, "Use /posthistory to open the complete post history.", "برای مشاهده تاریخچه کامل پست‌ها، دستور /posthistory را ارسال کنید."));
-  });
-
-  bot.callbackQuery(/^admin_logs$/, async (ctx) => {
+  bot.callbackQuery(/^(?:admin_logs(_status)?(?:_latest|:([1-9]\d{0,18}))?|au:([1-9]\d{0,18}):(\d{1,9})(?::([1-9]\d{0,18}))?)$/, async (ctx) => {
     if (!isSuperAdminPrivate(ctx)) {
       return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     }
@@ -886,21 +1085,20 @@ export function registerAdminOps(bot) {
     await ctx.answerCallbackQuery();
 
     try {
-      // Send the activity report as a new message rather than editing the
-      // dashboard message; this avoids Telegram edit restrictions.
-      await showAuditLog(ctx, false);
+      const [, statusFilter, auditCursor, target, page, userCursor] = ctx.match;
+      await showAuditLog(ctx, userCursor ?? auditCursor, Boolean(statusFilter || target), target, Number(page || 0));
     } catch (error) {
-      console.error("[admin-ops] activity view failed:", error);
+      console.error("[admin-ops] activity view failed:", safeDiagnosticCode(error));
 
       // Do not answer the same callback query twice. If editing the dashboard
       // fails (or the audit query fails), send a visible fallback message.
       try {
         await ctx.reply(
           adminText(language, "Unable to load admin activity.\nDiagnostic: ", "بارگذاری فعالیت‌های مدیریت ممکن نشد\nجزئیات: ") +
-          String(error?.message || error).slice(0, 700)
+          safeDiagnosticCode(error)
         );
       } catch (replyError) {
-        console.error("[admin-ops] activity fallback reply failed:", replyError);
+        console.error("[admin-ops] activity fallback reply failed:", safeDiagnosticCode(replyError));
       }
     }
   });
@@ -920,10 +1118,10 @@ export function registerAdminOps(bot) {
         }
       }
     } catch (error) {
-      console.error("[admin-ops] core database schema inspection failed:", error);
+      console.error("[admin-ops] core database schema inspection failed:", safeDiagnosticCode(error));
       await ctx.reply(
         adminText(language, "Unable to inspect the core database schema.\nDiagnostic: ", "بررسی ساختار پایگاه داده اصلی ممکن نشد.\nجزئیات: ") +
-        String(error?.message || error).slice(0, 500)
+        safeDiagnosticCode(error)
       );
     }
   });
