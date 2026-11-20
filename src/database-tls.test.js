@@ -3,11 +3,11 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 const source = new URL("./database.js", import.meta.url).href;
-function inspect(mode) {
+function inspect(mode, url = "postgres://user:pass@localhost:5432/test") {
   const script = `import { pool } from ${JSON.stringify(source)}; console.log(JSON.stringify(pool.options.ssl)); await pool.end();`;
   return spawnSync(process.execPath, ["--input-type=module", "-e", script], {
     encoding: "utf8",
-    env: { ...process.env, DATABASE_URL: "postgres://user:pass@localhost:5432/test",
+    env: { ...process.env, DATABASE_URL: url,
       ...(mode === undefined ? { PROFINO_DATABASE_TLS: "" } : { PROFINO_DATABASE_TLS: mode }) }
   });
 }
@@ -29,3 +29,11 @@ test("unknown TLS configuration fails closed", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /PROFINO_DATABASE_TLS must be disabled or verify/);
 });
+
+for (const parameter of ["sslmode=disable", "sslmode=no-verify", "sslrootcert=custom.pem", "sslcert=custom.pem", "sslkey=custom.pem"]) {
+  test("rejects connection URL TLS override: " + parameter, () => {
+    const result = inspect("verify", "postgres://user:pass@localhost:5432/test?" + parameter);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /DATABASE_URL TLS parameters conflict/);
+  });
+}
