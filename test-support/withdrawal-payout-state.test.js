@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { confirmTestnetWithdrawal, submitSimulatedWithdrawal, recoverSimulatedWithdrawals, findUnrecoverableSimulatedWithdrawals } from "./simulated-withdrawal.js";
 
 for (const scenario of [
@@ -59,7 +60,7 @@ for (const lookupResult of [undefined, null, "unknown", 0]) {
     let sent = 0;
     const pool = { async query(sql) {
       assert.match(sql, /FROM simulation_withdrawals/);
-      return { rows: [{ id: "7", hash: "0x" + "a".repeat(64), amount: "1", destination: "0x" + "1".repeat(40), payload: Buffer.from("test") }] };
+      return { rows: [{ id: "7", hash: "0x" + createHash("sha256").update("test").digest("hex"), amount: "1", destination: "0x" + "1".repeat(40), payload: Buffer.from("test") }] };
     } };
     const transport = { hasTransaction: async () => lookupResult, send: async () => { sent++; } };
     await assert.rejects(recoverSimulatedWithdrawals(pool, transport), /indeterminate transaction status/);
@@ -69,8 +70,8 @@ for (const lookupResult of [undefined, null, "unknown", 0]) {
 
 for (const alreadyKnown of [true, false]) {
   test("recovery " + (alreadyKnown ? "skips" : "resends") + " a known-status synthetic transaction", async () => {
-    const hash = "0x" + "a".repeat(64);
     const payload = Buffer.from("synthetic");
+    const hash = "0x" + createHash("sha256").update(payload).digest("hex");
     const sent = [];
     const pool = { async query(sql, params) {
       assert.match(sql, /status = 'pending_receipt'/);
