@@ -14,7 +14,7 @@ function reader(overrides={}) {
 }
 test("reads chain, receipt, canonical block and head before accepting deposit evidence",async()=>{
  const {inspect,calls}=reader();assert.equal((await inspect(tx,"0x0",policy)).eventKey,"bsc:56:"+tx+":0");
- assert.deepEqual(calls,["eth_chainId","eth_getTransactionReceipt","eth_getBlockByNumber","eth_blockNumber"]);
+ assert.deepEqual(calls,["eth_chainId","eth_getTransactionReceipt","eth_getBlockByNumber","eth_blockNumber","eth_getTransactionReceipt"]);
 });
 test("rejects wrong chain and inconsistent canonical block",async()=>{
  await assert.rejects(reader({eth_chainId:"0x1"}).inspect(tx,"0x0",policy));
@@ -23,4 +23,16 @@ test("rejects wrong chain and inconsistent canonical block",async()=>{
 test("rejects insufficient confirmations and malformed RPC endpoint",async()=>{
  await assert.rejects(reader({eth_blockNumber:"0x6e"}).inspect(tx,"0x0",policy));
  assert.throws(()=>createBscDepositEvidenceReader({rpcUrl:"http://rpc.example.org"}));
+});
+
+test("rejects receipt reorganization during RPC inspection",async()=>{
+ let reads=0;
+ const fetchImpl=async(_url,options)=>{
+  const q=JSON.parse(options.body);
+  const values={eth_chainId:"0x38",eth_getBlockByNumber:{hash:bh,number:"0x6d"},eth_blockNumber:"0x78"};
+  const result=q.method==="eth_getTransactionReceipt"?(++reads===1?receipt:{...receipt,blockHash:tx}):values[q.method];
+  return {ok:true,json:async()=>({jsonrpc:"2.0",id:q.id,result})};
+ };
+ const inspect=createBscDepositEvidenceReader({rpcUrl:"https://rpc.example.org",fetchImpl});
+ await assert.rejects(inspect(tx,"0x0",policy),/changed during inspection/);
 });
