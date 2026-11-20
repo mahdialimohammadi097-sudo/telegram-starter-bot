@@ -99,3 +99,28 @@ test("reports numeric precision, deferred constraints, and trigger enabled state
   assert.ok(messages.some(message => message.includes("deferrable: YES | initially deferred: YES | validated: YES")));
   assert.ok(messages.some(message => message.includes("enabled state: O | deferrable: YES | initially deferred: YES")));
 });
+
+test("inspection includes the delegated ledger validator without executing it", async () => {
+  const { inspectCoreSchema } = await import("./database-diagnostics.js");
+  const definition = "CREATE FUNCTION validate_posted_transaction(bigint) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END; $$";
+  const statements = [];
+  const snapshot = await inspectCoreSchema({
+    async query(sql) {
+      statements.push(sql);
+      if (sql.includes("p.proname = 'validate_posted_transaction'")) {
+        return { rows: [{ function_name: "validate_posted_transaction", arguments: "p_transaction_id bigint", function_definition: definition }] };
+      }
+      return { rows: [] };
+    }
+  });
+  assert.ok(statements.every(sql => /^SELECT\b/.test(sql.trim())));
+  assert.ok(formatCoreSchema(snapshot).some(section =>
+    section.includes("LEDGER VALIDATION FUNCTIONS") && section.includes(definition)));
+});
+
+test("reports a missing delegated validator explicitly", async () => {
+  const { inspectCoreSchema } = await import("./database-diagnostics.js");
+  const snapshot = await inspectCoreSchema({ async query() { return { rows: [] }; } });
+  assert.ok(formatCoreSchema(snapshot).some(section =>
+    section.includes("validate_posted_transaction: NOT FOUND")));
+});
