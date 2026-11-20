@@ -6,7 +6,7 @@ export async function openSimulatedInvestment(pool, userId, requestId, selection
   if (!plan) throw new Error("Unsupported plan or amount");
   if (typeof requestId !== "string" || !requestId.trim()) throw new Error("Missing request ID");
   return withLedgerTransaction(pool, async client => {
-    const user = await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
+    const user = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!user.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
       "SELECT id, plan, principal::text FROM simulation_investments WHERE user_id = $1 AND request_id = $2",

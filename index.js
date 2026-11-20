@@ -3,6 +3,7 @@
 
 import { Bot } from "grammy";
 import { registerCommands } from "./src/commands.js";
+import { createStagingSimulationHandlers } from "./src/staging-simulation.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
 import { startScheduler } from "./src/scheduler.js";
 import { ensurePostHistorySchema } from "./src/post-history.js";
@@ -129,7 +130,6 @@ if (mode === "webhook") {
   // stop() confirms the current polling offset. Leave the unconfirmed tail for the next receiver.
   bot.use((_ctx, next) => shuttingDown ? undefined : next());
 }
-registerCommands(bot);
 
 bot.catch((error) => {
   console.error("[bot] update handler error:", safeDiagnosticCode(error?.error ?? error));
@@ -260,6 +260,10 @@ async function main() {
   botUsername = me.username;
   runtimeHealth.setTelegramApiConnected(true);
   console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
+
+  // Never register financial simulation handlers before verifying bot identity and isolated DB.
+  const simulationHandlers = await createStagingSimulationHandlers(pool, process.env, me.username);
+  registerCommands(bot, simulationHandlers);
 
   await sendStartupReport(me.username);
 

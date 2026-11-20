@@ -154,6 +154,39 @@ test("row locks prevent concurrent AVAILABLE overdrafts", {
 });
 
 
+test("opposite concurrent transfers lock accounts consistently without deadlock", { skip: !enabled }, async () => {
+  const accountA = await createAccount("AVAILABLE");
+  const accountB = await createAccount("AVAILABLE");
+  await seedAvailableBalance(accountA, "10");
+  await seedAvailableBalance(accountB, "10");
+  const transfer = (debit, credit, key) => postLedgerTransaction({
+    pool, transactionType: "cross-account-test", idempotencyKey: key,
+    entries: [
+      { account_id: debit, entry_type: "debit", amount: "3", currency: "USDT" },
+      { account_id: credit, entry_type: "credit", amount: "3", currency: "USDT" }
+    ]
+  });
+  const [forward, reverse] = await Promise.all([
+    transfer(accountA, accountB, "opposite-transfer-forward"),
+    transfer(accountB, accountA, "opposite-transfer-reverse")
+  ]);
+  assert.equal(forward.posted, true);
+  assert.equal(reverse.posted, true);
+  assert.notEqual(forward.transactionId, reverse.transactionId);
+  const balances = await pool.query(
+    `SELECT la.id::text AS id,
+            trim_scale(SUM(CASE WHEN le.entry_type = 'credit'
+                                THEN le.amount ELSE -le.amount END))::text AS balance
+       FROM ledger_accounts la
+       JOIN ledger_entries le ON le.account_id = la.id
+       JOIN ledger_transactions lt ON lt.id = le.transaction_id
+      WHERE la.id = ANY($1::bigint[]) AND lt.status = 'posted'
+      GROUP BY la.id`, [[accountA, accountB]]
+  );
+  assert.equal(balances.rowCount, 2);
+  for (const row of balances.rows) assert.equal(row.balance, "10");
+});
+
 test("PostgreSQL rolls back the whole journal when an entry insert fails", {
   skip: !enabled
 }, async () => {
@@ -435,7 +468,7 @@ test("a stored sub-unit balance cannot be silently rounded during posting", {
 });
 
 async function createSimulationWallet(id) {
-  const { rows: [user] } = await pool.query("INSERT INTO users (id) VALUES ($1) RETURNING id", [id]);
+  const { rows: [user] } = await pool.query("INSERT INTO users (id, status) VALUES ($1, 'active') RETURNING id", [id]);
   await pool.query(
     `INSERT INTO ledger_accounts (user_id, account_code, account_type)
      SELECT $1, 'simulation:' || $1::bigint::text || ':' || kind, kind
@@ -1794,7 +1827,7 @@ test("transfer receipts reject a balanced release journal that debits another us
 });
 
 test("one finalized testnet event settles exactly one destination-bound withdrawal", { skip: !enabled }, async () => {
-  const { reserveWithdrawal, confirmTestnetWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const { reserveWithdrawal, submitSimulatedWithdrawal, confirmTestnetWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
   const sample = JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url), "utf8"));
   const owner = await createSimulationWallet(738);
   const { rows: [available] } = await pool.query("SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]);
@@ -1803,6 +1836,18 @@ test("one finalized testnet event settles exactly one destination-bound withdraw
   const reserve = key => reserveWithdrawal(pool, owner, key, "1", sample.expected.recipient);
   const first = await reserve("outbound-1");
   const second = await reserve("outbound-2");
+  const { createHash } = await import("node:crypto");
+  const payloadFor = request => Buffer.from("synthetic-withdrawal:" + request.id);
+  const hashFor = payload => "0x" + createHash("sha256").update(payload).digest("hex");
+  const firstPayload = payloadFor(first);
+  const firstHash = hashFor(firstPayload);
+  sample.expected.txHash = firstHash;
+  sample.observation.receipt.transactionHash = firstHash;
+  for (const log of sample.observation.receipt.logs) log.transactionHash = firstHash;
+  // Both competing requests must have a recorded synthetic submission before a receipt can settle either.
+  await submitSimulatedWithdrawal(pool, first.id, firstHash, async () => {}, firstPayload);
+  const secondPayload = payloadFor(second);
+  await submitSimulatedWithdrawal(pool, second.id, hashFor(secondPayload), async () => {}, secondPayload);
   const confirm = request => confirmTestnetWithdrawal(pool, request.id, sample.observation, sample.expected, treasury);
   const results = await Promise.allSettled([confirm(first), confirm(second)]);
   assert.equal(results.filter(row => row.status === "fulfilled").length, 1);
@@ -1810,8 +1855,8 @@ test("one finalized testnet event settles exactly one destination-bound withdraw
   const loser = winner === first ? second : first;
   assert.equal(await confirm(winner), results.find(row => row.status === "fulfilled").value);
   await assert.rejects(cancelWithdrawal(pool, owner, winner.id), /cannot be cancelled/);
-  await cancelWithdrawal(pool, owner, loser.id);
-  assert.equal((await displayedBalances(owner))[0], "1.00000000");
+  await assert.rejects(cancelWithdrawal(pool, owner, loser.id), /cannot be cancelled/);
+  assert.equal((await displayedBalances(owner))[0], "0.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
 
@@ -1820,7 +1865,9 @@ test("ambiguous simulated broadcast survives retries and settles by the original
     await import("../test-support/simulated-withdrawal.js");
   const sample = JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url), "utf8"));
   // Use a distinct synthetic transaction in the shared fixture database.
-  const txHash = "0x" + "8b".repeat(32);
+  const { createHash } = await import("node:crypto");
+  const payload = Buffer.from("synthetic-ambiguous-broadcast");
+  const txHash = "0x" + createHash("sha256").update(payload).digest("hex");
   sample.expected.txHash = txHash;
   sample.observation.receipt.transactionHash = txHash;
   for (const log of sample.observation.receipt.logs) log.transactionHash = txHash;
@@ -1836,11 +1883,13 @@ test("ambiguous simulated broadcast survives retries and settles by the original
     assert.equal(prepared.txHash, txHash);
     throw new Error("Network reply lost");
   };
-  const submit = () => submitSimulatedWithdrawal(pool, request.id, txHash, send);
+  const submit = () => submitSimulatedWithdrawal(pool, request.id, txHash, send, payload);
   const attempts = await Promise.allSettled([submit(), submit()]);
   assert.equal(attempts.filter(r => r.status === "rejected" && r.reason.message === "Network reply lost").length, 1);
   assert.equal(await submit(), txHash);
-  await assert.rejects(submitSimulatedWithdrawal(pool, request.id, "0x" + "9c".repeat(32), send), /mismatch/);
+  const conflictingPayload = Buffer.from("conflicting-synthetic-broadcast");
+  const conflictingHash = "0x" + createHash("sha256").update(conflictingPayload).digest("hex");
+  await assert.rejects(submitSimulatedWithdrawal(pool, request.id, conflictingHash, send, conflictingPayload), /mismatch/);
   assert.equal(broadcasts, 1);
   await assert.rejects(cancelWithdrawal(pool, owner, request.id), /cannot be cancelled/);
   const balances = await getWalletBalances(pool, owner);
@@ -1872,7 +1921,9 @@ test("restarted simulation recovers the exact saved payload after a pre-send sto
   const accepted = new Set();
   let calls = 0;
   const transport = {
-    hasTransaction: async key => accepted.has(key),
+    // Earlier integration fixtures can leave other pending synthetic payouts.
+    // This test must only exercise its own request, not resend unrelated fixtures.
+    hasTransaction: async key => key !== hash || accepted.has(key),
     async send(prepared) {
       assert.deepEqual(prepared.payload, payload);
       assert.equal(prepared.txHash, hash);
@@ -1898,5 +1949,342 @@ test("restarted simulation recovers the exact saved payload after a pre-send sto
   assert.equal(await settle(), await settle());
   assert.equal(formatUsdt((await getWalletBalances(pool, owner)).WITHDRAWAL_HOLD), "0.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
-  await recoverSimulatedWithdrawals(pool, { hasTransaction: () => assert.fail("Settled payout was rescanned") });
+  await recoverSimulatedWithdrawals(pool, {
+    hasTransaction: key => key !== hash ? true : assert.fail("Settled payout was rescanned"),
+    send: () => assert.fail("Settled payout was resent")
+  });
+});
+
+
+test("extended withdrawal rejects blocked customers and suspended reviewers", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1701);
+  const reviewer = await createSimulationWallet(1702);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "12");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const destination = "0x1111111111111111111111111111111111111111";
+  const request = await reserveWithdrawal(pool, customer, "auth-extended-1", "5", destination);
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [customer]);
+  await assert.rejects(
+    reserveWithdrawal(pool, customer, "auth-extended-1", "5", destination), /Unknown user/
+  );
+  await assert.rejects(
+    reserveWithdrawal(pool, customer, "auth-extended-2", "1", destination), /Unknown user/
+  );
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [reviewer]);
+  await assert.rejects(
+    cancelAsSimulationReviewer(pool, reviewer, request.id), /Unauthorized simulation reviewer/
+  );
+  const { rows: [hold] } = await pool.query(
+    "SELECT status, destination FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(hold.status, "reserved");
+  assert.equal(hold.destination, destination);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "7.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+
+
+test("revoking reviewer grant prevents destination-bound hold release", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer, cancelWithdrawal } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1711);
+  const reviewer = await createSimulationWallet(1712);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "11");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const destination = "0x2222222222222222222222222222222222222222";
+  const request = await reserveWithdrawal(pool, customer, "revoked-grant-1", "4", destination);
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  await assert.rejects(
+    cancelAsSimulationReviewer(pool, reviewer, request.id), /Unauthorized simulation reviewer/
+  );
+  const { rows: [before] } = await pool.query(
+    "SELECT status, release_id, destination FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(before.status, "reserved");
+  assert.equal(before.release_id, null);
+  assert.equal(before.destination, destination);
+  const released = await cancelWithdrawal(pool, customer, request.id);
+  assert.equal(await cancelWithdrawal(pool, customer, request.id), released);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "11.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+
+test("reviewer read access ends immediately after grant revocation", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, simulationWithdrawalReview } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1721);
+  const reviewer = await createSimulationWallet(1722);
+  const telegramId = 981722;
+  await pool.query("UPDATE users SET telegram_id = $2 WHERE id = $1", [reviewer, telegramId]);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "8");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(
+    pool, customer, "reviewer-read-1", "3", "0x3333333333333333333333333333333333333333"
+  );
+  const review = simulationWithdrawalReview(pool);
+  assert.equal((await review.list(telegramId, 0)).holds.some(x => String(x.id) === String(request.id)), true);
+  assert.equal((await review.inspect(telegramId, request.id)).status, "reserved");
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  assert.equal((await review.list(telegramId, 0)).holds.length, 0);
+  assert.equal(await review.inspect(telegramId, request.id), undefined);
+  await assert.rejects(review.release(telegramId, request.id), /Unauthorized simulation reviewer/);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "3.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+
+test("blocking a reviewer revokes extended withdrawal read and release access", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, simulationWithdrawalReview, cancelWithdrawal } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1731);
+  const reviewer = await createSimulationWallet(1732);
+  const telegramId = 981732;
+  await pool.query("UPDATE users SET telegram_id = $2 WHERE id = $1", [reviewer, telegramId]);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "9");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(
+    pool, customer, "blocked-reviewer-read-1", "4", "0x4444444444444444444444444444444444444444"
+  );
+  const review = simulationWithdrawalReview(pool);
+  assert.equal((await review.inspect(telegramId, request.id)).status, "reserved");
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [reviewer]);
+  assert.deepEqual((await review.list(telegramId, 0)).holds, []);
+  assert.equal(await review.inspect(telegramId, request.id), undefined);
+  await assert.rejects(review.release(telegramId, request.id), /Unauthorized simulation reviewer/);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "4.00000000");
+  const released = await cancelWithdrawal(pool, customer, request.id);
+  assert.equal(await cancelWithdrawal(pool, customer, request.id), released);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "9.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+
+test("concurrent customer and reviewer cancellations release one extended hold", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1741);
+  const reviewer = await createSimulationWallet(1742);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "10");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const destination = "0x5555555555555555555555555555555555555555";
+  const request = await reserveWithdrawal(pool, customer, "concurrent-release-1", "6", destination);
+  const [customerRelease, reviewerRelease] = await Promise.all([
+    cancelWithdrawal(pool, customer, request.id),
+    cancelAsSimulationReviewer(pool, reviewer, request.id)
+  ]);
+  assert.equal(String(customerRelease), String(reviewerRelease));
+  const { rows: [final] } = await pool.query(
+    "SELECT status, release_id, destination FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(final.status, "cancelled");
+  assert.equal(String(final.release_id), String(customerRelease));
+  assert.equal(final.destination, destination);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "10.00000000");
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "0.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+
+test("reviewer revocation committed before release cannot move a destination-bound hold", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer, cancelWithdrawal } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1751);
+  const reviewer = await createSimulationWallet(1752);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "13");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(
+    pool, customer, "revoke-before-release-1", "5", "0x6666666666666666666666666666666666666666"
+  );
+  const revoker = await pool.connect();
+  try {
+    await revoker.query("BEGIN");
+    await revoker.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+    await revoker.query("COMMIT");
+  } catch (error) {
+    await revoker.query("ROLLBACK");
+    throw error;
+  } finally {
+    revoker.release();
+  }
+  const results = await Promise.allSettled([
+    cancelAsSimulationReviewer(pool, reviewer, request.id),
+    cancelAsSimulationReviewer(pool, reviewer, request.id)
+  ]);
+  assert.equal(results.every(x => x.status === "rejected" && /Unauthorized simulation reviewer/.test(x.reason.message)), true);
+  const { rows: [held] } = await pool.query(
+    "SELECT status, release_id FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(held.status, "reserved");
+  assert.equal(held.release_id, null);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "5.00000000");
+  await cancelWithdrawal(pool, customer, request.id);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "13.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+
+test("in-flight reviewer release serializes with revocation of its grant", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } =
+    await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(1761);
+  const reviewer = await createSimulationWallet(1762);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "14");
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const request = await reserveWithdrawal(
+    pool, customer, "inflight-revoke-1", "6", "0x7777777777777777777777777777777777777777"
+  );
+  const revoker = await pool.connect();
+  let release;
+  try {
+    await revoker.query("BEGIN");
+    await revoker.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+    let settled = false;
+    release = cancelAsSimulationReviewer(pool, reviewer, request.id).then(
+      value => { settled = true; return { status: "fulfilled", value }; },
+      reason => { settled = true; return { status: "rejected", reason }; }
+    );
+    await revoker.query("SELECT pg_sleep(0.15)");
+    assert.equal(settled, false, "release must wait for reviewer grant lock");
+    await revoker.query("COMMIT");
+  } catch (error) {
+    await revoker.query("ROLLBACK");
+    if (release) await release;
+    throw error;
+  } finally {
+    revoker.release();
+  }
+  const outcome = await release;
+  assert.equal(outcome.status, "rejected");
+  assert.match(outcome.reason.message, /Unauthorized simulation reviewer/);
+  const { rows: [held] } = await pool.query(
+    "SELECT status, release_id FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(held.status, "reserved");
+  assert.equal(held.release_id, null);
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).AVAILABLE), "8.00000000");
+  assert.equal(formatUsdt((await getWalletBalances(pool, customer)).WITHDRAWAL_HOLD), "6.00000000");
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+test("staging Telegram adapters complete synthetic investment and withdrawal lifecycle", { skip: !enabled }, async () => {
+  const { createStagingSimulationHandlers } = await import("./staging-simulation.js");
+  const owner = await createSimulationWallet(8950);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  await seedAvailableBalance(available.id, "50");
+  const isolated = {
+    query(sql, params) {
+      if (sql.includes("current_setting('profino.environment'")) {
+        return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] });
+      }
+      return pool.query(sql, params);
+    },
+    connect: () => pool.connect()
+  };
+  const handlers = await createStagingSimulationHandlers(isolated, {
+    PROFINO_SIMULATION_MODE: "isolated-staging",
+    PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot",
+    PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot");
+  const investmentId = await handlers.openTestInvestment(owner, "telegram-staging-investment", "STARTER 10");
+  assert.equal(await handlers.openTestInvestment(owner, "telegram-staging-investment", "STARTER 10"), investmentId);
+  const hold = await handlers.reserveTestWithdrawal(owner, "telegram-staging-withdraw", "15");
+  assert.equal(String((await handlers.listTestHolds(owner))[0].id), String(hold.id));
+  const journal = await handlers.cancelTestWithdrawal(owner, hold.id);
+  assert.equal(await handlers.cancelTestWithdrawal(owner, hold.id), journal);
+  assert.equal((await handlers.listTestHolds(owner)).length, 0);
+  assert.deepEqual(await displayedBalances(owner), ["40.00000000", "10.00000000", "0.00000000", "0.00000000"]);
+});
+
+test("staging reviewer releases synthetic withdrawal once and revoked reviewer cannot repeat", { skip: !enabled }, async () => {
+  const { createStagingSimulationHandlers } = await import("./staging-simulation.js");
+  const customer = await createSimulationWallet(8951);
+  const reviewer = await createSimulationWallet(8952);
+  const reviewerTelegram = "9989512";
+  await pool.query("UPDATE users SET telegram_id = $2 WHERE id = $1", [reviewer, reviewerTelegram]);
+  await pool.query("INSERT INTO simulation_reviewers (user_id, active) VALUES ($1, true)", [reviewer]);
+  const { rows: [wallet] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(wallet.id, "25");
+  const isolated = {
+    query(sql, params) {
+      if (sql.includes("current_setting('profino.environment'")) {
+        return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] });
+      }
+      return pool.query(sql, params);
+    },
+    connect: () => pool.connect()
+  };
+  const handlers = await createStagingSimulationHandlers(isolated, {
+    PROFINO_SIMULATION_MODE: "isolated-staging",
+    PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot",
+    PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot");
+  const hold = await handlers.reserveTestWithdrawal(customer, "telegram-review-release", "8");
+  const queue = await handlers.testWithdrawalReview.list(reviewerTelegram, "0");
+  assert.ok(queue.holds.some(row => String(row.id) === String(hold.id)));
+  assert.equal((await handlers.testWithdrawalReview.inspect(reviewerTelegram, hold.id)).status, "reserved");
+  const release = await handlers.testWithdrawalReview.release(reviewerTelegram, hold.id);
+  assert.ok(release);
+  assert.equal((await handlers.testWithdrawalReview.inspect(reviewerTelegram, hold.id)).status, "cancelled");
+  assert.deepEqual(await displayedBalances(customer), ["25.00000000", "0.00000000", "0.00000000", "0.00000000"]);
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [reviewer]);
+  assert.deepEqual((await handlers.testWithdrawalReview.list(reviewerTelegram, "0")).holds, []);
+  await assert.rejects(handlers.testWithdrawalReview.release(reviewerTelegram, hold.id), /Unauthorized/);
+});
+
+test("isolated withdrawal fixture enforces all four states and payout linkage", { skip: !enabled }, async () => {
+  const { rows: [catalog] } = await pool.query(`
+    SELECT
+      (SELECT count(*) = 6 FROM pg_attribute
+       WHERE attrelid = 'simulation_withdrawals'::regclass
+         AND attname IN ('submitted_hash', 'simulation_payload', 'destination',
+                         'payout_event', 'payout_id', 'clearing_id')
+         AND attnum > 0 AND NOT attisdropped) AS extended_columns,
+      EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'simulation_withdrawals'::regclass
+          AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%pending_receipt%'
+      ) AS payout_state_constraint
+  `);
+  assert.equal(catalog.extended_columns, true);
+  assert.equal(catalog.payout_state_constraint, true);
+  const { rows: [statuses] } = await pool.query(`
+    SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+    WHERE conrelid = 'simulation_withdrawals'::regclass
+      AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%pending_receipt%'
+      AND pg_get_constraintdef(oid) LIKE '%cancelled%'
+      AND pg_get_constraintdef(oid) LIKE '%paid%'
+    LIMIT 1
+  `);
+  assert.ok(statuses, "withdrawal status constraint must retain all four lifecycle states");
 });

@@ -1,8 +1,11 @@
+import { registerOwnerRehearsal } from "./owner-rehearsal.js";
 import { listPreviewPlans, settlementExamples } from "./plan-preview.js";
 import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 
 import { InlineKeyboard, Keyboard } from "grammy";
 import { randomBytes } from "node:crypto";
+import { simulationRequestKey } from "./simulation-idempotency.js";
+import { isPrivateSimulationChat } from "./simulation-chat-safety.js";
 import { pool } from "./database.js";
 import { getWalletBalances, getSimulationReceipt, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt, toUsdtUnitsExact } from "./ledger-safety.js";
@@ -196,9 +199,14 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
     return next();
   });
 
+  registerOwnerRehearsal(bot, { productionPool: pool, ownerId: ADMIN_ID, getLanguage: getAdminLanguage });
+
   // Only the offline test harness supplies a simulation writer.
   if (openTestInvestment) {
     bot.callbackQuery(/^sim_open:([A-Z]+):(\d+)$/, async ctx => {
+      if (!isPrivateSimulationChat(ctx)) {
+        return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
+      }
       const [, name, amount] = ctx.match;
       if (!settlementExamples(name).some(example => example.amount === amount) || !ctx.callbackQuery.message) {
         return ctx.answerCallbackQuery({ text: "Invalid simulation selection.", show_alert: true });
@@ -207,7 +215,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         "SELECT id FROM users WHERE telegram_id = $1 AND status = 'active'", [ctx.from.id]
       );
       if (!user) return ctx.answerCallbackQuery({ text: "Send /start first.", show_alert: true });
-      const key = "telegram-preview:" + ctx.callbackQuery.message.message_id;
+      const key = simulationRequestKey("investment", user.id, ctx.callbackQuery.message.message_id);
       await ctx.answerCallbackQuery();
       try {
         const id = await openTestInvestment(user.id, key, name + " " + amount);
@@ -223,6 +231,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
   if (reserveTestWithdrawal) {
     bot.command("testwithdraw", async ctx => {
+      if (!isPrivateSimulationChat(ctx)) {
+        return ctx.reply("Use the staging bot in a private chat for test withdrawals.");
+      }
       const amount = ctx.match.trim();
       if (!/^\d{1,18}(?:\.\d{1,8})?$/.test(amount) || toUsdtUnitsExact(amount) === 0n) {
         return ctx.reply("Use /testwithdraw followed by a positive test USDT amount with up to 8 decimal places.");
@@ -234,6 +245,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       });
     });
     bot.callbackQuery(/^sim_hold:([1-9]\d{0,9}):(\d{1,18}\.\d{8})$/, async ctx => {
+      if (!isPrivateSimulationChat(ctx)) {
+        return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
+      }
       await ctx.answerCallbackQuery();
       try {
         const { rows: [user] } = await pool.query(
@@ -241,7 +255,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         );
         if (!user) return ctx.reply("Send /start first.");
         const [, messageId, amount] = ctx.match;
-        const request = await reserveTestWithdrawal(user.id, "telegram-withdraw:" + messageId, amount);
+        const request = await reserveTestWithdrawal(user.id, simulationRequestKey("withdrawal", user.id, messageId), amount);
         return ctx.reply("Simulated withdrawal #" + request.id + " is " + request.status + ".", {
           reply_markup: new Keyboard().text("Withdraw").text("My Wallet").row().text("⬅ Main Menu").resized()
         });
@@ -255,6 +269,9 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
 
   if (cancelTestWithdrawal) {
     bot.callbackQuery(/^sim_cancel_hold:([1-9]\d{0,18})$/, async ctx => {
+      if (!isPrivateSimulationChat(ctx)) {
+        return ctx.answerCallbackQuery({ text: "Open the staging bot in a private chat.", show_alert: true });
+      }
       await ctx.answerCallbackQuery();
       try {
         const { rows: [user] } = await pool.query(
@@ -788,7 +805,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       const keyboard = new Keyboard();
       const terms = listPreviewPlans().map(plan => {
         keyboard.text("Preview " + plan.name).row();
-        return plan.name + " · " + plan.days + " days";
+        return plan.name + " · " + plan.days + " days · " + plan.profitPercent + "% example profit · " + plan.feePercent + "% settlement fee";
       });
       keyboard.text("⬅ Main Menu").resized();
       return ctx.reply(["INVESTMENT PLANS · SIMULATION", ...terms,

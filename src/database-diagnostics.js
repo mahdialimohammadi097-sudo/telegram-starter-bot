@@ -27,7 +27,7 @@ const CORE_TABLES = [
 ];
 
 export async function inspectCoreSchema(pool) {
-  const [inventoryResult, tablesResult, columnsResult, constraintsResult, indexesResult, triggersResult] = await Promise.all([
+  const [inventoryResult, tablesResult, columnsResult, constraintsResult, indexesResult, triggersResult, ledgerValidatorResult] = await Promise.all([
     pool.query(
       `SELECT table_name
        FROM information_schema.tables
@@ -92,6 +92,17 @@ export async function inspectCoreSchema(pool) {
        WHERE n.nspname = current_schema()
          AND NOT t.tgisinternal
        ORDER BY c.relname, t.tgname`
+    ),
+    pool.query(
+      `SELECT p.proname AS function_name,
+              pg_get_function_identity_arguments(p.oid) AS arguments,
+              pg_get_functiondef(p.oid) AS function_definition
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = current_schema()
+         AND p.proname = 'validate_posted_transaction'
+         AND p.prokind = 'f'
+       ORDER BY p.oid`
     )
   ]);
 
@@ -102,7 +113,8 @@ export async function inspectCoreSchema(pool) {
     columns: columnsResult.rows,
     constraints: constraintsResult.rows,
     indexes: indexesResult.rows,
-    triggers: triggersResult.rows
+    triggers: triggersResult.rows,
+    ledgerValidators: ledgerValidatorResult.rows
   };
 }
 
@@ -179,6 +191,15 @@ export function formatCoreSchema(snapshot) {
     );
   } else {
     sections.push("DATABASE TRIGGERS\nNo user-defined triggers found");
+  }
+
+  if (snapshot.ledgerValidators) {
+    sections.push("LEDGER VALIDATION FUNCTIONS\n" +
+      (snapshot.ledgerValidators.length
+        ? snapshot.ledgerValidators.map(row =>
+          row.function_name + "(" + row.arguments + ")\n" + row.function_definition
+        ).join("\n\n")
+        : "validate_posted_transaction: NOT FOUND in current schema"));
   }
 
   return sections;

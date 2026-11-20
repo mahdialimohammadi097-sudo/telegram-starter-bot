@@ -23,7 +23,7 @@ export async function reserveWithdrawal(pool, userId, key, amount, destination =
   destination = destination?.toLowerCase() ?? null;
   const normalized = formatUsdt(amount);
   return withLedgerTransaction(pool, async client => {
-    const owner = await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
+    const owner = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!owner.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
       "SELECT id, amount, status, destination FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
@@ -81,7 +81,10 @@ export async function cancelAsSimulationReviewer(pool, reviewerId, id) {
 
 async function releaseAsReviewer(client, reviewerId, id) {
   const reviewer = await client.query(
-    "SELECT user_id FROM simulation_reviewers WHERE user_id = $1 AND active FOR SHARE", [reviewerId]
+    `SELECT r.user_id FROM simulation_reviewers r
+     JOIN users u ON u.id = r.user_id
+     WHERE r.user_id = $1 AND r.active AND u.status = 'active'
+     FOR SHARE OF r, u`, [reviewerId]
   );
   if (!reviewer.rowCount) throw new Error("Unauthorized simulation reviewer");
   const { rows: [request] } = await client.query(
@@ -143,15 +146,19 @@ export function simulationWithdrawalReview(pool) {
 // The offline caller supplies a prepared transaction hash and a fake transport.
 // Commit the claim before submission: an ambiguous response can only be reconciled by hash.
 export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload = null) {
-  if (payload !== null) {
-    // Synthetic transport identity only. There is no chain signer in this harness.
-    if (!Buffer.isBuffer(payload) || payload.length === 0 ||
-        "0x" + createHash("sha256").update(payload).digest("hex") !== txHash) {
-      throw new Error("Simulation payload hash mismatch");
-    }
+  // Reject invalid transports before persisting an irreversible submission claim.
+  if (typeof send !== "function") throw new Error("Simulation transport sender required");
+  // Every persisted submission must be replayable after a crash. A null payload
+  // would be excluded from recovery and leave a pending receipt indefinitely.
+  if (!Buffer.isBuffer(payload) || payload.length === 0) {
+    throw new Error("Simulation submission requires a nonempty recovery payload");
   }
   if (typeof txHash !== "string" || !/^0x[0-9a-f]{64}$/i.test(txHash)) throw new Error("Invalid transaction hash");
   const hash = txHash.toLowerCase();
+  // Synthetic transport identity only. There is no chain signer in this harness.
+  if ("0x" + createHash("sha256").update(payload).digest("hex") !== hash) {
+    throw new Error("Simulation payload hash mismatch");
+  }
   const claim = await pool.query(
     `UPDATE simulation_withdrawals SET status = 'pending_receipt', submitted_hash = $2, simulation_payload = $3
      WHERE id = $1 AND destination IS NOT NULL AND status = 'reserved'
@@ -171,13 +178,26 @@ export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload 
 // After a restart, process a bounded page. The transport must deduplicate identical
 // payloads by hash, including if lookup lags or a previous submit lost its reply.
 export async function recoverSimulatedWithdrawals(pool, transport, afterId = "0") {
+  if (!transport || typeof transport.hasTransaction !== "function" || typeof transport.send !== "function") {
+    throw new Error("Simulation recovery requires a queryable, send-capable transport");
+  }
   const { rows } = await pool.query(
     `SELECT id, submitted_hash AS hash, amount, destination, simulation_payload AS payload
      FROM simulation_withdrawals WHERE status = 'pending_receipt' AND simulation_payload IS NOT NULL
+       AND octet_length(simulation_payload) > 0
        AND id > $1 ORDER BY id LIMIT 50`, [afterId]
   );
   for (const request of rows) {
+    // Never replay a persisted payload whose identity no longer matches its claim.
+    if (!Buffer.isBuffer(request.payload) || request.payload.length === 0 ||
+        typeof request.hash !== "string" ||
+        "0x" + createHash("sha256").update(request.payload).digest("hex") !== request.hash.toLowerCase()) {
+      throw new Error("Simulation recovery payload hash mismatch");
+    }
     const known = await transport.hasTransaction(request.hash);
+    if (typeof known !== "boolean") {
+      throw new Error("Simulation transport returned an indeterminate transaction status");
+    }
     if (known === false) {
       await transport.send({ txHash: request.hash, amount: request.amount, destination: request.destination, payload: request.payload });
     }
@@ -191,6 +211,10 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
       "SELECT * FROM simulation_withdrawals WHERE id = $1 FOR UPDATE", [id]
     );
     if (!request?.destination || request.status === "cancelled") throw new Error("No payable withdrawal");
+    if (request.status !== "pending_receipt" && request.status !== "paid") {
+      throw new Error("Withdrawal must be submitted before receipt confirmation");
+    }
+    if (!request.submitted_hash) throw new Error("Withdrawal submission hash missing");
     const { event } = readTestnetWithdrawalReceipt(observation, expected, {
       sender: treasury.sender, recipient: request.destination, amount: request.amount
     });
@@ -211,4 +235,19 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
     );
     return journal.transactionId;
   });
+}
+
+// Read-only diagnostic for legacy submissions that cannot be safely replayed.
+// Operators must reconcile these manually; never fabricate a missing payload.
+export async function findUnrecoverableSimulatedWithdrawals(pool, limit = 50) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new TypeError("Invalid diagnostic page size");
+  }
+  const { rows } = await pool.query(
+    `SELECT id, submitted_hash AS hash FROM simulation_withdrawals
+     WHERE status = 'pending_receipt'
+       AND (simulation_payload IS NULL OR octet_length(simulation_payload) = 0)
+     ORDER BY id LIMIT $1`, [limit]
+  );
+  return rows;
 }

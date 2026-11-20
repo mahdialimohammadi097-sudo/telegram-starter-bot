@@ -62,3 +62,10 @@ test("admin status confirmation rejects stale, repeated, and unknown transitions
   assert.equal(isConfirmationCurrent("active", "active", "active"), false);
   assert.equal(isConfirmationCurrent("deleted", "deleted", "active"), false);
 });
+
+test("exact USDT parsing rejects unsafe JavaScript numbers but preserves decimal strings", () => {
+  assert.throws(() => toUsdtUnitsExact(Number.MAX_SAFE_INTEGER + 1), /Unsafe numeric USDT/);
+  assert.throws(() => toUsdtUnitsExact(Infinity), /Unsafe numeric USDT/);
+  assert.throws(() => toUsdtUnitsExact(NaN), /Unsafe numeric USDT/);
+  assert.equal(toUsdtUnitsExact("9007199254740992"), 900719925474099200000000n);
+});
