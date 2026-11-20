@@ -1,0 +1,477 @@
+name: FadeHost MCP Read-Only Connectivity Test
+
+on:
+  push:
+    branches:
+      - test/fadehost-mcp-readonly-connection
+    paths:
+      - .github/workflows/fadehost-mcp-connectivity.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fadehost-mcp-connectivity.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify FadeHost MCP initialize (no server changes)
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FADEHOST_TOKEN:-}" ]; then
+            echo "::error::FADEHOST_TOKEN secret is missing or empty."
+            exit 1
+          fi
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          http_status="$(curl --silent --show-error --max-time 25 \
+            --output "$response_file" --write-out '%{http_code}' \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"PROFINO GitHub connectivity check","version":"1.0"}}}' \
+            )" || { echo "::error::Could not reach FadeHost MCP."; exit 1; }
+          echo "FadeHost MCP HTTP status: $http_status"
+          if [ "$http_status" != "200" ]; then
+            echo "::error::MCP initialize failed (HTTP $http_status). Response withheld to protect sensitive data."
+            exit 1
+          fi
+          python3 - "$response_file" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              body = f.read()
+          messages = []
+          try:
+              messages.append(json.loads(body))
+          except json.JSONDecodeError:
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try:
+                          messages.append(json.loads(line[6:]))
+                      except json.JSONDecodeError:
+                          pass
+          if any(isinstance(msg, dict) and msg.get("id") == 1 and isinstance(msg.get("result"), dict) and "protocolVersion" in msg["result"] for msg in messages):
+              print("PASS: FadeHost MCP authenticated and initialized successfully (read-only handshake).")
+          else:
+              print("FAIL: No valid MCP initialize response. Response content withheld.")
+              sys.exit(1)
+          PY
+
+      - name: Discover available FadeHost read-only tools (names only)
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          status="$(curl --silent --show-error --max-time 25 --output "$response_file" --write-out '%{http_code}' \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')" || { echo "::error::FadeHost tools/list request failed."; exit 1; }
+          echo "FadeHost tools/list HTTP status: $status"
+          if [ "$status" != "200" ]; then
+            echo "::error::Tool discovery returned HTTP $status (response withheld)."
+            exit 1
+          fi
+          python3 - "$response_file" <<'PY'
+          import json, sys
+          body = open(sys.argv[1], encoding="utf-8").read()
+          messages = []
+          try:
+              messages.append(json.loads(body))
+          except json.JSONDecodeError:
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try:
+                          messages.append(json.loads(line[6:]))
+                      except json.JSONDecodeError:
+                          pass
+          results = [m.get("result") for m in messages if isinstance(m, dict) and m.get("id") == 2]
+          if not results or not isinstance(results[0], dict) or not isinstance(results[0].get("tools"), list):
+              print("FAIL: No valid MCP tools/list response; content withheld.")
+              sys.exit(1)
+          names = [t.get("name", "") for t in results[0]["tools"] if isinstance(t, dict)]
+          print("PASS: MCP tools/list returned", len(names), "tools.")
+          for name in sorted(names):
+              if name.startswith(("list_", "get_")):
+                  print("Read-only candidate:", name)
+          PY
+
+      - name: Read bot inventory safely (no secrets or configuration output)
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          tools_file="$(mktemp)"
+          result_file="$(mktemp)"
+          trap 'rm -f "$tools_file" "$result_file"' EXIT
+          curl --fail --silent --show-error --max-time 25 --output "$tools_file" \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+          python3 - "$tools_file" <<'PY'
+          import json,sys
+          body=open(sys.argv[1],encoding="utf-8").read()
+          events=[]
+          try: events=[json.loads(body)]
+          except json.JSONDecodeError:
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try: events.append(json.loads(line[6:]))
+                      except json.JSONDecodeError: pass
+          tools=[t for e in events if isinstance(e,dict) for t in e.get("result",{}).get("tools",[]) if t.get("name")=="list_bots"]
+          if len(tools)!=1:
+              print("FAIL: list_bots tool unavailable");sys.exit(1)
+          required=tools[0].get("inputSchema",{}).get("required",[])
+          if required:
+              print("SKIP: list_bots requires arguments; no automatic call made.")
+              sys.exit(0)
+          print("PASS: list_bots accepts an empty argument object.")
+          for candidate in ("list_app_deployments","get_bot_logs","get_live_stats"):
+              matches=[t for e in events if isinstance(e,dict) for t in e.get("result",{}).get("tools",[]) if t.get("name")==candidate]
+              if matches:
+                  schema=matches[0].get("inputSchema",{})
+                  print("READ-ONLY TOOL SCHEMA:",candidate,"required:",schema.get("required",[]),"properties:",sorted(schema.get("properties",{}).keys()))
+                  for key, spec in schema.get("properties",{}).items():
+                      if isinstance(spec,dict):
+                          print("TOOL ARGUMENT:",candidate,key,"type:",spec.get("type"),"description:",str(spec.get("description",""))[:180])
+          PY
+          curl --fail --silent --show-error --max-time 25 --output "$result_file" \
+            --request POST 'https://api.fadehost.com/mcp' \
+            --header "Authorization: Bearer ${FADEHOST_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_bots","arguments":{}}}'
+          python3 - "$result_file" <<'PY'
+          import json,sys
+          body=open(sys.argv[1],encoding="utf-8").read()
+          events=[]
+          try: events=[json.loads(body)]
+          except json.JSONDecodeError:
+              for line in body.splitlines():
+                  if line.startswith("data: "):
+                      try: events.append(json.loads(line[6:]))
+                      except json.JSONDecodeError: pass
+          matches=[e for e in events if isinstance(e,dict) and e.get("id")==3]
+          if not matches or "error" in matches[0] or matches[0].get("result",{}).get("isError"):
+              print("FAIL: list_bots call returned an error (details withheld).");sys.exit(1)
+          result=matches[0].get("result",{})
+          payloads=[]
+          for item in result.get("content",[]):
+              if item.get("type")=="text":
+                  try: payloads.append(json.loads(item.get("text","")))
+                  except json.JSONDecodeError: pass
+          if isinstance(result.get("structuredContent"), (dict,list)):
+              payloads.append(result["structuredContent"])
+          if not payloads:
+              print("DIAGNOSTIC: MCP response envelope keys:", sorted(result.keys()))
+              print("DIAGNOSTIC: MCP content types:", [item.get("type") for item in result.get("content",[]) if isinstance(item,dict)])
+              print("DIAGNOSTIC: MCP structuredContent present:", "structuredContent" in result)
+              print("DIAGNOSTIC: MCP tool isError:", result.get("isError",False))
+              print("PASS: list_bots MCP call completed; inventory structure not recognized.")
+              sys.exit(0)
+          def scan(value):
+              if isinstance(value,list):
+                  for v in value: scan(v)
+              elif isinstance(value,dict):
+                  if value.get("name")=="telegram-bot":
+                      print("PROFINO bot found: yes")
+                      print("PROFINO bot field names:", sorted(value.keys()))
+                      for key in ("status","state","power_state"):
+                          if isinstance(value.get(key),str) and value[key] in ("running","online","offline","stopped","starting","sleeping","error"):
+                              print("PROFINO bot",key+":",value[key])
+                  for key in ("bots","data","items","results"):
+                      if key in value: scan(value[key])
+          print("DIAGNOSTIC: inventory parsed payload types:", [type(x).__name__ for x in payloads])
+          for payload in payloads:
+              if isinstance(payload,dict):
+                  print("DIAGNOSTIC: inventory top-level keys:", sorted(payload.keys()))
+          scan(payloads)
+          print("PASS: list_bots read-only request completed; sensitive fields withheld.")
+          PY
+
+
+      - name: Audit FadeHost permissions and PROFINO deployment (read-only)
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          endpoint="https://api.fadehost.com/mcp"
+          token=os.environ["FADEHOST_TOKEN"]
+          def rpc(method,params,ident):
+              body=json.dumps({"jsonrpc":"2.0","id":ident,"method":method,"params":params})
+              p=subprocess.run(["curl","--silent","--show-error","--max-time","25","--request","POST",endpoint,
+                  "--header","Authorization: Bearer "+token,"--header","Content-Type: application/json",
+                  "--header","Accept: application/json, text/event-stream","--data-binary","@-"],
+                  input=body,text=True,capture_output=True,timeout=30)
+              if p.returncode:
+                  print("FAIL: MCP transport error (details withheld)");sys.exit(1)
+              try: events=[json.loads(p.stdout)]
+              except json.JSONDecodeError:
+                  events=[]
+                  for line in p.stdout.splitlines():
+                      if line.startswith("data: "):
+                          try: events.append(json.loads(line[6:]))
+                          except json.JSONDecodeError: pass
+              matches=[e for e in events if isinstance(e,dict) and e.get("id")==ident]
+              if not matches or "error" in matches[0]:
+                  print("FAIL: MCP response error (details withheld)");sys.exit(1)
+              return matches[0].get("result",{})
+          def call(name,args,ident):
+              result=rpc("tools/call",{"name":name,"arguments":args},ident)
+              if result.get("isError"):
+                  print("SKIP:",name,"returned an application error (details withheld)")
+                  return None
+              payload=result.get("structuredContent")
+              if payload is None:
+                  for item in result.get("content",[]):
+                      if item.get("type")=="text":
+                          try: payload=json.loads(item.get("text",""))
+                          except json.JSONDecodeError: pass
+              return payload
+          tools=rpc("tools/list",{},20).get("tools",[])
+          names={t.get("name") for t in tools}
+          print("MCP available tool count:",len(names))
+          for t in tools:
+              n=t.get("name","")
+              if any(word in n for word in ("database","network","private","postgres","bot","app","server","vps")):
+                  schema=t.get("inputSchema",{})
+                  print("Relevant tool:",n,"required:",schema.get("required",[]))
+          inventory=call("list_bots",{},21)
+          bots=inventory.get("bots",[]) if isinstance(inventory,dict) else inventory if isinstance(inventory,list) else []
+          matches=[b for b in bots if isinstance(b,dict) and b.get("name")=="telegram-bot"]
+          if not matches:
+              print("FAIL: PROFINO bot not found in inventory");sys.exit(1)
+          bot=matches[0]
+          print("PROFINO bot found: yes")
+          print("PROFINO bot status:",bot.get("status","unknown"))
+          bot_id=bot.get("id")
+          if not isinstance(bot_id,str) or not bot_id.startswith("bot_"):
+              print("FAIL: PROFINO internal ID missing");sys.exit(1)
+          print("PROFINO internal bot ID verified: yes (value withheld)")
+          for key in ("repo","runtime"):
+              value=bot.get(key)
+              if isinstance(value,str):
+                  print("PROFINO bot",key+":",value[:120] if key=="runtime" else "configured")
+          deployments=call("list_app_deployments",{"app":bot_id},22)
+          if deployments is not None:
+              print("PASS: deployment query authorized")
+              if isinstance(deployments,dict):
+                  print("Deployment result keys:",sorted(deployments.keys()))
+                  for k in ("deployments","items","data","results"):
+                      if isinstance(deployments.get(k),list):
+                          print("Deployment record count:",len(deployments[k]))
+                          print("Deployment record field names:", sorted(deployments[k][0].keys()) if deployments[k] and isinstance(deployments[k][0],dict) else [])
+                          for item in deployments[k][:3]:
+                              if isinstance(item,dict):
+                                  for field in ("status","state"):
+                                      if isinstance(item.get(field),str):
+                                          print("Deployment",field+":",item[field][:50])
+              elif isinstance(deployments,list):
+                  print("Deployment record count:",len(deployments))
+          for tool in ("list_servers","list_vps"):
+              if tool in names:
+                  result=call(tool,{},23 if tool=="list_servers" else 24)
+                  print("Read-only inventory",tool,"available:",result is not None)
+                  if isinstance(result,dict):
+                      print("Inventory",tool,"top-level keys:",sorted(result.keys()))
+                      for field in ("count",):
+                          if isinstance(result.get(field),int):
+                              print("Inventory",tool,field+":",result[field])
+                      for field in ("servers","instances"):
+                          if isinstance(result.get(field),list):
+                              print("Inventory",tool,field,"records:",len(result[field]))
+                              for item in result[field][:5]:
+                                  if isinstance(item,dict):
+                                      print("Inventory",tool,"record fields:",sorted(item.keys()))
+                                      print("Inventory",tool,"status:",item.get("status","unknown"))
+          PY
+
+      - name: Verify public health endpoint and database readiness (sanitized)
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(mktemp)"
+          trap 'rm -f "$response"' EXIT
+          status="$(curl --silent --show-error --max-time 20 --output "$response" --write-out '%{http_code}' 'https://telegram-bot-d23e.fadehost.app/healthz')" || {
+            echo "FAIL: PROFINO health endpoint unreachable"
+            exit 1
+          }
+          echo "PROFINO health HTTP status: $status"
+          python3 - "$response" <<'PY'
+          import json,sys
+          try:
+              state=json.load(open(sys.argv[1],encoding="utf-8"))
+          except (ValueError,OSError):
+              print("FAIL: Health endpoint returned invalid JSON");sys.exit(1)
+          print("Health response field names:",sorted(state.keys()))
+          for key in ("database","telegram","telegramApi","telegramReceiver"):
+              if isinstance(state.get(key),str):
+                  print("Health",key+":",state[key])
+          if not state.get("ready",False):
+              print("FAIL: Health endpoint not ready");sys.exit(1)
+          expected={"database":"connected","telegram":"connected","telegramApi":"connected","telegramReceiver":"active"}
+          failures=[k for k,v in expected.items() if state.get(k)!=v]
+          if failures:
+              print("FAIL: Required production health checks not satisfied:",", ".join(failures))
+              sys.exit(1)
+          print("PASS: Production health readiness confirmed.")
+          PY
+          test "$status" = "200"
+
+      - name: Verify runtime configuration presence without revealing values
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,subprocess,sys
+          def rpc(method,params,id):
+              data=json.dumps({"jsonrpc":"2.0","id":id,"method":method,"params":params})
+              p=subprocess.run(["curl","--silent","--show-error","--max-time","25","-X","POST","https://api.fadehost.com/mcp",
+                 "-H","Authorization: Bearer "+os.environ["FADEHOST_TOKEN"],
+                 "-H","Content-Type: application/json","-H","Accept: application/json, text/event-stream",
+                 "--data-binary","@-"],input=data,text=True,capture_output=True,timeout=30)
+              if p.returncode: raise RuntimeError("MCP transport unavailable")
+              try: events=[json.loads(p.stdout)]
+              except json.JSONDecodeError:
+                  events=[]
+                  for line in p.stdout.splitlines():
+                      if line.startswith("data: "):
+                          try: events.append(json.loads(line[6:]))
+                          except json.JSONDecodeError: pass
+              messages=[m for m in events if isinstance(m,dict) and m.get("id")==id]
+              if not messages or "error" in messages[0]: raise RuntimeError("MCP error")
+              return messages[0].get("result",{})
+          def payload(result):
+              if result.get("isError"): raise RuntimeError("FadeHost tool error")
+              value=result.get("structuredContent")
+              if value is not None:return value
+              for item in result.get("content",[]):
+                  if item.get("type")=="text":
+                      try:return json.loads(item.get("text",""))
+                      except json.JSONDecodeError:pass
+              return None
+          bots=payload(rpc("tools/call",{"name":"list_bots","arguments":{}},31))
+          entries=bots.get("bots",[]) if isinstance(bots,dict) else []
+          bot=next((b for b in entries if isinstance(b,dict) and b.get("name")=="telegram-bot"),None)
+          if not bot or not isinstance(bot.get("id"),str):raise RuntimeError("PROFINO bot unavailable")
+          result=payload(rpc("tools/call",{"name":"list_app_variables","arguments":{"app":bot["id"]}},32))
+          print("PASS: FadeHost application variables inventory read authorized")
+          print("Variables payload type:",type(result).__name__)
+          if isinstance(result,dict):
+              print("Variables response field names:",sorted(result.keys()))
+              def find_names(obj):
+                  if isinstance(obj,dict):
+                      for k in ("names","variables","env","items","data"):
+                          if k in obj:return find_names(obj[k])
+                      return list(obj.keys())
+                  if isinstance(obj,list):
+                      if all(isinstance(item,str) for item in obj):return obj
+                      names=[]
+                      for item in obj:
+                          if isinstance(item,dict):
+                              name=item.get("key") or item.get("name")
+                              if isinstance(name,str):names.append(name)
+                      return names
+                  return []
+              names=set(find_names(result))
+              for key in ("DATABASE_URL","TELEGRAM_BOT_TOKEN","TELEGRAM_MODE","PORT"):
+                  print("Configured variable",key+":",key in names)
+              missing=sorted({"DATABASE_URL","TELEGRAM_BOT_TOKEN"}-names)
+              if missing:
+                  print("FAIL: required runtime variable names missing:",", ".join(missing))
+                  sys.exit(1)
+              print("PASS: Required PROFINO runtime variable names configured")
+          PY
+
+      - name: Inspect deployment and runtime health without exposing raw logs
+        if: always()
+        shell: bash
+        env:
+          FADEHOST_TOKEN: ${{ secrets.FADEHOST_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,subprocess,sys
+          def rpc(method,params,id):
+              data=json.dumps({"jsonrpc":"2.0","id":id,"method":method,"params":params})
+              p=subprocess.run(["curl","--silent","--show-error","--max-time","25","-X","POST","https://api.fadehost.com/mcp",
+                 "-H","Authorization: Bearer "+os.environ["FADEHOST_TOKEN"],
+                 "-H","Content-Type: application/json","-H","Accept: application/json, text/event-stream",
+                 "--data-binary","@-"],input=data,text=True,capture_output=True,timeout=30)
+              if p.returncode: raise RuntimeError("MCP transport unavailable")
+              try: events=[json.loads(p.stdout)]
+              except json.JSONDecodeError:
+                  events=[]
+                  for line in p.stdout.splitlines():
+                      if line.startswith("data: "):
+                          try: events.append(json.loads(line[6:]))
+                          except json.JSONDecodeError: pass
+              messages=[m for m in events if isinstance(m,dict) and m.get("id")==id]
+              if not messages or "error" in messages[0]: raise RuntimeError("MCP error")
+              return messages[0].get("result",{})
+          def payload(result):
+              if result.get("isError"): raise RuntimeError("FadeHost tool error")
+              value=result.get("structuredContent")
+              if value is not None:return value
+              for item in result.get("content",[]):
+                  if item.get("type")=="text":
+                      try:return json.loads(item.get("text",""))
+                      except json.JSONDecodeError:pass
+              return None
+          import re
+          bots=payload(rpc("tools/call",{"name":"list_bots","arguments":{}},51))
+          entries=bots.get("bots",[]) if isinstance(bots,dict) else []
+          matches=[b for b in entries if b.get("name")=="telegram-bot"]
+          if len(matches)!=1:raise RuntimeError("Bot not uniquely identified")
+          print("Bot status:",matches[0].get("status"))
+          specs=rpc("tools/list",{},52).get("tools",[])
+          spec=next(t for t in specs if t.get("name")=="get_bot_logs")
+          props=spec.get("inputSchema",{}).get("properties",{})
+          print("Log tool schema:",json.dumps(spec.get("inputSchema",{})))
+          key=next((k for k in ("bot","app","bot_id","id") if k in props),None)
+          if not key:raise RuntimeError("Unrecognized logs tool schema")
+          result=rpc("tools/call",{"name":"get_bot_logs","arguments":{key:matches[0]["id"]}},53)
+          def strings(v):
+              if isinstance(v,str):yield v
+              elif isinstance(v,list):
+                  for x in v:yield from strings(x)
+              elif isinstance(v,dict):
+                  for x in v.values():yield from strings(x)
+          lines="\n".join(strings(result))
+          print("Logs tool error:",bool(result.get("isError")))
+          for label,phrase in (
+              ("Target commit observed","51a4627"),
+              ("HTTP listener observed","HTTP endpoints listening"),
+              ("Database connected observed","PostgreSQL connected successfully"),
+              ("Polling active observed","Telegram polling is active"),
+              ("Syntax failure observed","SyntaxError"),
+              ("Missing column observed","does not exist"),
+              ("Startup report observed","startup report delivered"),
+              ("Process exit observed","exited")):
+              print(label+":",phrase in lines)
+          for sha in sorted(set(re.findall(r"deployed ([a-f0-9]{7,40})",lines))):
+              print("Observed deployed commit:",sha)
+          PY
