@@ -18,7 +18,8 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: requestId, method, params }),
-      signal: AbortSignal.timeout(timeoutMs)
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: "error"
     });
     if (!response.ok) throw new Error("BSC RPC HTTP failure");
     const data = await response.json();
@@ -39,6 +40,11 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
     if (!block || !HASH.test(block.hash)) throw new Error("Missing canonical block");
     const head = await rpc("eth_blockNumber", []);
     if (typeof head !== "string" || !Q.test(head)) throw new Error("Invalid RPC head");
-    return validateBep20Receipt(receipt, logIndex, block, {...policy, confirmedHeadBlock: BigInt(head).toString()});
+    const secondReceipt = await rpc("eth_getTransactionReceipt", [txHash]);
+    if (secondReceipt.transactionHash?.toLowerCase() !== receipt.transactionHash.toLowerCase() ||
+        secondReceipt.blockHash?.toLowerCase() !== receipt.blockHash.toLowerCase() ||
+        secondReceipt.blockNumber !== receipt.blockNumber ||
+        secondReceipt.status !== receipt.status) throw new Error("Transaction receipt changed during inspection");
+    return validateBep20Receipt(secondReceipt, logIndex, block, {...policy, confirmedHeadBlock: BigInt(head).toString()});
   };
 }
