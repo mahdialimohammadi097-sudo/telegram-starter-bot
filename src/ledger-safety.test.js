@@ -17,6 +17,14 @@ test("exact financial parsing rejects precision beyond eight decimals", () => {
   assert.throws(() => toUsdtUnitsExact("1.123456785"), /exceeds eight decimal places/);
 });
 
+test("exact financial parsing rejects unsafe JavaScript numeric amounts", () => {
+  assert.equal(toUsdtUnitsExact(25), 2500000000n);
+  assert.equal(toUsdtUnitsExact("9007199254740993"), 900719925474099300000000n);
+  assert.throws(() => toUsdtUnitsExact(9007199254740993), /Unsafe numeric USDT amount/);
+  assert.throws(() => toUsdtUnitsExact(Infinity), /Unsafe numeric USDT amount/);
+  assert.throws(() => toUsdtUnitsExact(NaN), /Unsafe numeric USDT amount/);
+});
+
 test("ledger entries must balance per currency without rounding", () => {
   assert.equal(assertBalancedLedgerEntries([
     { currency: "USDT", entry_type: "debit", amount: "12.5" },

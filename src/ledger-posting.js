@@ -1,11 +1,16 @@
 import { assertBalancedLedgerEntries, toUsdtUnitsExact } from "./ledger-safety.js";
 
 function normalizeAccountId(value) {
+  // Large numeric IDs lose precision before String() converts them.
+  // Preserve exact database identifiers by requiring a decimal string instead.
+  if (typeof value === "number" && !Number.isSafeInteger(value)) {
+    throw new TypeError("Unsafe numeric ledger account id; provide a decimal string");
+  }
   const id = String(value ?? "").trim();
-  if (!/^[1-9][0-9]*$/.test(id)) {
+  if (!/^[1-9][0-9]{0,18}$/.test(id) || BigInt(id) > 9223372036854775807n) {
     throw new TypeError("Invalid ledger account id");
   }
-  return id;
+  return BigInt(id).toString();
 }
 
 function decimalFromUnits(units) {

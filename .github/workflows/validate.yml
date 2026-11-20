@@ -5,9 +5,12 @@ on:
     branches:
       - main
       - "feature/**"
+      - "audit/ledger-release-gates-20261119"
   pull_request:
     branches:
       - main
+      - "feature/integrated-postgres-matrix"
+  workflow_dispatch:
 
 jobs:
   test:

@@ -16,6 +16,12 @@ export function toUsdtUnits(value) {
 // Financial validation must never round an input into a different amount.
 // Keep toUsdtUnits() for display formatting, where rounding to eight places is intentional.
 export function toUsdtUnitsExact(value) {
+  // Unsafe JavaScript numbers can already have lost integer precision before parsing.
+  // Callers handling financial amounts should prefer decimal strings.
+  if (typeof value === "number" && (!Number.isFinite(value) ||
+      (Number.isInteger(value) && !Number.isSafeInteger(value)))) {
+    throw new TypeError("Unsafe numeric USDT amount; provide a decimal string");
+  }
   const raw = String(value ?? "").trim();
   const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(raw);
   if (!match) throw new TypeError("Invalid USDT amount");
