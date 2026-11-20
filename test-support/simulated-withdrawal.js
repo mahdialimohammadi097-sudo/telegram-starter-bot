@@ -187,6 +187,12 @@ export async function recoverSimulatedWithdrawals(pool, transport, afterId = "0"
        AND id > $1 ORDER BY id LIMIT 50`, [afterId]
   );
   for (const request of rows) {
+    // Never replay a persisted payload whose identity no longer matches its claim.
+    if (!Buffer.isBuffer(request.payload) || request.payload.length === 0 ||
+        typeof request.hash !== "string" ||
+        "0x" + createHash("sha256").update(request.payload).digest("hex") !== request.hash.toLowerCase()) {
+      throw new Error("Simulation recovery payload hash mismatch");
+    }
     const known = await transport.hasTransaction(request.hash);
     if (typeof known !== "boolean") {
       throw new Error("Simulation transport returned an indeterminate transaction status");
