@@ -1,0 +1,52 @@
+name: Integration PostgreSQL financial test matrix
+
+on:
+  push:
+    branches:
+      - integration/retain-ledger-validator-20261120
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24, 26]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: profino_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d profino_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/profino_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Syntax validation
+        run: |
+          find . -path ./node_modules -prune -o -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Unit and PostgreSQL integration tests
+        run: npm test
+      - name: Focused PostgreSQL tests
+        if: matrix.node-version == 22
+        run: npm run test:postgres
