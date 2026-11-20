@@ -229,3 +229,18 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
     return journal.transactionId;
   });
 }
+
+// Read-only diagnostic for legacy submissions that cannot be safely replayed.
+// Operators must reconcile these manually; never fabricate a missing payload.
+export async function findUnrecoverableSimulatedWithdrawals(pool, limit = 50) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new TypeError("Invalid diagnostic page size");
+  }
+  const { rows } = await pool.query(
+    `SELECT id, submitted_hash AS hash FROM simulation_withdrawals
+     WHERE status = 'pending_receipt'
+       AND (simulation_payload IS NULL OR octet_length(simulation_payload) = 0)
+     ORDER BY id LIMIT $1`, [limit]
+  );
+  return rows;
+}
