@@ -44,3 +44,29 @@ test("invalid status in any position cannot authorize a transition", () => {
     assert.equal(isConfirmationCurrent("active", "active", value), false);
   }
 });
+
+test("admin status transaction rolls back if audit insertion fails", async () => {
+  process.env.DATABASE_URL ??= "postgresql://localhost/profino_test";
+  const { commitUserStatus } = await import("./admin-ops.js");
+  const queries = [];
+  let released = false;
+  const client = {
+    async query(sql) {
+      queries.push(sql);
+      if (sql === "BEGIN" || sql === "ROLLBACK") return {};
+      if (sql.includes("xmin::text")) return { rowCount: 1, rows: [{ id: 9, status: "active", version: "12" }] };
+      if (sql.includes("FROM admin_users")) return { rowCount: 1, rows: [{ user_id: 1 }] };
+      if (sql.startsWith("UPDATE users")) return { rowCount: 1, rows: [{ id: 9, telegram_id: 123, status: "blocked" }] };
+      if (sql.includes("INSERT INTO admin_audit_logs")) throw new Error("simulated audit failure");
+      throw new Error("Unexpected SQL");
+    },
+    release() { released = true; }
+  };
+  await assert.rejects(
+    commitUserStatus("123", "blocked", "active", "12", { connect: async () => client }),
+    /simulated audit failure/
+  );
+  assert.equal(queries.includes("ROLLBACK"), true);
+  assert.equal(queries.includes("COMMIT"), false);
+  assert.equal(released, true);
+});
