@@ -1,0 +1,33 @@
+name: Integration ledger validator regression
+
+on:
+  push:
+    branches:
+      - integration/retain-ledger-validator-20261120
+  pull_request:
+    branches:
+      - feature/integrated-postgres-matrix
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validator-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Verify diagnostic source and test syntax
+        run: |
+          node --check src/database-diagnostics.js
+          node --check src/database-diagnostics.test.js
+      - name: Run delegated ledger validator regression tests
+        run: node --test src/database-diagnostics.test.js
