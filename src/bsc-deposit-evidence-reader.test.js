@@ -13,7 +13,9 @@ function reader(overrides={}) {
  return {inspect:createBscDepositEvidenceReader({rpcUrl:"https://rpc.example.org",fetchImpl}),calls};
 }
 test("reads chain, receipt, canonical block and head before accepting deposit evidence",async()=>{
- const {inspect,calls}=reader();assert.equal((await inspect(tx,"0x0",policy)).eventKey,"bsc:56:"+tx+":0");
+ const {inspect,calls}=reader();const evidence = await inspect(tx,"0x0",policy);
+ assert.equal(evidence.eventKey,"bsc:56:"+tx+":0");
+ assert.equal(evidence.ledgerAmount,"1.00000000");
  assert.deepEqual(calls,["eth_chainId","eth_getTransactionReceipt","eth_getBlockByNumber","eth_blockNumber","eth_getTransactionReceipt"]);
 });
 test("rejects wrong chain and inconsistent canonical block",async()=>{
@@ -35,4 +37,9 @@ test("rejects receipt reorganization during RPC inspection",async()=>{
  };
  const inspect=createBscDepositEvidenceReader({rpcUrl:"https://rpc.example.org",fetchImpl});
  await assert.rejects(inspect(tx,"0x0",policy),/changed during inspection/);
+});
+
+test("rejects BSC receipt amounts that cannot be posted without rounding",async()=>{
+ const dustReceipt={...receipt,logs:[{...receipt.logs[0],data:"0x"+(10n**18n+1n).toString(16).padStart(64,"0")}]};
+ await assert.rejects(reader({eth_getTransactionReceipt:dustReceipt}).inspect(tx,"0x0",policy),/manual review required/);
 });
