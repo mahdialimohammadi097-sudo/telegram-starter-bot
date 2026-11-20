@@ -1921,7 +1921,9 @@ test("restarted simulation recovers the exact saved payload after a pre-send sto
   const accepted = new Set();
   let calls = 0;
   const transport = {
-    hasTransaction: async key => accepted.has(key),
+    // Earlier integration fixtures can leave other pending synthetic payouts.
+    // This test must only exercise its own request, not resend unrelated fixtures.
+    hasTransaction: async key => key !== hash || accepted.has(key),
     async send(prepared) {
       assert.deepEqual(prepared.payload, payload);
       assert.equal(prepared.txHash, hash);
@@ -1947,7 +1949,10 @@ test("restarted simulation recovers the exact saved payload after a pre-send sto
   assert.equal(await settle(), await settle());
   assert.equal(formatUsdt((await getWalletBalances(pool, owner)).WITHDRAWAL_HOLD), "0.00000000");
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
-  await recoverSimulatedWithdrawals(pool, { hasTransaction: () => assert.fail("Settled payout was rescanned"), send: () => assert.fail("Settled payout was resent") });
+  await recoverSimulatedWithdrawals(pool, {
+    hasTransaction: key => key !== hash ? true : assert.fail("Settled payout was rescanned"),
+    send: () => assert.fail("Settled payout was resent")
+  });
 });
 
 
