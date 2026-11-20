@@ -453,8 +453,9 @@ jobs:
           props=schema.get("properties",{})
           print("Command tool fields:",sorted(props))
           if "app" not in props or "command" not in props: raise RuntimeError("Unrecognized host command schema")
-          source="import {pool} from './src/database.js';const r=await pool.query(\"SELECT table_name,column_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('users','ledger_accounts','ledger_transactions','ledger_entries','investments','withdrawal_requests') ORDER BY table_name,ordinal_position\");console.log('PROFINO_SCHEMA='+JSON.stringify(r.rows));await pool.end();"
+          source="import {pool} from './src/database.js';const r=await pool.query(\"SELECT table_name,column_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name LIKE 'ledger_%' ORDER BY 1,2\");console.log('PROFINO_SCHEMA='+JSON.stringify(r.rows));await pool.end();"
           command="node --input-type=module -e "+shlex.quote(source)
+          if len(command)>500: raise RuntimeError("Command exceeds host limit")
           result=rpc("tools/call",{"name":"run_app_command","arguments":{"app":matches[0]["id"],"command":command}},43)
           def strings(value):
               if isinstance(value,str): yield value
