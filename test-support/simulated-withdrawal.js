@@ -184,6 +184,7 @@ export async function recoverSimulatedWithdrawals(pool, transport, afterId = "0"
   const { rows } = await pool.query(
     `SELECT id, submitted_hash AS hash, amount, destination, simulation_payload AS payload
      FROM simulation_withdrawals WHERE status = 'pending_receipt' AND simulation_payload IS NOT NULL
+       AND octet_length(simulation_payload) > 0
        AND id > $1 ORDER BY id LIMIT 50`, [afterId]
   );
   for (const request of rows) {
