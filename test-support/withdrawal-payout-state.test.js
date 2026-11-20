@@ -53,3 +53,16 @@ for (const transport of [null, {}, { hasTransaction: async () => false }, { send
     assert.equal(queries, 0);
   });
 }
+
+for (const lookupResult of [undefined, null, "unknown", 0]) {
+  test("recovery fails closed when transaction lookup is indeterminate", async () => {
+    let sent = 0;
+    const pool = { async query(sql) {
+      assert.match(sql, /FROM simulation_withdrawals/);
+      return { rows: [{ id: "7", hash: "0x" + "a".repeat(64), amount: "1", destination: "0x" + "1".repeat(40), payload: Buffer.from("test") }] };
+    } };
+    const transport = { hasTransaction: async () => lookupResult, send: async () => { sent++; } };
+    await assert.rejects(recoverSimulatedWithdrawals(pool, transport), /indeterminate transaction status/);
+    assert.equal(sent, 0);
+  });
+}
