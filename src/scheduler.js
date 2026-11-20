@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
 import { InlineKeyboard } from "grammy";
@@ -132,7 +133,7 @@ async function sendPreview(bot, post, client, language) {
       { reply_markup: keyboard }
     );
 
-    await client.query(`
+    const confirmation = await client.query(`
       UPDATE scheduled_posts
       SET status = 'preview_sent',
           preview_message_id = $1,
@@ -145,6 +146,8 @@ async function sendPreview(bot, post, client, language) {
       message.chat.id,
       post.id
     ]);
+
+    if (confirmation.rowCount !== 1) throw new Error("Preview confirmation did not update the post");
 
     console.log(`[scheduler] preview sent for post ${post.id}.`);
   } catch (error) {
@@ -225,8 +228,9 @@ async function handlePostAction(ctx) {
   const postId = match[2];
 
   if (action === "reject") {
+    let result;
     try {
-      const result = await pool.query(`
+      result = await pool.query(`
         UPDATE scheduled_posts
         SET status = 'rejected',
             updated_at = NOW()
@@ -236,23 +240,6 @@ async function handlePostAction(ctx) {
           AND preview_chat_id = $3
         RETURNING id
       `, [postId, ctx.callbackQuery.message.message_id, ctx.callbackQuery.message.chat.id]);
-
-      if (!result.rowCount) {
-        await ctx.answerCallbackQuery({
-          text: adminText(language, "Post is no longer available.", "این پست دیگر در دسترس نیست."),
-          show_alert: true
-        });
-        return;
-      }
-
-      await ctx.answerCallbackQuery({
-        text: adminText(language, "Post rejected.", "پست رد شد.")
-      });
-
-      await updateAdminMessage(
-        ctx,
-        adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
-      );
     } catch (error) {
       console.error("[scheduler] rejection error:", safeDiagnosticCode(error));
 
@@ -260,12 +247,47 @@ async function handlePostAction(ctx) {
         text: adminText(language, "Database error. Please try again.", "خطای پایگاه داده. دوباره تلاش کنید."),
         show_alert: true
       });
+      return;
     }
+
+    if (!result.rowCount) {
+      await ctx.answerCallbackQuery({
+        text: adminText(language, "Post is no longer available.", "این پست دیگر در دسترس نیست."),
+        show_alert: true
+      });
+      return;
+    }
+
+    try {
+      await ctx.answerCallbackQuery({
+        text: adminText(language, "Post rejected.", "پست رد شد.")
+      });
+    } catch (error) {
+      console.error("[scheduler] rejection acknowledgement failed:", safeDiagnosticCode(error));
+    }
+
+    await updateAdminMessage(
+      ctx,
+      adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
+    );
 
     return;
   }
 
-  return withSchedulerLock(true, client => publishApprovedPost(ctx, postId, language, client));
+  let publicationStarted = false;
+  try {
+    await withSchedulerLock(true, client => {
+      publicationStarted = true;
+      return publishApprovedPost(ctx, postId, language, client);
+    });
+  } catch (error) {
+    if (publicationStarted) throw error;
+    console.error("[scheduler] approval lock unavailable:", safeDiagnosticCode(error));
+    await ctx.answerCallbackQuery({
+      text: adminText(language, "Could not start publication. Please try again.", "انتشار شروع نشد. لطفاً دوباره تلاش کنید."),
+      show_alert: true
+    });
+  }
 }
 
 async function publishApprovedPost(ctx, postId, language, client) {
@@ -351,7 +373,7 @@ async function publishApprovedPost(ctx, postId, language, client) {
   }
 
   try {
-    await client.query(`
+    const confirmation = await client.query(`
       UPDATE scheduled_posts
       SET status = 'published',
           published_message_id = $1,
@@ -360,6 +382,8 @@ async function publishApprovedPost(ctx, postId, language, client) {
       WHERE id = $2
         AND status = 'publishing'
     `, [published.message_id, postId]);
+
+    if (confirmation.rowCount !== 1) throw new Error("Publication confirmation did not update the post");
 
     console.log(`[scheduler] post ${postId} published successfully.`);
 
@@ -381,7 +405,7 @@ async function publishApprovedPost(ctx, postId, language, client) {
   }
 }
 
-export function startScheduler(bot) {
+export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}) {
   if (isStarted) {
     return { ready: Promise.resolve(false), stop() {} };
   }
@@ -401,33 +425,38 @@ export function startScheduler(bot) {
     }
   });
 
-  const ready = recoverInterruptedOperations()
-    .then(() => {
-      if (schedulerStopped) return false;
-      console.log("[scheduler] recovery completed.");
+  const retryController = new AbortController();
+  async function initialize() {
+    while (!schedulerStopped) {
+      try {
+        await recoverInterruptedOperations();
+        break;
+      } catch (error) {
+        console.error("[scheduler] startup recovery failed:", safeDiagnosticCode(error));
+        if (schedulerStopped) return false;
+        try {
+          await delay(recoveryRetryMs, undefined, { signal: retryController.signal });
+        } catch (timerError) {
+          if (retryController.signal.aborted) return false;
+          throw timerError;
+        }
+      }
+    }
+    if (schedulerStopped) return false;
+    console.log("[scheduler] recovery completed.");
+    startBatch(bot);
+    schedulerTimer = setInterval(() => startBatch(bot), CHECK_INTERVAL_MS);
+    schedulerTimer.unref?.();
+    console.log("[scheduler] scheduled-post system started.");
+    return true;
+  }
 
-      startBatch(bot);
-
-      schedulerTimer = setInterval(() => {
-        startBatch(bot);
-      }, CHECK_INTERVAL_MS);
-      schedulerTimer.unref?.();
-
-      console.log("[scheduler] scheduled-post system started.");
-      return true;
-    })
-    .catch((error) => {
-      console.error(
-        "[scheduler] startup recovery failed. Scheduler remains disabled:",
-      safeDiagnosticCode(error)
-    );
-      return false;
-    });
-
+  const ready = initialize();
   return {
     ready,
     async stop() {
       schedulerStopped = true;
+      retryController.abort();
       if (schedulerTimer) clearInterval(schedulerTimer);
       schedulerTimer = null;
       await ready;
@@ -435,3 +464,4 @@ export function startScheduler(bot) {
     }
   };
 }
+

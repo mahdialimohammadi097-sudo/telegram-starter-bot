@@ -1,0 +1,20 @@
+name: Verify historical BSC testnet transfer against live RPC
+on:
+  push:
+    branches: [feature/post-edit-session-guard]
+    paths: [scripts/verify-bsc-testnet-withdrawal.mjs, .github/workflows/testnet-receipt.yml]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare live receipt to recorded transfer expectations
+        run: >
+          node scripts/verify-bsc-testnet-withdrawal.mjs
+          0x199dcf31f8ffbf38141ce796893da8d6fde87137fa3cdc3082f0c394eb6d4840 0x0
+          0xd8e25612692fca3ab4252409df63b702bbeadaf5
+          0x03e37a3686a553735dd9737a060e4a2c6c018ace
+          0xe4419ba1c4d38d3aaeaa756adb5b19806e3faf8f 1 18

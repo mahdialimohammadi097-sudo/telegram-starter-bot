@@ -80,3 +80,40 @@ jobs:
             docker exec -i "$PG_CONTAINER" pg_restore -U postgres --single-transaction --exit-on-error -d wallet_drill_restored
           node scripts/check-wallet-restore.js verify > "$RUNNER_TEMP/wallet-restored.json"
           cmp "$RUNNER_TEMP/wallet-source.json" "$RUNNER_TEMP/wallet-restored.json"
+          # Compare both catalogs in pg_restore form. PostgreSQL can rewrite equivalent CHECK casts during restore.
+          docker exec "$PG_CONTAINER" createdb -U postgres wallet_schema_reference
+          docker exec "$PG_CONTAINER" pg_dump -U postgres --schema-only -Fc wallet_drill_source |
+            docker exec -i "$PG_CONTAINER" pg_restore -U postgres --single-transaction --exit-on-error -d wallet_schema_reference
+          for db in wallet_drill_source wallet_schema_reference wallet_drill_restored; do
+            docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d "$db" \
+              < scripts/ledger-catalog.sql > "$RUNNER_TEMP/$db.catalog"
+          done
+          test "$(grep -c '^\["table",' "$RUNNER_TEMP/wallet_schema_reference.catalog")" -eq 3
+          diff -u "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/wallet_drill_restored.catalog"
+          node scripts/build-ledger-comparison.mjs "$RUNNER_TEMP/wallet_drill_source.catalog" "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/compare-ledger.sql"
+          for db in wallet_drill_source wallet_drill_restored; do
+            docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d "$db" \
+              < "$RUNNER_TEMP/compare-ledger.sql" > "$RUNNER_TEMP/comparison.txt"
+            grep -Fxq 'ledger|three tables|match' "$RUNNER_TEMP/comparison.txt"
+          done
+          docker exec "$PG_CONTAINER" psql -Xq -v ON_ERROR_STOP=1 -U postgres -d wallet_drill_restored \
+            -c 'ALTER TABLE ledger_entries DISABLE TRIGGER protect_posted_ledger_entries'
+          docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d wallet_drill_restored \
+            < scripts/ledger-catalog.sql > "$RUNNER_TEMP/disabled.catalog"
+          if cmp -s "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/disabled.catalog"; then
+            echo "Disabled ledger trigger went undetected" >&2
+            exit 1
+          fi
+          docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d wallet_drill_restored \
+            < "$RUNNER_TEMP/compare-ledger.sql" > "$RUNNER_TEMP/comparison.txt"
+          test "$(cat "$RUNNER_TEMP/comparison.txt")" = 'trigger|ledger_entries.protect_posted_ledger_entries|changed'
+          echo "Ledger catalog matches after restore and detects a disabled trigger."
+      - name: Save the tested PostgreSQL 17 ledger catalog for comparison
+        if: matrix.node-version == 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-catalog-postgres17
+          path: |
+            ${{ runner.temp }}/wallet_schema_reference.catalog
+            ${{ runner.temp }}/compare-ledger.sql
+          if-no-files-found: error

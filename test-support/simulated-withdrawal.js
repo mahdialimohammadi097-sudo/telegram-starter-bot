@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readTestnetWithdrawalReceipt } from "./bsc-testnet-receipt.js";
 import { toUsdtUnitsExact, formatUsdt } from "../src/ledger-safety.js";
 import { postJournalInTransaction, withLedgerTransaction } from "../src/ledger-posting.js";
 
@@ -12,19 +14,25 @@ async function postMovement(client, request, operation, debit, credit) {
   });
 }
 
-export async function reserveWithdrawal(pool, userId, key, amount) {
+export async function reserveWithdrawal(pool, userId, key, amount, destination = null) {
   if (typeof key !== "string" || !key.trim()) throw new Error("Missing request key");
   if (toUsdtUnitsExact(amount) <= 0n) throw new Error("Withdrawal must be positive");
+  if (destination !== null && (!/^0x[0-9a-f]{40}$/i.test(destination) || /^0x0{40}$/i.test(destination))) {
+    throw new Error("Invalid withdrawal destination");
+  }
+  destination = destination?.toLowerCase() ?? null;
   const normalized = formatUsdt(amount);
   return withLedgerTransaction(pool, async client => {
     const owner = await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
     if (!owner.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
-      "SELECT id, amount, status FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
+      "SELECT id, amount, status, destination FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
     );
     if (prior.rowCount) {
       if (formatUsdt(prior.rows[0].amount) !== normalized) throw new Error("Request amount mismatch");
-      return prior.rows[0];
+      const { destination: saved, ...request } = prior.rows[0];
+      if (saved !== destination) throw new Error("Withdrawal destination mismatch");
+      return request;
     }
     // First-use setup shares the reservation transaction so a failed hold leaves no account behind.
     await client.query(
@@ -33,11 +41,11 @@ export async function reserveWithdrawal(pool, userId, key, amount) {
        ON CONFLICT (user_id, account_type, currency) DO NOTHING`, [userId]
     );
     const result = await client.query(
-      `INSERT INTO simulation_withdrawals (user_id, request_key, amount, available_id, held_id)
-       SELECT a.user_id, $2, $3, a.id, h.id FROM ledger_accounts a JOIN ledger_accounts h ON h.user_id = a.user_id
+      `INSERT INTO simulation_withdrawals (user_id, request_key, amount, available_id, held_id, destination)
+       SELECT a.user_id, $2, $3, a.id, h.id, $4 FROM ledger_accounts a JOIN ledger_accounts h ON h.user_id = a.user_id
        WHERE a.user_id = $1 AND a.currency = 'USDT' AND h.currency = 'USDT'
          AND a.account_type = 'AVAILABLE' AND h.account_type = 'WITHDRAWAL_HOLD'
-       RETURNING id, amount, status, available_id, held_id`, [userId, key, normalized]
+       RETURNING id, amount, status, available_id, held_id`, [userId, key, normalized, destination]
     );
     if (!result.rowCount) throw new Error("Incomplete withdrawal wallet");
     const request = result.rows[0];
@@ -130,4 +138,77 @@ export function simulationWithdrawalReview(pool) {
       });
     }
   };
+}
+
+// The offline caller supplies a prepared transaction hash and a fake transport.
+// Commit the claim before submission: an ambiguous response can only be reconciled by hash.
+export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload = null) {
+  if (payload !== null) {
+    // Synthetic transport identity only. There is no chain signer in this harness.
+    if (!Buffer.isBuffer(payload) || payload.length === 0 ||
+        "0x" + createHash("sha256").update(payload).digest("hex") !== txHash) {
+      throw new Error("Simulation payload hash mismatch");
+    }
+  }
+  if (typeof txHash !== "string" || !/^0x[0-9a-f]{64}$/i.test(txHash)) throw new Error("Invalid transaction hash");
+  const hash = txHash.toLowerCase();
+  const claim = await pool.query(
+    `UPDATE simulation_withdrawals SET status = 'pending_receipt', submitted_hash = $2, simulation_payload = $3
+     WHERE id = $1 AND destination IS NOT NULL AND status = 'reserved'
+     RETURNING amount, destination, simulation_payload`, [id, hash, payload]
+  );
+  if (claim.rowCount) {
+    await send({ txHash: hash, amount: claim.rows[0].amount, destination: claim.rows[0].destination, payload: claim.rows[0].simulation_payload });
+  } else {
+    const { rows: [existing] } = await pool.query(
+      "SELECT submitted_hash FROM simulation_withdrawals WHERE id = $1", [id]
+    );
+    if (existing?.submitted_hash !== hash) throw new Error("Withdrawal submission mismatch");
+  }
+  return hash;
+}
+
+// After a restart, process a bounded page. The transport must deduplicate identical
+// payloads by hash, including if lookup lags or a previous submit lost its reply.
+export async function recoverSimulatedWithdrawals(pool, transport, afterId = "0") {
+  const { rows } = await pool.query(
+    `SELECT id, submitted_hash AS hash, amount, destination, simulation_payload AS payload
+     FROM simulation_withdrawals WHERE status = 'pending_receipt' AND simulation_payload IS NOT NULL
+       AND id > $1 ORDER BY id LIMIT 50`, [afterId]
+  );
+  for (const request of rows) {
+    const known = await transport.hasTransaction(request.hash);
+    if (known === false) {
+      await transport.send({ txHash: request.hash, amount: request.amount, destination: request.destination, payload: request.payload });
+    }
+  }
+  return rows.length === 50 ? rows[49].id : null;
+}
+
+export async function confirmTestnetWithdrawal(pool, id, observation, expected, treasury) {
+  return withLedgerTransaction(pool, async client => {
+    const { rows: [request] } = await client.query(
+      "SELECT * FROM simulation_withdrawals WHERE id = $1 FOR UPDATE", [id]
+    );
+    if (!request?.destination || request.status === "cancelled") throw new Error("No payable withdrawal");
+    const { event } = readTestnetWithdrawalReceipt(observation, expected, {
+      sender: treasury.sender, recipient: request.destination, amount: request.amount
+    });
+    if (request.submitted_hash && request.submitted_hash !== expected.txHash.toLowerCase()) throw new Error("Withdrawal transaction mismatch");
+    if (request.status === "paid") {
+      if (request.payout_event !== event || request.clearing_id !== String(treasury.accountId)) throw new Error("Payout mismatch");
+      return request.payout_id;
+    }
+    const clearing = await client.query(
+      "SELECT id FROM ledger_accounts WHERE id = $1 AND account_type = 'CLEARING' AND currency = 'USDT' AND user_id IS NULL FOR SHARE",
+      [treasury.accountId]
+    );
+    if (!clearing.rowCount) throw new Error("Invalid payout clearing account");
+    const journal = await postMovement(client, request, "payout", request.held_id, treasury.accountId);
+    await client.query(
+      "UPDATE simulation_withdrawals SET status = 'paid', payout_event = $2, payout_id = $3, clearing_id = $4, submitted_hash = $5 WHERE id = $1",
+      [id, event, journal.transactionId, treasury.accountId, expected.txHash.toLowerCase()]
+    );
+    return journal.transactionId;
+  });
 }
