@@ -292,3 +292,14 @@ test("discards the client when rollback fails and preserves the original posting
   assert.equal(calls.at(-1).sql, "RELEASE");
   assert.equal(calls.at(-1).releaseError, "rollback connection failure");
 });
+
+test("rejects unsafe and out-of-range ledger identifiers", () => {
+  const entries = id => [
+    { account_id: id, entry_type: "debit", amount: "1", currency: "USDT" },
+    { account_id: "2", entry_type: "credit", amount: "1", currency: "USDT" }
+  ];
+  assert.throws(() => normalizeEntries(entries(Number.MAX_SAFE_INTEGER + 1)), /Unsafe numeric ledger account id/);
+  assert.throws(() => normalizeEntries(entries("9223372036854775808")), /Invalid ledger account id/);
+  assert.throws(() => normalizeEntries(entries("1".repeat(100))), /Invalid ledger account id/);
+  assert.equal(normalizeEntries(entries("9223372036854775807"))[0].account_id, "9223372036854775807");
+});

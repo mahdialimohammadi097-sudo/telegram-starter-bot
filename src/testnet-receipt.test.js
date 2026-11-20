@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { readTestnetTransfer } from "../test-support/bsc-testnet-receipt.js";
+import { readTestnetTransfer, readTestnetWithdrawalReceipt } from "../test-support/bsc-testnet-receipt.js";
 
 const sample = JSON.parse(readFileSync(new URL("../test/fixtures/bsc-testnet-transfer.json", import.meta.url)));
 const expected = sample.expected;
@@ -42,3 +42,17 @@ for (const [name, mutate] of invalidCases) {
     assert.throws(() => readTestnetTransfer(observation, config));
   });
 }
+
+test("outbound receipt must match the reserved sender, destination and exact amount", () => {
+  const reservation = {
+    sender: "0x03e37a3686a553735dd9737a060e4a2c6c018ace",
+    recipient: "0xe4419ba1c4d38d3aaeaa756adb5b19806e3faf8f",
+    amount: "1.00000000"
+  };
+  const verify = changes => readTestnetWithdrawalReceipt(sample.observation, expected, { ...reservation, ...changes });
+  assert.deepEqual(verify({}), sample.result);
+  assert.throws(() => verify({ sender: wrongAddress }), /sender mismatch/);
+  assert.throws(() => verify({ recipient: wrongAddress }), /configured token and wallet/);
+  assert.throws(() => verify({ amount: "1.00000001" }), /amount mismatch/);
+  assert.throws(() => verify({ amount: "0.99999999" }), /amount mismatch/);
+});

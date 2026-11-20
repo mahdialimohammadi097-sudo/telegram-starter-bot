@@ -91,3 +91,25 @@ test("an undelivered outage retries, deduplicates and reports recovery", async t
   assert.match(attempts[2], /DATABASE: RECOVERED/);
   assert.deepEqual(diagnostics, [["[health] alert delivery failed:", "telegram_send_failed"]]);
 });
+
+test("stopping during a health probe suppresses stale status and alerts", async () => {
+  let failProbe;
+  let checks = 0;
+  const events = [];
+  const monitor = startHealthMonitor({
+    telegramCheck: async () => true,
+    pool: { query() {
+      checks++;
+      return new Promise((_resolve, reject) => { failProbe = reject; });
+    } },
+    bot: { api: { sendMessage: async () => { events.push("alert"); } } },
+    onStatus: () => { events.push("status"); },
+    logger: { warn() {}, error() {} }
+  });
+  monitor.stop();
+  failProbe(new Error("offline"));
+  await monitor.ready;
+  assert.deepEqual(events, []);
+  await monitor.check();
+  assert.equal(checks, 1);
+});

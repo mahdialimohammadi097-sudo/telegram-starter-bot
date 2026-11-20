@@ -64,7 +64,15 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
+      - name: Audit production dependencies
+        if: matrix.node-version == 22
+        run: npm audit --omit=dev --audit-level=high
       - name: Unit and PostgreSQL integration tests
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/profino-tests.tap"
+          grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-tests.tap"
+          grep -Fxq '# skipped 0' "$RUNNER_TEMP/profino-tests.tap"
       - name: Focused PostgreSQL tests
         run: npm run test:postgres
