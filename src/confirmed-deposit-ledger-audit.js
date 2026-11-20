@@ -39,7 +39,7 @@ export async function auditConfirmedDepositLedger({ pool, clearingAccountId,
         `SELECT id::text, reference_id, idempotency_key FROM ledger_transactions
          WHERE id > $1::bigint AND (transaction_type = 'confirmed-deposit'
            OR idempotency_key LIKE 'confirmed-deposit:%' OR reference_id LIKE 'bsc:56:%')
-         ORDER BY id LIMIT $2`, [cursor, take + 1]);
+         ORDER BY ledger_transactions.id LIMIT $2`, [cursor, take + 1]);
       const page = rows.slice(0, take);
       if (!page.length) { scanComplete = rows.length === 0; break; }
       const events = new Set();
