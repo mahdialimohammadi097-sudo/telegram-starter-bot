@@ -13,6 +13,15 @@ if (!["disabled", "verify"].includes(tlsMode)) {
   throw new Error("PROFINO_DATABASE_TLS must be disabled or verify");
 }
 
+// node-postgres can replace the explicit ssl option when sslmode or related
+// parameters appear in the connection URL. Reject ambiguity rather than
+// silently disabling certificate verification.
+const databaseUrl = new URL(process.env.DATABASE_URL);
+const conflictingTlsParameters = ["sslmode", "sslcert", "sslkey", "sslrootcert"];
+if (conflictingTlsParameters.some(name => databaseUrl.searchParams.has(name))) {
+  throw new Error("DATABASE_URL TLS parameters conflict with PROFINO_DATABASE_TLS");
+}
+
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 5,
