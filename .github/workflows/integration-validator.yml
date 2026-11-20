@@ -29,8 +29,8 @@ jobs:
         run: |
           node --check src/database-diagnostics.js
           node --check src/database-diagnostics.test.js
-      - name: Run delegated ledger validator regression tests
-        run: node --test src/database-diagnostics.test.js
+      - name: Run delegated ledger validator and database TLS policy tests
+        run: node --test src/database-diagnostics.test.js src/database-tls-policy.test.js
 
   postgres-integration:
     runs-on: ubuntu-24.04
