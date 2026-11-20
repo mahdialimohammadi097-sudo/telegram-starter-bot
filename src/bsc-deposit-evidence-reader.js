@@ -1,4 +1,5 @@
 import { validateBep20Receipt } from "./bep20-receipt-validation.js";
+import { bep20BaseUnitsToLedgerAmount } from "./bep20-ledger-precision.js";
 
 const HASH = /^0x[0-9a-f]{64}$/i;
 const Q = /^0x(?:0|[1-9a-f][0-9a-f]*)$/i;
@@ -45,6 +46,8 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
         secondReceipt.blockHash?.toLowerCase() !== receipt.blockHash.toLowerCase() ||
         secondReceipt.blockNumber !== receipt.blockNumber ||
         secondReceipt.status !== receipt.status) throw new Error("Transaction receipt changed during inspection");
-    return validateBep20Receipt(secondReceipt, logIndex, block, {...policy, confirmedHeadBlock: BigInt(head).toString()});
+    const evidence = validateBep20Receipt(secondReceipt, logIndex, block, {...policy, confirmedHeadBlock: BigInt(head).toString()});
+    const ledgerAmount = bep20BaseUnitsToLedgerAmount(evidence.amountBaseUnits);
+    return Object.freeze({ ...evidence, ledgerAmount });
   };
 }
