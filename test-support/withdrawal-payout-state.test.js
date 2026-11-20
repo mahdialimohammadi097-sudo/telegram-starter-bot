@@ -66,3 +66,23 @@ for (const lookupResult of [undefined, null, "unknown", 0]) {
     assert.equal(sent, 0);
   });
 }
+
+for (const alreadyKnown of [true, false]) {
+  test("recovery " + (alreadyKnown ? "skips" : "resends") + " a known-status synthetic transaction", async () => {
+    const hash = "0x" + "a".repeat(64);
+    const payload = Buffer.from("synthetic");
+    const sent = [];
+    const pool = { async query(sql, params) {
+      assert.match(sql, /status = 'pending_receipt'/);
+      assert.deepEqual(params, ["0"]);
+      return { rows: [{ id: "7", hash, amount: "1.00000000", destination: "0x" + "1".repeat(40), payload }] };
+    } };
+    const transport = {
+      async hasTransaction(candidate) { assert.equal(candidate, hash); return alreadyKnown; },
+      async send(value) { sent.push(value); }
+    };
+    assert.equal(await recoverSimulatedWithdrawals(pool, transport), null);
+    assert.equal(sent.length, alreadyKnown ? 0 : 1);
+    if (!alreadyKnown) assert.deepEqual(sent[0], { txHash: hash, amount: "1.00000000", destination: "0x" + "1".repeat(40), payload });
+  });
+}
