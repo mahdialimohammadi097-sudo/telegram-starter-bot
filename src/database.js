@@ -1,4 +1,5 @@
 import pg from "pg";
+import { resolveDatabaseTls } from "./database-tls-policy.js";
 
 const { Pool } = pg;
 
@@ -11,7 +12,7 @@ export const pool = new Pool({
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
-  ssl: false,
+  ssl: resolveDatabaseTls(),
 });
 
 export async function testDatabaseConnection() {

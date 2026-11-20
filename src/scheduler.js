@@ -1,3 +1,4 @@
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
@@ -8,37 +9,51 @@ const CHANNEL_USERNAME = "@PROFINO1";
 const CHECK_INTERVAL_MS = 15000;
 const BATCH_SIZE = 5;
 
-let isRunning = false;
+let activeBatch = null;
 let isStarted = false;
 let schedulerStopped = false;
 let schedulerTimer = null;
 
-async function recoverInterruptedOperations() {
-  const previewResult = await pool.query(`
-    UPDATE scheduled_posts
-    SET status = 'preview_unknown',
-        updated_at = NOW()
-    WHERE status = 'preview_sending'
-  `);
-
-  const publishResult = await pool.query(`
-    UPDATE scheduled_posts
-    SET status = 'publish_unknown',
-        updated_at = NOW()
-    WHERE status = 'publishing'
-  `);
-
-  console.log(
-    `[scheduler] recovered ${previewResult.rowCount} interrupted previews.`
-  );
-
-  console.log(
-    `[scheduler] recovered ${publishResult.rowCount} interrupted publications.`
-  );
+// A session lock spans the committed claim, Telegram send and final status write.
+// Recovery waits for sends on other instances. Disconnecting releases the lock.
+async function withSchedulerLock(shared, operation) {
+  const client = await pool.connect();
+  const suffix = shared ? "_shared" : "";
+  let clean = false;
+  let disconnected = false;
+  const onDisconnect = error => {
+    disconnected = true;
+    console.error("[scheduler] PostgreSQL session lost:", safeDiagnosticCode(error));
+  };
+  client.on("error", onDisconnect);
+  try {
+    await client.query("SELECT pg_advisory_lock" + suffix + "(780244, 1)");
+    return await operation(client);
+  } finally {
+    try {
+      if (!disconnected) {
+        const result = await client.query("SELECT pg_advisory_unlock" + suffix + "(780244, 1) AS unlocked");
+        clean = result.rows[0].unlocked;
+      }
+    } catch (error) {
+      console.error("[scheduler] PostgreSQL lock cleanup failed:", safeDiagnosticCode(error));
+    } finally {
+      client.off("error", onDisconnect);
+      client.release(disconnected || !clean);
+    }
+  }
 }
 
-async function claimScheduledPosts() {
-  const client = await pool.connect();
+async function recoverInterruptedOperations() {
+  return withSchedulerLock(false, client => client.query(`
+    UPDATE scheduled_posts
+    SET status = CASE WHEN status = 'preview_sending' THEN 'preview_unknown' ELSE 'publish_unknown' END,
+        updated_at = NOW()
+    WHERE status IN ('preview_sending', 'publishing')
+  `));
+}
+
+async function claimScheduledPosts(client) {
 
   try {
     await client.query("BEGIN");
@@ -75,13 +90,10 @@ async function claimScheduledPosts() {
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
-  } finally {
-    client.release();
   }
 }
 
-async function sendPreview(bot, post) {
-  const language = await getAdminLanguage({ from: { id: ADMIN_ID } });
+async function sendPreview(bot, post, client, language) {
   try {
     const scheduledTime = new Date(post.scheduled_at).toLocaleString(
       "en-GB",
@@ -120,7 +132,7 @@ async function sendPreview(bot, post) {
       { reply_markup: keyboard }
     );
 
-    await pool.query(`
+    await client.query(`
       UPDATE scheduled_posts
       SET status = 'preview_sent',
           preview_message_id = $1,
@@ -138,11 +150,11 @@ async function sendPreview(bot, post) {
   } catch (error) {
     console.error(
       `[scheduler] preview result uncertain for post ${post.id}:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     try {
-      await pool.query(`
+      await client.query(`
         UPDATE scheduled_posts
         SET status = 'preview_unknown',
             updated_at = NOW()
@@ -152,27 +164,28 @@ async function sendPreview(bot, post) {
     } catch (databaseError) {
       console.error(
         `[scheduler] could not record preview uncertainty for post ${post.id}:`,
-        databaseError
+        safeDiagnosticCode(databaseError)
       );
     }
   }
 }
 
 async function processScheduledPosts(bot) {
-  if (isRunning || schedulerStopped) return;
-
-  isRunning = true;
-
   try {
-    const posts = await claimScheduledPosts();
-
-    for (const post of posts) {
-      await sendPreview(bot, post);
-    }
+    await withSchedulerLock(true, async client => {
+      const posts = await claimScheduledPosts(client);
+      if (!posts.length) return;
+      const language = await getAdminLanguage({ from: { id: ADMIN_ID } }, client);
+      for (const post of posts) await sendPreview(bot, post, client, language);
+    });
   } catch (error) {
-    console.error("[scheduler] processing error:", error);
-  } finally {
-    isRunning = false;
+    console.error("[scheduler] processing error:", safeDiagnosticCode(error));
+  }
+}
+
+function startBatch(bot) {
+  if (!schedulerStopped && !activeBatch) {
+    activeBatch = processScheduledPosts(bot).finally(() => { activeBatch = null; });
   }
 }
 
@@ -180,7 +193,7 @@ async function updateAdminMessage(ctx, text) {
   try {
     await ctx.editMessageText(text, { reply_markup: { inline_keyboard: [] } });
   } catch (error) {
-    console.error("[scheduler] could not update admin message:", error);
+    console.error("[scheduler] could not update admin message:", safeDiagnosticCode(error));
   }
 }
 
@@ -241,7 +254,7 @@ async function handlePostAction(ctx) {
         adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
       );
     } catch (error) {
-      console.error("[scheduler] rejection error:", error);
+      console.error("[scheduler] rejection error:", safeDiagnosticCode(error));
 
       await ctx.answerCallbackQuery({
         text: adminText(language, "Database error. Please try again.", "خطای پایگاه داده. دوباره تلاش کنید."),
@@ -252,10 +265,14 @@ async function handlePostAction(ctx) {
     return;
   }
 
+  return withSchedulerLock(true, client => publishApprovedPost(ctx, postId, language, client));
+}
+
+async function publishApprovedPost(ctx, postId, language, client) {
   let post;
 
   try {
-    const result = await pool.query(`
+    const result = await client.query(`
       UPDATE scheduled_posts
       SET status = 'publishing',
           approved_by = $1,
@@ -269,7 +286,7 @@ async function handlePostAction(ctx) {
 
     if (!result.rowCount) {
       await ctx.answerCallbackQuery({
-        text: "Post is no longer available.",
+        text: adminText(language, "Post is no longer available.", "این پست دیگر در دسترس نیست."),
         show_alert: true
       });
       return;
@@ -277,7 +294,7 @@ async function handlePostAction(ctx) {
 
     post = result.rows[0];
   } catch (error) {
-    console.error("[scheduler] approval database error:", error);
+    console.error("[scheduler] approval database error:", safeDiagnosticCode(error));
 
     await ctx.answerCallbackQuery({
       text: adminText(language, "Database error. Nothing was published.", "خطای پایگاه داده؛ هیچ چیزی منتشر نشد."),
@@ -287,9 +304,14 @@ async function handlePostAction(ctx) {
     return;
   }
 
-  await ctx.answerCallbackQuery({
-    text: adminText(language, "Approval received. Publishing...", "تأیید دریافت شد. در حال انتشار...")
-  });
+  try {
+    await ctx.answerCallbackQuery({
+      text: adminText(language, "Approval received. Publishing...", "تأیید دریافت شد. در حال انتشار...")
+    });
+  } catch (error) {
+    // The approved post is already claimed. An expired callback does not undo that claim.
+    console.error("[scheduler] approval acknowledgement failed:", safeDiagnosticCode(error));
+  }
 
   let published;
 
@@ -301,11 +323,11 @@ async function handlePostAction(ctx) {
   } catch (error) {
     console.error(
       `[scheduler] publication result uncertain for post ${postId}:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     try {
-      await pool.query(`
+      await client.query(`
         UPDATE scheduled_posts
         SET status = 'publish_unknown',
             updated_at = NOW()
@@ -315,8 +337,8 @@ async function handlePostAction(ctx) {
     } catch (databaseError) {
       console.error(
         "[scheduler] could not record publication uncertainty:",
-        databaseError
-      );
+      safeDiagnosticCode(databaseError)
+    );
     }
 
     await updateAdminMessage(
@@ -329,7 +351,7 @@ async function handlePostAction(ctx) {
   }
 
   try {
-    await pool.query(`
+    await client.query(`
       UPDATE scheduled_posts
       SET status = 'published',
           published_message_id = $1,
@@ -348,12 +370,12 @@ async function handlePostAction(ctx) {
   } catch (error) {
     console.error(
       `[scheduler] post ${postId} was sent, but database confirmation failed:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     await updateAdminMessage(
       ctx,
-      `PROFINO — Post ${postId} was sent to the channel.\n\n` +
+      adminText(language, "Post " + postId + " sent. Message ID: ", "پست " + postId + " ارسال شد. شناسه پیام: ") + published.message_id + "\n\n" +
       adminText(language, "Database confirmation failed.\nPlease verify the channel and database status manually.", "تأیید پایگاه داده ناموفق بود.\nوضعیت کانال و پایگاه داده را دستی بررسی کنید.")
     );
   }
@@ -367,20 +389,27 @@ export function startScheduler(bot) {
   isStarted = true;
   schedulerStopped = false;
 
-  bot.callbackQuery(
-    /^post_(approve|reject):\d+$/,
-    handlePostAction
-  );
+  const activeActions = new Set();
+  bot.callbackQuery(/^post_(approve|reject):\d+$/, async ctx => {
+    if (schedulerStopped) return;
+    const action = handlePostAction(ctx);
+    activeActions.add(action);
+    try {
+      await action;
+    } finally {
+      activeActions.delete(action);
+    }
+  });
 
   const ready = recoverInterruptedOperations()
     .then(() => {
       if (schedulerStopped) return false;
       console.log("[scheduler] recovery completed.");
 
-      processScheduledPosts(bot);
+      startBatch(bot);
 
       schedulerTimer = setInterval(() => {
-        processScheduledPosts(bot);
+        startBatch(bot);
       }, CHECK_INTERVAL_MS);
       schedulerTimer.unref?.();
 
@@ -390,17 +419,19 @@ export function startScheduler(bot) {
     .catch((error) => {
       console.error(
         "[scheduler] startup recovery failed. Scheduler remains disabled:",
-        error
-      );
+      safeDiagnosticCode(error)
+    );
       return false;
     });
 
   return {
     ready,
-    stop() {
+    async stop() {
       schedulerStopped = true;
       if (schedulerTimer) clearInterval(schedulerTimer);
       schedulerTimer = null;
+      await ready;
+      await Promise.all([activeBatch, Promise.allSettled(activeActions)]);
     }
   };
 }

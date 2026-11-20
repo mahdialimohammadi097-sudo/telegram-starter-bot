@@ -1,3 +1,5 @@
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
+
 const ADMIN_ID = 8810232463;
 
 export function getHealthChanges(previous, current) {
@@ -32,6 +34,7 @@ export function startHealthMonitor({
   telegramCheck = async () => { await bot.api.getMe(); return true; }
 }) {
   let previous = { telegram: true, database: true };
+  const pendingAlerts = new Map();
   let running = false;
 
   async function check() {
@@ -50,20 +53,22 @@ export function startHealthMonitor({
       const changes = getHealthChanges(previous, current);
 
       for (const change of changes) {
+        pendingAlerts.set(change.service, change);
         logger.warn("[health] " + change.service + " " + change.status.toLowerCase());
       }
 
       previous = current;
 
-      if (changes.length && current.telegram) {
+      if (pendingAlerts.size && current.telegram) {
         try {
-          await bot.api.sendMessage(ADMIN_ID, formatHealthAlert(changes, now()));
+          await bot.api.sendMessage(ADMIN_ID, formatHealthAlert([...pendingAlerts.values()], now()));
+          pendingAlerts.clear();
         } catch (error) {
-          logger.error("[health] alert delivery failed:", error?.error_code || "telegram_send_failed");
+          logger.error("[health] alert delivery failed:", Number.isInteger(error?.error_code) ? error.error_code : "telegram_send_failed");
         }
       }
     } catch (error) {
-      logger.error("[health] monitor check failed:", error?.code || "check_failed");
+      logger.error("[health] monitor check failed:", safeDiagnosticCode(error));
     } finally {
       running = false;
     }
