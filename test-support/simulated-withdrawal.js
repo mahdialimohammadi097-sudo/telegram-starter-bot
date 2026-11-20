@@ -148,15 +148,17 @@ export function simulationWithdrawalReview(pool) {
 export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload = null) {
   // Reject invalid transports before persisting an irreversible submission claim.
   if (typeof send !== "function") throw new Error("Simulation transport sender required");
-  if (payload !== null) {
-    // Synthetic transport identity only. There is no chain signer in this harness.
-    if (!Buffer.isBuffer(payload) || payload.length === 0 ||
-        "0x" + createHash("sha256").update(payload).digest("hex") !== txHash) {
-      throw new Error("Simulation payload hash mismatch");
-    }
+  // Every persisted submission must be replayable after a crash. A null payload
+  // would be excluded from recovery and leave a pending receipt indefinitely.
+  if (!Buffer.isBuffer(payload) || payload.length === 0) {
+    throw new Error("Simulation submission requires a nonempty recovery payload");
   }
   if (typeof txHash !== "string" || !/^0x[0-9a-f]{64}$/i.test(txHash)) throw new Error("Invalid transaction hash");
   const hash = txHash.toLowerCase();
+  // Synthetic transport identity only. There is no chain signer in this harness.
+  if ("0x" + createHash("sha256").update(payload).digest("hex") !== hash) {
+    throw new Error("Simulation payload hash mismatch");
+  }
   const claim = await pool.query(
     `UPDATE simulation_withdrawals SET status = 'pending_receipt', submitted_hash = $2, simulation_payload = $3
      WHERE id = $1 AND destination IS NOT NULL AND status = 'reserved'
