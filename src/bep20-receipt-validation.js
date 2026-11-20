@@ -26,7 +26,7 @@ export function validateBep20Receipt(receipt, logIndex, canonicalBlock, policy) 
   const matches = receipt.logs.filter(log => quantity(log.logIndex) === index);
   if (matches.length !== 1) throw new Error("Transfer log identity mismatch");
   const log = matches[0];
-  if (log.removed !== false || !ADDRESS.test(log.address) || !Array.isArray(log.topics) ||
+  if (log.removed === true || (log.removed !== undefined && log.removed !== false) || !ADDRESS.test(log.address) || !Array.isArray(log.topics) ||
       log.topics.length !== 3 || log.topics[0].toLowerCase() !== TRANSFER_TOPIC ||
       !HASH.test(log.data) || log.transactionHash?.toLowerCase() !== receipt.transactionHash.toLowerCase() ||
       log.blockHash?.toLowerCase() !== receipt.blockHash.toLowerCase() ||
@@ -42,7 +42,7 @@ export function validateBep20Receipt(receipt, logIndex, canonicalBlock, policy) 
     txHash: receipt.transactionHash,
     logIndex: index.toString(),
     amountBaseUnits: BigInt(log.data).toString(),
-    removed: log.removed,
+    removed: false, // A mined receipt log may omit the subscription-only removed flag.
     receiptStatus: 1,
     blockNumber: quantity(receipt.blockNumber).toString()
   }, policy);

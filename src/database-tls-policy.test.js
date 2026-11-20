@@ -32,3 +32,11 @@ test("verify-full accepts a connection URL without TLS overrides", () => {
     DATABASE_URL: "postgresql://localhost/profino?application_name=profino"
   }), { rejectUnauthorized: true });
 });
+
+test('merged TLS configuration accepts equivalent names and rejects contradictory settings', () => {
+  assert.deepEqual(resolveDatabaseTls({ PROFINO_DATABASE_TLS: 'verify' }), { rejectUnauthorized: true });
+  assert.deepEqual(resolveDatabaseTls({ PROFINO_DATABASE_TLS: 'verify', PROFINO_DB_TLS_MODE: 'verify-full' }), { rejectUnauthorized: true });
+  for (const [legacy, mode] of [['disabled', 'verify-full'], ['verify', 'disable']]) {
+    assert.throws(() => resolveDatabaseTls({ PROFINO_DATABASE_TLS: legacy, PROFINO_DB_TLS_MODE: mode }), /Conflicting/);
+  }
+});

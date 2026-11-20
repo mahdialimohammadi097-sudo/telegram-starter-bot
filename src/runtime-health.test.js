@@ -5,6 +5,7 @@ import { createRuntimeHealthState } from "./runtime-health.js";
 test("readiness requires PostgreSQL, Telegram API, and an active update receiver", () => {
   const health = createRuntimeHealthState();
   assert.equal(health.snapshot().ready, false);
+  health.setSchedulerReady(true);
   health.setDatabaseReady(true);
   health.setTelegramApiConnected(true);
   assert.equal(health.snapshot().ready, false);
@@ -15,12 +16,14 @@ test("readiness requires PostgreSQL, Telegram API, and an active update receiver
     telegram: "connected",
     telegramApi: "connected",
     telegramReceiver: "active",
+    scheduler: "ready",
     shuttingDown: false
   });
 });
 
 test("API availability alone does not falsely mark polling as ready", () => {
   const health = createRuntimeHealthState();
+  health.setSchedulerReady(true);
   health.setDatabaseReady(true);
   health.setTelegramApiConnected(true);
   assert.equal(health.snapshot().ready, false);
@@ -31,6 +34,7 @@ test("API availability alone does not falsely mark polling as ready", () => {
 
 test("readiness becomes false immediately when PostgreSQL fails", () => {
   const health = createRuntimeHealthState();
+  health.setSchedulerReady(true);
   health.setDatabaseReady(true);
   health.setTelegramApiConnected(true);
   health.setTelegramReceiverActive(true);
@@ -40,6 +44,7 @@ test("readiness becomes false immediately when PostgreSQL fails", () => {
 
 test("readiness is false during graceful shutdown", () => {
   const health = createRuntimeHealthState();
+  health.setSchedulerReady(true);
   health.setDatabaseReady(true);
   health.setTelegramApiConnected(true);
   health.setTelegramReceiverActive(true);
