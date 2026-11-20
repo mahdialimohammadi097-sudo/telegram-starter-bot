@@ -13,15 +13,16 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 30000) throw new Error("Invalid RPC timeout");
   let nextId = 0;
   async function rpc(method, params) {
+    const requestId = ++nextId;
     const response = await fetchImpl(endpoint.toString(), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: ++nextId, method, params }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: requestId, method, params }),
       signal: AbortSignal.timeout(timeoutMs)
     });
     if (!response.ok) throw new Error("BSC RPC HTTP failure");
     const data = await response.json();
-    if (data?.jsonrpc !== "2.0" || data.id !== nextId || data.error || data.result === undefined || data.result === null) {
+    if (data?.jsonrpc !== "2.0" || data.id !== requestId || data.error || data.result === undefined || data.result === null) {
       throw new Error("Invalid BSC RPC response");
     }
     return data.result;
