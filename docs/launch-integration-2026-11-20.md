@@ -60,3 +60,16 @@ catalog query ran. `scripts/deposit-wallet-catalog.sql` is a bounded READ ONLY
 catalog inspection script; it returns metadata, not customer rows. Access must be
 provided through an authenticated hosting connection or the read-only script's
 results, without publishing credentials or making the private database public.
+
+## Read-only confirmed-deposit reconciliation
+
+`src/confirmed-deposit-reconciliation.js` compares a batch of 1–500 independently
+verified events and historical ownership expectations against the journal, entries
+and account owners in one PostgreSQL MVCC snapshot. It flags missing/duplicate
+journals, unposted states, wrong event identity, mismatched attribution and wrong
+amount/currency/account/entry count. All arithmetic comparisons use exact units.
+No write or automatic repair is performed. Results explicitly cover supplied
+events only: this is not a full chain scan or orphan-journal audit, and events
+omitted by the source (or journals with both identifying fields corrupted) still
+require an independent persisted scanner/cursor and full reconciliation process.
+Production ownership and evidence adapters remain blocked on the catalog review.

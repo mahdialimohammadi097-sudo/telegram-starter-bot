@@ -98,3 +98,50 @@ test('ownership lock prevents reassignment until posting commits', { skip: !enab
     } });
   } finally { await writer.query('ROLLBACK'); writer.release(); }
 });
+
+const { reconcileConfirmedDeposits } = await import('./confirmed-deposit-reconciliation.js');
+const { postLedgerTransaction } = await import('./ledger-posting.js');
+const expectedDeposit = n => ({ evidence: evidence(n), availableAccountId: '2', assignments: [{
+  userId: '1', active: true, chainId: 56, currency: 'USDT', address, tokenContract: contract
+}] });
+
+test('confirmed deposit reconciliation matches posted journals and detects missing evidence without writes', { skip: !enabled }, async () => {
+  const before = await count();
+  const report = await reconcileConfirmedDeposits(pool, [1,3,4,99].map(expectedDeposit), '1');
+  assert.equal(report.checkedEvents, 4);
+  assert.equal(report.matchedEvents, 3);
+  assert.deepEqual(report.findings.map(f => f.code), ['missing_journal']);
+  assert.equal(report.findings[0].eventKey, evidence(99).eventKey);
+  assert.equal(await count(), before);
+});
+test('reconciliation catches wrong amount, recipient, metadata and transaction identity', { skip: !enabled }, async () => {
+  for (const [n, change, expectedCode] of [
+    [10, { amount: '24' }, 'ledger_entries_mismatch'],
+    [11, { destination: '3' }, 'ledger_entries_mismatch'],
+    [12, { description: '{broken' }, 'attribution_mismatch'],
+    [13, { transactionType: 'other-credit' }, 'journal_identity_mismatch']
+  ]) {
+    const e = evidence(n);
+    await postLedgerTransaction({ pool, transactionType: change.transactionType ?? 'confirmed-deposit',
+      referenceId: e.eventKey, idempotencyKey: 'confirmed-deposit:' + e.eventKey,
+      description: change.description ?? JSON.stringify({ userId: '1', address, tokenContract: contract }),
+      entries: [{ account_id: '1', entry_type: 'debit', amount: change.amount ?? '25', currency: 'USDT' },
+        { account_id: change.destination ?? '2', entry_type: 'credit', amount: change.amount ?? '25', currency: 'USDT' }] });
+    const report = await reconcileConfirmedDeposits(pool, [expectedDeposit(n)], '1');
+    assert.equal(report.matchedEvents, 0);
+    assert.ok(report.findings.some(f => f.code === expectedCode));
+  }
+});
+test('reconciliation catches duplicate event journals and pending entries', { skip: !enabled }, async () => {
+  const e = evidence(1);
+  await postLedgerTransaction({ pool, transactionType: 'confirmed-deposit', referenceId: e.eventKey,
+    idempotencyKey: 'incorrect-second-key', description: JSON.stringify({ userId: '1', address, tokenContract: contract }),
+    entries: [{ account_id: '1', entry_type: 'debit', amount: '25', currency: 'USDT' },
+      { account_id: '2', entry_type: 'credit', amount: '25', currency: 'USDT' }] });
+  await pool.query(`INSERT INTO ledger_transactions(transaction_type,reference_id,idempotency_key,status)
+    VALUES ('confirmed-deposit',$1,$2,'pending')`, [evidence(14).eventKey, 'confirmed-deposit:'+evidence(14).eventKey]);
+  const report = await reconcileConfirmedDeposits(pool, [1,14].map(expectedDeposit), '1');
+  assert.equal(report.matchedEvents, 0);
+  assert.ok(report.findings.some(f => f.code === 'duplicate_journal'));
+  assert.ok(report.findings.some(f => f.code === 'journal_not_posted'));
+});
