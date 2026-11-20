@@ -5,11 +5,12 @@ const ADDRESS = /^0x[0-9a-f]{40}$/i;
 const ID = /^[1-9][0-9]*$/;
 export function requireUniqueDepositOwner(evidence, assignments) {
   if (!evidence || typeof evidence.depositAddress !== "string" ||
-      !ADDRESS.test(evidence.depositAddress) || typeof evidence.eventKey !== "string" ||
+      !ADDRESS.test(evidence.depositAddress) || typeof evidence.tokenContract !== "string" ||
+      !ADDRESS.test(evidence.tokenContract) || evidence.chainId !== "56" || typeof evidence.eventKey !== "string" ||
       !/^bsc:56:0x[0-9a-f]{64}:[0-9]+$/i.test(evidence.eventKey) ||
       typeof evidence.ledgerAmount !== "string" ||
       !/^(?:0|[1-9][0-9]*)\.[0-9]{8}$/.test(evidence.ledgerAmount) ||
-      !Array.isArray(assignments)) throw new Error("Invalid deposit attribution evidence");
+      !Array.isArray(assignments) || !/[1-9]/.test(evidence.ledgerAmount)) throw new Error("Invalid deposit attribution evidence");
   // Multiple rows are unsafe even when they name the same user: they may
   // represent reused addresses or stale assignments.
   if (assignments.length !== 1) throw new Error("Deposit address must have exactly one active owner");
@@ -17,7 +18,9 @@ export function requireUniqueDepositOwner(evidence, assignments) {
   if (!owner || owner.active !== true || !ID.test(String(owner.userId ?? "")) ||
       typeof owner.address !== "string" || !ADDRESS.test(owner.address) ||
       owner.address.toLowerCase() !== evidence.depositAddress.toLowerCase() ||
-      owner.chainId !== 56 || owner.currency !== "USDT") {
+      owner.chainId !== 56 || owner.currency !== "USDT" ||
+      typeof owner.tokenContract !== "string" || !ADDRESS.test(owner.tokenContract) ||
+      owner.tokenContract.toLowerCase() !== evidence.tokenContract.toLowerCase()) {
     throw new Error("Deposit wallet ownership mismatch");
   }
   return Object.freeze({
