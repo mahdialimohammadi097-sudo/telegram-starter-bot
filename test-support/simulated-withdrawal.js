@@ -186,6 +186,9 @@ export async function recoverSimulatedWithdrawals(pool, transport, afterId = "0"
   );
   for (const request of rows) {
     const known = await transport.hasTransaction(request.hash);
+    if (typeof known !== "boolean") {
+      throw new Error("Simulation transport returned an indeterminate transaction status");
+    }
     if (known === false) {
       await transport.send({ txHash: request.hash, amount: request.amount, destination: request.destination, payload: request.payload });
     }
