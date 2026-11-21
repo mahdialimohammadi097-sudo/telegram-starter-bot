@@ -4,6 +4,7 @@ on:
     paths:
       - 'src/catalog-deposit-owner*'
       - 'src/deposit-owner-guard.js'
+      - 'src/bep20-receipt-evidence*'
       - '.github/workflows/catalog-owner-tests.yml'
   push:
     branches:
@@ -18,4 +19,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test src/catalog-deposit-owner.test.js
+      - run: node --test src/catalog-deposit-owner.test.js src/bep20-receipt-evidence.test.js
