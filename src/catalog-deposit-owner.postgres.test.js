@@ -36,6 +36,14 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
     await b.query("SET LOCAL lock_timeout = '300ms'");
     await assert.rejects(resolve(b,evidence), {code:"55P03"});
     await b.query("ROLLBACK");
+    // Existing assignment reassignment is blocked as well as new inserts.
+    await b.query("BEGIN");
+    await b.query("SET LOCAL lock_timeout = '300ms'");
+    await assert.rejects(
+      b.query("UPDATE public.user_wallet_assignments SET user_id = 2 WHERE id = 1"),
+      {code:"55P03"}
+    );
+    await b.query("ROLLBACK");
     await a.query("COMMIT");
     // After commit, the second transaction can resolve the same owner.
     await b.query("BEGIN");
