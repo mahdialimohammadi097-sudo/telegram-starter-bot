@@ -37,6 +37,8 @@ export function createCatalogDepositOwnerResolver({ tokenContract } = {}) {
          JOIN public.users u ON u.id = a.user_id
         WHERE w.chain_id = 56 AND lower(w.wallet_address) = $1
         ORDER BY a.id`, [evidence.depositAddress.toLowerCase()]);
+    // No attribution is safe if the catalog has no historical assignment
+    // evidence; the caller must fail closed on empty or ambiguous results.
     return result.rows.map(row => ({
       userId: row.user_id, address: row.wallet_address,
       active: row.active === true, chainId: 56,
