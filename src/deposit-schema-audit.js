@@ -13,7 +13,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  if(!client || typeof client.query!=="function" || !/^[a-z_][a-z_0-9]*$/.test(schema))
   throw new TypeError("Invalid schema audit configuration");
  const result=await client.query(`
- SELECT table_name,column_name,data_type,numeric_precision,numeric_scale FROM information_schema.columns
+ SELECT table_name,column_name,data_type,numeric_precision,numeric_scale,is_nullable FROM information_schema.columns
  WHERE table_schema=$1 AND table_name=ANY($2::text[])`,[schema,Object.keys(required)]);
  const actual=new Map();
  const types=new Map();
@@ -27,6 +27,20 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   for(const column of columns)
    if(!actual.get(table)?.has(column))missing.push(table+"."+column);
  const incompatible=[];
+ for(const name of [
+  'verified_deposit_evidence.event_key',
+  'verified_deposit_evidence.block_hash',
+  'verified_deposit_evidence.block_number',
+  'verified_deposit_evidence.token_contract',
+  'verified_deposit_evidence.deposit_address',
+  'verified_deposit_evidence.amount_base_units',
+  'ledger_entries.amount',
+  'ledger_entries.transaction_id',
+  'ledger_entries.account_id'
+ ]) {
+  const col=types.get(name);
+  if(col && col.is_nullable!=='NO') incompatible.push(name+':not_null');
+ }
  const numericContract={
   "ledger_entries.amount":{precision:36,scale:18},
   "verified_deposit_evidence.amount_base_units":{precision:78,scale:0},
