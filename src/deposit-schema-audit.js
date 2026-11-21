@@ -27,6 +27,11 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   for(const column of columns)
    if(!actual.get(table)?.has(column))missing.push(table+"."+column);
  const incompatible=[];
+ const numericContract={
+  "ledger_entries.amount":{precision:36,scale:18},
+  "verified_deposit_evidence.amount_base_units":{precision:78,scale:0},
+  "verified_deposit_evidence.block_number":{precision:78,scale:0}
+ };
  for(const [name,expected] of Object.entries({
    "ledger_entries.amount":"numeric",
    "verified_deposit_evidence.event_key":"text",
@@ -36,9 +41,10 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  })) {
    const col=types.get(name);
    if(col && (col.data_type!==expected ||
-     (col.numeric_scale!==undefined && col.numeric_scale!==null &&
-      ["ledger_entries.amount","verified_deposit_evidence.amount_base_units","verified_deposit_evidence.block_number"].includes(name) &&
-      Number(col.numeric_scale)!== (name==="ledger_entries.amount" ? 18 : 0))))
+     (numericContract[name] && (
+       Number(col.numeric_scale)!==numericContract[name].scale ||
+       Number(col.numeric_precision)<numericContract[name].precision ||
+       col.numeric_precision==null))))
      incompatible.push(name);
  }
  // A unique index on the event key and the ledger idempotency key is mandatory.
