@@ -57,6 +57,9 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
     await b.query("BEGIN");
     assert.equal(requireUniqueDepositOwner(evidence,await resolve(b,evidence)).userId,"1");
     await b.query("ROLLBACK");
+    // A previously committed or rolled-back transaction must not leave a
+    // reusable authorization marker on this pooled database connection.
+    await assert.rejects(resolve(b,evidence), /Explicit database transaction required/);
     await b.query("INSERT INTO public.user_wallet_assignments VALUES (2,2,1,'active',NULL,'deposit')");
     await a.query("BEGIN");
     assert.throws(() => requireUniqueDepositOwner(evidence, []));
