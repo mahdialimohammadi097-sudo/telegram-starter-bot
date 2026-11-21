@@ -67,6 +67,17 @@ test("staged evidence migration creates constrained table and is idempotent",asy
       VALUES (${values.join(",")})`), error=>error.code==="23514");
     await client.query("ROLLBACK TO SAVEPOINT " + label);
   }
+  // Invalid token contracts and zero amounts must be rejected by PostgreSQL.
+  for (const [label, values] of [
+    ["invalid_token", ["'bsc:56:0x' || repeat('e',64) || ':3'","'0x' || repeat('a',64)","1","'bad-token'","'0x' || repeat('c',40)","1"]],
+    ["zero_amount", ["'bsc:56:0x' || repeat('e',64) || ':4'","'0x' || repeat('a',64)","1","'0x' || repeat('b',40)","'0x' || repeat('c',40)","0"]]
+  ]) {
+    await client.query("SAVEPOINT " + label);
+    await assert.rejects(client.query(`INSERT INTO public.verified_deposit_evidence
+      (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
+      VALUES (${values.join(",")})`), error=>error.code==="23514");
+    await client.query("ROLLBACK TO SAVEPOINT " + label);
+  }
   const count=await client.query("SELECT count(*)::int AS n FROM public.verified_deposit_evidence");
   assert.equal(count.rows[0].n,1);
  }finally{
