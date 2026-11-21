@@ -36,6 +36,26 @@ test("staged evidence migration creates constrained table and is idempotent",asy
    (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
    VALUES ('bad','0x' || repeat('a',64),1,'0x' || repeat('b',40),'0x' || repeat('c',40),0)`));
   await client.query("ROLLBACK TO SAVEPOINT invalid_evidence");
+  // A duplicate chain event must never create a second evidence record.
+  await client.query("SAVEPOINT duplicate_event");
+  await assert.rejects(
+   client.query(`INSERT INTO public.verified_deposit_evidence
+    (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
+    VALUES ('bsc:56:0x' || repeat('d',64) || ':0','0x' || repeat('a',64),1,
+            '0x' || repeat('b',40),'0x' || repeat('c',40),1000000000000000000)`),
+   error=>error.code==="23505"
+  );
+  await client.query("ROLLBACK TO SAVEPOINT duplicate_event");
+  // A positive amount with an invalid chain event key is also forbidden.
+  await client.query("SAVEPOINT invalid_event_key");
+  await assert.rejects(
+   client.query(`INSERT INTO public.verified_deposit_evidence
+    (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
+    VALUES ('not-a-chain-event','0x' || repeat('a',64),1,
+            '0x' || repeat('b',40),'0x' || repeat('c',40),1)`),
+   error=>error.code==="23514"
+  );
+  await client.query("ROLLBACK TO SAVEPOINT invalid_event_key");
   const count=await client.query("SELECT count(*)::int AS n FROM public.verified_deposit_evidence");
   assert.equal(count.rows[0].n,1);
  }finally{
