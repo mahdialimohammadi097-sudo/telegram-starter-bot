@@ -1,0 +1,43 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createCatalogDepositOwnerResolver } from "./catalog-deposit-owner.js";
+import { requireUniqueDepositOwner } from "./deposit-owner-guard.js";
+const tokenContract = "0x" + "a".repeat(40);
+const depositAddress = "0x" + "b".repeat(40);
+const evidence = { tokenContract, depositAddress, chainId: "56",
+  eventKey: "bsc:56:0x" + "c".repeat(64) + ":0", ledgerAmount: "10.00000000" };
+const row = { user_id: "123", wallet_address: depositAddress, active: true };
+function mock(rows) {
+  const calls = [];
+  return { calls, async query(sql, params) {
+    calls.push({sql, params});
+    return { rows: rows };
+  }};
+}
+const resolve = createCatalogDepositOwnerResolver({tokenContract});
+test("valid owner and lock before lookup", async () => {
+  const client = mock([row]);
+  const result = await resolve(client, evidence);
+  assert.equal(requireUniqueDepositOwner(evidence, result).userId, "123");
+  assert.match(client.calls[1].sql, /SHARE ROW EXCLUSIVE/);
+  assert.deepEqual(client.calls[2].params, [depositAddress]);
+});
+test("reject unknown chain or token before database access", async () => {
+  for (const change of [{chainId:"1"}, {tokenContract:depositAddress}, {depositAddress:"bad"}]) {
+    const client = mock([]);
+    await assert.rejects(resolve(client, {...evidence,...change}));
+    assert.equal(client.calls.length, 0);
+  }
+});
+test("reject missing, ambiguous and inactive assignments", async () => {
+  for (const rows of [[], [row,row], [{...row, active:false}], [row,{...row,user_id:"456",active:false}]]) {
+    const result = await resolve(mock(rows), evidence);
+    assert.throws(() => requireUniqueDepositOwner(evidence,result));
+  }
+});
+test("lock failure propagates without ownership lookup", async () => {
+  let count = 0;
+  const client = { async query() { if (++count === 2) throw new Error("lock timeout"); } };
+  await assert.rejects(resolve(client,evidence), /lock timeout/);
+  assert.equal(count,2);
+});
