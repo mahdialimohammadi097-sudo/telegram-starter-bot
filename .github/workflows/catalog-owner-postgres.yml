@@ -30,6 +30,7 @@ jobs:
       - run: npm ci
       - run: node --test src/deposit-evidence-migration.postgres.test.js
         env:
+          PROFINO_DISPOSABLE_POSTGRES: 'yes'
           CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
       - run: node --test src/confirmed-deposit-posting.postgres.test.js
         env:
