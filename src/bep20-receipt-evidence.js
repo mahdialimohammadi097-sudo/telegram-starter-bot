@@ -23,6 +23,7 @@ export function verifyBep20DepositReceipt({receipt, transaction, block, head, to
   if (!Array.isArray(receipt.logs)) throw new Error("Missing receipt logs");
   const expectedTo = addressTopic(depositAddress.toLowerCase());
   const results = [];
+  const seenIndices = new Set();
   for (const log of receipt.logs) {
     if (!log || typeof log !== "object") throw new Error("Malformed receipt log");
     if (typeof log.address !== "string" || log.address.toLowerCase() !== tokenContract.toLowerCase()) continue;
@@ -33,6 +34,9 @@ export function verifyBep20DepositReceipt({receipt, transaction, block, head, to
         !UINT.test(String(log.logIndex ?? "")) && !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(log.logIndex ?? "")) continue;
     const index = typeof log.logIndex === "string" && log.logIndex.startsWith("0x") ? quantity(log.logIndex.toLowerCase()) : BigInt(log.logIndex);
     const amount = BigInt(log.data);
+    const indexKey = index.toString();
+    if (seenIndices.has(indexKey)) throw new Error("Duplicate transfer log index");
+    seenIndices.add(indexKey);
     if (amount === 0n || log.transactionHash !== receipt.transactionHash ||
         log.blockHash !== block.hash) throw new Error("Inconsistent transfer log");
     results.push(Object.freeze({eventKey:`bsc:56:${receipt.transactionHash}:${index}`,
