@@ -20,3 +20,43 @@ test("read-only audit queries real PostgreSQL catalog and fails closed on incomp
   await pool.end();
  }
 });
+
+test("read-only audit accepts complete PostgreSQL ownership and ledger contract",{skip:!url},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_ok_"+randomUUID().replaceAll("-","");
+ const q=async sql=>pool.query(sql);
+ try{
+  await q('CREATE SCHEMA "'+schema+'"');
+  const prefix='"'+schema+'".';
+  await q(`
+   CREATE TABLE ${prefix}users(id bigint PRIMARY KEY,status text NOT NULL);
+   CREATE TABLE ${prefix}wallets(id bigint PRIMARY KEY,wallet_address text NOT NULL,
+     chain_id integer NOT NULL,network text NOT NULL,status text NOT NULL);
+   CREATE TABLE ${prefix}user_wallet_assignments(
+     user_id bigint NOT NULL REFERENCES ${prefix}users(id),
+     wallet_id bigint NOT NULL REFERENCES ${prefix}wallets(id),
+     assignment_type text NOT NULL,status text NOT NULL);
+   CREATE TABLE ${prefix}ledger_accounts(
+     id bigint PRIMARY KEY,user_id bigint REFERENCES ${prefix}users(id),
+     account_type text NOT NULL,currency text NOT NULL);
+   CREATE TABLE ${prefix}ledger_transactions(
+     id bigint PRIMARY KEY,idempotency_key text UNIQUE NOT NULL,
+     status text NOT NULL,transaction_type text NOT NULL,reference_id text);
+   CREATE TABLE ${prefix}ledger_entries(
+     transaction_id bigint NOT NULL REFERENCES ${prefix}ledger_transactions(id),
+     account_id bigint NOT NULL REFERENCES ${prefix}ledger_accounts(id),
+     entry_type text NOT NULL,amount numeric(36,18) NOT NULL,currency text NOT NULL);
+   CREATE TABLE ${prefix}verified_deposit_evidence(
+     event_key text PRIMARY KEY,block_hash text NOT NULL,
+     block_number numeric(78,0) NOT NULL,token_contract text NOT NULL,
+     deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL);
+  `);
+  const result=await auditDepositSchema(pool,{schema});
+  assert.deepEqual(result.missing,[]);
+  assert.deepEqual(result.incompatible,[]);
+  assert.equal(result.ready,true);
+ }finally{
+  await q('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
