@@ -11,7 +11,7 @@ function mock(rows) {
   const calls = [];
   return { calls, async query(sql, params) {
     calls.push({sql, params});
-    return { rows: rows };
+    return { rows: sql.includes("current_setting(") ? [{marker:"active"}] : rows };
   }};
 }
 const resolve = createCatalogDepositOwnerResolver({tokenContract});
@@ -19,8 +19,8 @@ test("valid owner and lock before lookup", async () => {
   const client = mock([row]);
   const result = await resolve(client, evidence);
   assert.equal(requireUniqueDepositOwner(evidence, result).userId, "123");
-  assert.match(client.calls[1].sql, /SHARE ROW EXCLUSIVE/);
-  assert.deepEqual(client.calls[2].params, [depositAddress]);
+  assert.match(client.calls[3].sql, /SHARE ROW EXCLUSIVE/);
+  assert.deepEqual(client.calls[4].params, [depositAddress]);
 });
 test("reject unknown chain or token before database access", async () => {
   for (const change of [{chainId:"1"}, {tokenContract:depositAddress}, {depositAddress:"bad"}]) {
@@ -37,7 +37,7 @@ test("reject missing, ambiguous and inactive assignments", async () => {
 });
 test("lock failure propagates without ownership lookup", async () => {
   let count = 0;
-  const client = { async query() { if (++count === 2) throw new Error("lock timeout"); } };
+  const client = { async query() { if (++count === 4) throw new Error("lock timeout"); } };
   await assert.rejects(resolve(client,evidence), /lock timeout/);
-  assert.equal(count,2);
+  assert.equal(count,4);
 });
