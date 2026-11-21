@@ -16,6 +16,13 @@ export function createCatalogDepositOwnerResolver({ tokenContract } = {}) {
         evidence.tokenContract.toLowerCase() !== contract) {
       throw new Error("Unexpected deposit chain or token");
     }
+    // SET LOCAL is discarded after a standalone statement; a follow-up read
+    // must see the marker only when the caller owns an explicit transaction.
+    await client.query("SET LOCAL profino.deposit_owner_tx = 'active'");
+    const boundary = await client.query("SELECT current_setting('profino.deposit_owner_tx', true) AS marker");
+    if (boundary.rows?.[0]?.marker !== 'active') {
+      throw new Error("Explicit database transaction required for deposit ownership");
+    }
     await client.query("SET LOCAL lock_timeout = '2s'");
     await client.query("LOCK TABLE public.users, public.wallets, public.user_wallet_assignments IN SHARE ROW EXCLUSIVE MODE");
     const result = await client.query(
