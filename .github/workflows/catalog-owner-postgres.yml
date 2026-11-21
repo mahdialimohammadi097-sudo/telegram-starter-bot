@@ -1,0 +1,33 @@
+name: Catalog ownership PostgreSQL
+on:
+  pull_request:
+  push:
+    branches:
+      - feature/catalog-owner-adapter
+permissions:
+  contents: read
+jobs:
+  concurrency:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: rehearsal
+          POSTGRES_DB: catalog_rehearsal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: node --test src/catalog-deposit-owner.postgres.test.js
+        env:
+          CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
