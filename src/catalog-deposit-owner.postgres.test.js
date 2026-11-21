@@ -1,0 +1,45 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import pg from "pg";
+import { createCatalogDepositOwnerResolver } from "./catalog-deposit-owner.js";
+import { requireUniqueDepositOwner } from "./deposit-owner-guard.js";
+const url = process.env.CATALOG_REHEARSAL_URL;
+test("catalog locks prevent concurrent assignment writes", {skip: !url}, async () => {
+  const parsed = new URL(url);
+  assert.ok(["localhost","127.0.0.1"].includes(parsed.hostname));
+  assert.equal(parsed.pathname,"/catalog_rehearsal");
+  const pool = new pg.Pool({connectionString:url});
+  const a = await pool.connect();
+  const b = await pool.connect();
+  const address = "0x" + "b".repeat(40);
+  const tokenContract = "0x" + "a".repeat(40);
+  const evidence = {depositAddress:address, tokenContract, chainId:"56",
+    eventKey:"bsc:56:0x"+"c".repeat(64)+":0",ledgerAmount:"10.00000000"};
+  try {
+    await a.query("CREATE TABLE public.users (id bigint PRIMARY KEY,status text)");
+    await a.query("CREATE TABLE public.wallets (id bigint PRIMARY KEY,wallet_address text,status text,network text,wallet_type text,is_platform_controlled boolean,chain_id integer)");
+    await a.query("CREATE TABLE public.user_wallet_assignments (id bigint PRIMARY KEY,user_id bigint,wallet_id bigint,status text,ended_at timestamptz,assignment_type text)");
+    await a.query("INSERT INTO public.users VALUES (1,'active'),(2,'active')");
+    await a.query("INSERT INTO public.wallets VALUES (1,$1,'active','BEP20','deposit',true,56)",[address]);
+    await a.query("INSERT INTO public.user_wallet_assignments VALUES (1,1,1,'active',NULL,'deposit')");
+    const resolve = createCatalogDepositOwnerResolver({tokenContract});
+    await a.query("BEGIN");
+    assert.equal(requireUniqueDepositOwner(evidence,await resolve(a,evidence)).userId,"1");
+    await b.query("BEGIN");
+    await b.query("SET LOCAL lock_timeout = '300ms'");
+    await assert.rejects(b.query("INSERT INTO public.user_wallet_assignments VALUES (2,2,1,'active',NULL,'deposit')"), {code:"55P03"});
+    await b.query("ROLLBACK");
+    await a.query("COMMIT");
+    await b.query("INSERT INTO public.user_wallet_assignments VALUES (2,2,1,'active',NULL,'deposit')");
+    await a.query("BEGIN");
+    assert.throws(() => requireUniqueDepositOwner(evidence, []));
+    const rows = await resolve(a,evidence);
+    assert.equal(rows.length,2);
+    assert.throws(() => requireUniqueDepositOwner(evidence,rows));
+    await a.query("ROLLBACK");
+  } finally {
+    await a.query("ROLLBACK").catch(()=>{});
+    await b.query("ROLLBACK").catch(()=>{});
+    a.release(); b.release(); await pool.end();
+  }
+});
