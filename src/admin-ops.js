@@ -3,6 +3,7 @@ import { pool } from "./database.js";
 import { isConfirmationCurrent } from "./admin-status-guard.js";
 import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
 import { adminText } from "./admin-language.js";
+import { editAdminMessageSafely } from "./admin-message-edit.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -210,7 +211,16 @@ async function showUsers(ctx, page = 0, edit = false) {
         "Search by Telegram ID: /user <telegram_id>"
       ].join("\n");
 
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  if (edit) {
+    try {
+      return await ctx.editMessageText(message, { reply_markup: keyboard });
+    } catch (error) {
+      // Telegram returns 400 when text and inline keyboard are already identical.
+      // This is an idempotent UI refresh, not a failed language update.
+      if (error?.error_code === 400 && /message is not modified/i.test(error?.description ?? "")) return;
+      throw error;
+    }
+  }
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
@@ -533,7 +543,9 @@ async function showAdminLanguage(ctx, edit = false) {
   const message = language === "fa"
     ? "تنظیم زبان پنل مدیریت\n\nزبان موردنظر را انتخاب کنید. این تنظیم فقط روی پنل خصوصی ادمین اثر دارد؛ رابط کاربران PROFINO انگلیسی باقی می‌ماند."
     : "ADMIN PANEL LANGUAGE\n\nChoose the language for the private admin panel. This preference does not change the customer-facing PROFINO interface, which remains English.";
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  if (edit) {
+    return editAdminMessageSafely(ctx, message, { reply_markup: keyboard });
+  }
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
