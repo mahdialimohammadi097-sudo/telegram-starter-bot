@@ -237,6 +237,15 @@ test('verified BEP20 receipt posts one atomic PostgreSQL journal and replays ide
     ['debit','25.000000000000000000','CLEARING'],
     ['credit','25.000000000000000000','AVAILABLE']
   ]);
+  // A replay with the same tx/log identity but a different block is a
+  // potential reorg: it must not credit a second time or silently succeed.
+  const reorgHash='0x'+'7'.repeat(64);
+  const changedReceipt={...receipt,blockHash:reorgHash,
+    logs:receipt.logs.map(log=>({...log,blockHash:reorgHash}))};
+  await assert.rejects(rehearseVerifiedBep20Deposit({...args,
+    receipt:changedReceipt,transaction:{...transaction,blockHash:reorgHash},
+    block:{...block,hash:reorgHash}}),/Conflicting verified deposit evidence/);
+  assert.equal(await count(),before+1);
   await assert.rejects(rehearseVerifiedBep20Deposit({...args, head:'0x76'}), /Insufficient confirmations/);
   assert.equal(await count(), before + 1);
 });
