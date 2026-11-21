@@ -1,11 +1,10 @@
 // Explicitly disabled production boundary. No Telegram command or scheduler may
 // invoke a financial posting until the final security/accounting release gate.
 import {readVerifiedBep20Deposit} from "./bep20-rpc-reader.js";
-import {rehearseVerifiedBep20Deposit} from "./bep20-deposit-rehearsal.js";
 
 export function createDisabledDepositIngestion({
- enabled=false, approvedRelease=false, pool, rpc, tokenContract,
- clearingAccountId, resolveAndLockAssignments, minConfirmations=20
+ enabled=false, approvedRelease=false, rpc, tokenContract,
+ minConfirmations=20
 }={}) {
  if(enabled || approvedRelease) {
   throw new Error("Real deposit ingestion requires a separately reviewed production release");
