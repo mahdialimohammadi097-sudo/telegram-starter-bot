@@ -31,6 +31,9 @@ jobs:
       - run: node --test src/confirmed-deposit-posting.postgres.test.js
         env:
           DATABASE_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
+      - run: node --test src/verified-deposit-evidence-store.postgres.test.js
+        env:
+          CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
       - run: node --test src/catalog-deposit-owner.postgres.test.js
         env:
           CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
