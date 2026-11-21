@@ -277,3 +277,29 @@ test('failed atomic journal rolls back newly persisted blockchain evidence', { s
   assert.equal(stored.rows[0].n,0);
   assert.equal((await rehearseVerifiedBep20Deposit(args)).idempotent,false);
 });
+
+test('missing evidence table prevents a journal even when ownership and receipt are valid', { skip: !enabled }, async () => {
+  const { rehearseVerifiedBep20Deposit } = await import('./bep20-deposit-rehearsal.js');
+  const txHash='0x'+'6'.repeat(64), blockHash='0x'+'5'.repeat(64);
+  const block={hash:blockHash,number:'0x66'};
+  const transaction={hash:txHash,blockHash,blockNumber:'0x66'};
+  const receipt={transactionHash:txHash,blockHash,blockNumber:'0x66',status:'0x1',
+    logs:[{address:contract,topics:[
+      '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+      '0x'+'0'.repeat(24)+'b'.repeat(40),
+      '0x'+'0'.repeat(24)+address.slice(2)],
+      data:'0x'+(25n*10n**18n).toString(16).padStart(64,'0'),
+      logIndex:'0x0',transactionHash:txHash,blockHash}]};
+  const args={pool,receipt,transaction,block,head:'0x79',tokenContract:contract,
+    depositAddress:address,clearingAccountId:'1',resolveAndLockAssignments:resolve};
+  const before=await count();
+  await pool.query('ALTER TABLE verified_deposit_evidence RENAME TO unavailable_evidence_fixture');
+  try {
+    await assert.rejects(rehearseVerifiedBep20Deposit(args), e => e.code==='42P01');
+    assert.equal(await count(),before);
+  } finally {
+    await pool.query('ALTER TABLE unavailable_evidence_fixture RENAME TO verified_deposit_evidence');
+  }
+  assert.equal((await rehearseVerifiedBep20Deposit(args)).idempotent,false);
+  assert.equal(await count(),before+1);
+});
