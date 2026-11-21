@@ -90,3 +90,19 @@ test("schema audit rejects insufficient total precision even when scale is corre
   await pool.end();
  }
 });
+
+test("schema audit rejects partial unique indexes for deposit event identity",{skip:!url},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_partial_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  await pool.query('CREATE UNIQUE INDEX ON "'+schema+'".verified_deposit_evidence(event_key) WHERE event_key IS NOT NULL');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:unique_index"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
