@@ -8,7 +8,10 @@ import { withLedgerTransaction, postJournalInTransaction } from "./ledger-postin
 // and return ALL assignments, with active=false for inactive users/wallets.
 // Those locks must remain held on this client until COMMIT/ROLLBACK.
 export async function postConfirmedDeposit({ pool, evidence, clearingAccountId,
-  resolveAndLockAssignments }) {
+  resolveAndLockAssignments, persistVerifiedEvidence }) {
+  if (typeof persistVerifiedEvidence !== "function") {
+    throw new TypeError("Durable verified evidence persistence is required before posting");
+  }
   if (typeof resolveAndLockAssignments !== "function") {
     throw new TypeError("A reviewed transactional ownership adapter is required");
   }
@@ -30,6 +33,8 @@ export async function postConfirmedDeposit({ pool, evidence, clearingAccountId,
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
     const assignments = await resolveAndLockAssignments(client, verified);
     const owner = requireUniqueDepositOwner(verified, assignments);
+    // Evidence and journal must commit or roll back together.
+    await persistVerifiedEvidence(client, verified);
     const accounts = await client.query(
       `SELECT id, user_id, account_type, currency FROM ledger_accounts
        WHERE id = $1 OR (user_id = $2 AND account_type = 'AVAILABLE' AND currency = 'USDT')

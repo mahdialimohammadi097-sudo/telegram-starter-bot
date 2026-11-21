@@ -34,6 +34,9 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/profino_test
+      # Restricted to a disposable CI database; never point at production.
+      PROFINO_DISPOSABLE_POSTGRES: 'yes'
+      CATALOG_REHEARSAL_URL: postgres://postgres:postgres@localhost:5432/catalog_rehearsal
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -50,6 +53,10 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           find . -path ./node_modules -prune -o -name "*.js" -print0 | xargs -0 -n1 node --check
+      - name: Prepare isolated deposit migration rehearsal database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
       - name: Run unit and PostgreSQL 17 integration tests
         shell: bash
         run: |
@@ -64,6 +71,21 @@ jobs:
             grep -E '^# (tests|pass|fail|skipped) [0-9]+$' "$RUNNER_TEMP/profino-tests.tap"
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Reset disposable databases before focused PostgreSQL replay
+        if: matrix.node-version == 22
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The full suite creates catalog fixtures; the focused replay must
+          # start with clean databases to avoid duplicate-table failures.
+          for db in profino_test catalog_rehearsal; do
+            psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "DROP DATABASE IF EXISTS $db WITH (FORCE)"
+            psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "CREATE DATABASE $db"
+          done
       - name: Verify the focused PostgreSQL review command
         if: matrix.node-version == 22
         run: npm run test:postgres

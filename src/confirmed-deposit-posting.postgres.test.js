@@ -5,12 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 import { postConfirmedDeposit } from './confirmed-deposit-posting.js';
+import {persistVerifiedDepositEvidence} from './verified-deposit-evidence-store.js';
 
 const enabled = Boolean(process.env.DATABASE_URL);
 let admin, pool, schema;
 const address = '0x' + 'a'.repeat(40);
 const contract = '0x' + 'c'.repeat(40);
 const evidence = n => ({ chainId: '56', tokenContract: contract, depositAddress: address,
+  blockHash: '0x' + 'b'.repeat(64), blockNumber: '100',
   eventKey: 'bsc:56:0x' + n.toString(16).padStart(64, '0') + ':0',
   amountBaseUnits: '25000000000000000000', ledgerAmount: '25.00000000' });
 
@@ -21,6 +23,7 @@ before(async () => {
   await admin.query(`CREATE SCHEMA "${schema}"`);
   pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, options: `-c search_path=${schema}` });
   await pool.query(await readFile(new URL('../test/fixtures/ledger-contract.sql', import.meta.url), 'utf8'));
+  await pool.query(await readFile(new URL('../test/fixtures/verified-deposit-evidence.sql', import.meta.url), 'utf8'));
   // Explicitly synthetic ownership contract; not a FadeHost schema claim.
   await pool.query(`INSERT INTO users VALUES (1), (2);
     INSERT INTO ledger_accounts (id, user_id, account_code, account_type) VALUES
@@ -41,7 +44,8 @@ async function resolve(client) {
     tokenContract: contract, chainId: 56, currency: 'USDT' }));
 }
 const post = (n, overrides = {}) => postConfirmedDeposit({ pool, evidence: evidence(n),
-  clearingAccountId: '1', resolveAndLockAssignments: resolve, ...overrides });
+  clearingAccountId: '1', resolveAndLockAssignments: resolve,
+  persistVerifiedEvidence: persistVerifiedDepositEvidence, ...overrides });
 const count = async () => Number((await pool.query('SELECT count(*) FROM ledger_transactions')).rows[0].count);
 
 test('concurrent confirmed receipts credit exactly once and replay after commit', { skip: !enabled }, async () => {
@@ -56,7 +60,7 @@ test('concurrent confirmed receipts credit exactly once and replay after commit'
   assert.equal(await count(), 1);
 });
 test('changed amount and reassigned owner cannot replay an already credited event', { skip: !enabled }, async () => {
-  await assert.rejects(post(1, { evidence: { ...evidence(1), amountBaseUnits: '26000000000000000000', ledgerAmount: '26.00000000' } }), /different request/);
+  await assert.rejects(post(1, { evidence: { ...evidence(1), amountBaseUnits: '26000000000000000000', ledgerAmount: '26.00000000' } }), /(?:different request|Conflicting verified deposit evidence)/);
   await pool.query('UPDATE test_assignments SET user_id=2');
   try { await assert.rejects(post(1), /different request/); }
   finally { await pool.query('UPDATE test_assignments SET user_id=1'); }
@@ -195,4 +199,110 @@ test('ledger audit is a consistent snapshot across concurrent commits and a fres
   const limited = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', maxJournals: 1, resolveExpectedDeposits: resolver });
   assert.equal(limited.scanComplete, false);
   assert.equal(limited.clean, false);
+});
+
+test('verified BEP20 receipt posts one atomic PostgreSQL journal and replays idempotently', { skip: !enabled }, async () => {
+  const { rehearseVerifiedBep20Deposit } = await import('./bep20-deposit-rehearsal.js');
+  const txHash = '0x' + 'f'.repeat(64);
+  const blockHash = '0x' + 'e'.repeat(64);
+  const block = {hash:blockHash, number:'0x64'};
+  const transaction = {hash:txHash, blockHash, blockNumber:'0x64'};
+  const log = {
+    address:contract,
+    topics: [
+      '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+      '0x' + '0'.repeat(24) + 'b'.repeat(40),
+      '0x' + '0'.repeat(24) + address.slice(2)
+    ],
+    data:'0x' + (25n * 10n ** 18n).toString(16).padStart(64,'0'),
+    logIndex:'0x0', transactionHash:txHash, blockHash
+  };
+  const receipt = {transactionHash:txHash, blockHash, blockNumber:'0x64', status:'0x1', logs:[log]};
+  const args = {pool, receipt, transaction, block, head:'0x77',
+    tokenContract:contract, depositAddress:address, clearingAccountId:'1',
+    resolveAndLockAssignments:resolve};
+  const before = await count();
+  const first = await rehearseVerifiedBep20Deposit(args);
+  assert.equal(first.idempotent, false);
+  assert.equal((await rehearseVerifiedBep20Deposit(args)).idempotent, true);
+  assert.equal(await count(), before + 1);
+  const persisted = await pool.query('SELECT block_hash,amount_base_units::text AS amount FROM verified_deposit_evidence WHERE event_key=$1',['bsc:56:'+txHash+':0']);
+  assert.equal(persisted.rowCount,1);
+  assert.equal(persisted.rows[0].block_hash,blockHash);
+  assert.equal(persisted.rows[0].amount,'25000000000000000000');
+  const journal = await pool.query(
+    `SELECT le.entry_type, le.amount::text AS amount, la.account_type
+       FROM ledger_entries le JOIN ledger_accounts la ON la.id = le.account_id
+       JOIN ledger_transactions lt ON lt.id = le.transaction_id
+      WHERE lt.idempotency_key = $1 ORDER BY le.id`,
+    ['confirmed-deposit:bsc:56:' + txHash + ':0']);
+  assert.deepEqual(journal.rows.map(r=>[r.entry_type,r.amount,r.account_type]),[
+    ['debit','25.000000000000000000','CLEARING'],
+    ['credit','25.000000000000000000','AVAILABLE']
+  ]);
+  // A replay with the same tx/log identity but a different block is a
+  // potential reorg: it must not credit a second time or silently succeed.
+  const reorgHash='0x'+'7'.repeat(64);
+  const changedReceipt={...receipt,blockHash:reorgHash,
+    logs:receipt.logs.map(log=>({...log,blockHash:reorgHash}))};
+  await assert.rejects(rehearseVerifiedBep20Deposit({...args,
+    receipt:changedReceipt,transaction:{...transaction,blockHash:reorgHash},
+    block:{...block,hash:reorgHash}}),/Conflicting verified deposit evidence/);
+  assert.equal(await count(),before+1);
+  await assert.rejects(rehearseVerifiedBep20Deposit({...args, head:'0x76'}), /Insufficient confirmations/);
+  assert.equal(await count(), before + 1);
+});
+
+test('failed atomic journal rolls back newly persisted blockchain evidence', { skip: !enabled }, async () => {
+  const { rehearseVerifiedBep20Deposit } = await import('./bep20-deposit-rehearsal.js');
+  const txHash='0x'+'9'.repeat(64), blockHash='0x'+'8'.repeat(64);
+  const block={hash:blockHash,number:'0x65'};
+  const transaction={hash:txHash,blockHash,blockNumber:'0x65'};
+  const receipt={transactionHash:txHash,blockHash,blockNumber:'0x65',status:'0x1',
+    logs:[{address:contract,topics:[
+      '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+      '0x'+'0'.repeat(24)+'b'.repeat(40),
+      '0x'+'0'.repeat(24)+address.slice(2)],
+      data:'0x'+(25n*10n**18n).toString(16).padStart(64,'0'),
+      logIndex:'0x0',transactionHash:txHash,blockHash}]};
+  const args={pool,receipt,transaction,block,head:'0x78',tokenContract:contract,
+    depositAddress:address,clearingAccountId:'1',resolveAndLockAssignments:resolve};
+  const before=await count();
+  await pool.query(`CREATE FUNCTION reject_atomic_receipt_credit() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN IF NEW.entry_type='credit' THEN RAISE EXCEPTION 'injected atomic failure'; END IF; RETURN NEW; END $$;
+    CREATE TRIGGER reject_atomic_receipt_credit BEFORE INSERT ON ledger_entries
+      FOR EACH ROW EXECUTE FUNCTION reject_atomic_receipt_credit()`);
+  try { await assert.rejects(rehearseVerifiedBep20Deposit(args),/injected atomic failure/); }
+  finally { await pool.query('DROP TRIGGER reject_atomic_receipt_credit ON ledger_entries'); }
+  assert.equal(await count(),before);
+  const stored=await pool.query('SELECT count(*)::int AS n FROM verified_deposit_evidence WHERE event_key=$1',
+    ['bsc:56:'+txHash+':0']);
+  assert.equal(stored.rows[0].n,0);
+  assert.equal((await rehearseVerifiedBep20Deposit(args)).idempotent,false);
+});
+
+test('missing evidence table prevents a journal even when ownership and receipt are valid', { skip: !enabled }, async () => {
+  const { rehearseVerifiedBep20Deposit } = await import('./bep20-deposit-rehearsal.js');
+  const txHash='0x'+'6'.repeat(64), blockHash='0x'+'5'.repeat(64);
+  const block={hash:blockHash,number:'0x66'};
+  const transaction={hash:txHash,blockHash,blockNumber:'0x66'};
+  const receipt={transactionHash:txHash,blockHash,blockNumber:'0x66',status:'0x1',
+    logs:[{address:contract,topics:[
+      '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+      '0x'+'0'.repeat(24)+'b'.repeat(40),
+      '0x'+'0'.repeat(24)+address.slice(2)],
+      data:'0x'+(25n*10n**18n).toString(16).padStart(64,'0'),
+      logIndex:'0x0',transactionHash:txHash,blockHash}]};
+  const args={pool,receipt,transaction,block,head:'0x79',tokenContract:contract,
+    depositAddress:address,clearingAccountId:'1',resolveAndLockAssignments:resolve};
+  const before=await count();
+  await pool.query('ALTER TABLE verified_deposit_evidence RENAME TO unavailable_evidence_fixture');
+  try {
+    await assert.rejects(rehearseVerifiedBep20Deposit(args), e => e.code==='42P01');
+    assert.equal(await count(),before);
+  } finally {
+    await pool.query('ALTER TABLE unavailable_evidence_fixture RENAME TO verified_deposit_evidence');
+  }
+  assert.equal((await rehearseVerifiedBep20Deposit(args)).idempotent,false);
+  assert.equal(await count(),before+1);
 });
