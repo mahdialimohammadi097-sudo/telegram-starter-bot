@@ -30,7 +30,7 @@ test("staged evidence migration creates constrained table and is idempotent",asy
   assert.ok(result.rows.some(r=>r.indexdef.includes("(event_key)")&&r.indexdef.includes("UNIQUE")));
   await client.query(`INSERT INTO public.verified_deposit_evidence
    (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
-   VALUES ('valid','0x' || repeat('a',64),1,'0x' || repeat('b',40),'0x' || repeat('c',40),1000000000000000000)`);
+   VALUES ('bsc:56:0x' || repeat('d',64) || ':0','0x' || repeat('a',64),1,'0x' || repeat('b',40),'0x' || repeat('c',40),1000000000000000000)`);
   await client.query("SAVEPOINT invalid_evidence");
   await assert.rejects(client.query(`INSERT INTO public.verified_deposit_evidence
    (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
