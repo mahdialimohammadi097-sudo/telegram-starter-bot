@@ -71,6 +71,21 @@ jobs:
             grep -E '^# (tests|pass|fail|skipped) [0-9]+$' "$RUNNER_TEMP/profino-tests.tap"
             echo '~~~'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Reset disposable databases before focused PostgreSQL replay
+        if: matrix.node-version == 22
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The full suite creates catalog fixtures; the focused replay must
+          # start with clean databases to avoid duplicate-table failures.
+          for db in profino_test catalog_rehearsal; do
+            psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "DROP DATABASE IF EXISTS $db WITH (FORCE)"
+            psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "CREATE DATABASE $db"
+          done
       - name: Verify the focused PostgreSQL review command
         if: matrix.node-version == 22
         run: npm run test:postgres
