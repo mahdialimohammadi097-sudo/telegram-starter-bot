@@ -82,6 +82,15 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
     assert.equal(historicalRows.length, 2);
     assert.throws(() => requireUniqueDepositOwner(evidence, historicalRows));
     await a.query("ROLLBACK");
+    // A dangling historical assignment must remain visible, never disappear
+    // through an INNER JOIN and allow a false unique-owner attribution.
+    await a.query("UPDATE public.user_wallet_assignments SET user_id = 999 WHERE id = 2");
+    await a.query("BEGIN");
+    const orphanedRows = await resolve(a,evidence);
+    assert.equal(orphanedRows.length,2);
+    assert.equal(orphanedRows.find(row => row.userId === "999")?.active,false);
+    assert.throws(() => requireUniqueDepositOwner(evidence,orphanedRows));
+    await a.query("ROLLBACK");
     // Remove the duplicate so each subsequent rejection tests its own cause.
     await a.query("DELETE FROM public.user_wallet_assignments WHERE id = 2");
     await a.query("UPDATE public.users SET status = 'blocked' WHERE id = 1");
