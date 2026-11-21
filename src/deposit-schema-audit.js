@@ -49,6 +49,27 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  for(const [table,column] of [["verified_deposit_evidence","event_key"],
    ["ledger_transactions","idempotency_key"]])
    if(!uniqueIndex(table,column)) incompatible.push(table+"."+column+":unique_index");
+ // Inspect actual FK constraints rather than inferring relationships from names.
+ const foreignKeys=await client.query(`
+ SELECT source.relname AS source_table, source_col.attname AS source_column,
+        target.relname AS target_table, target_col.attname AS target_column
+ FROM pg_constraint c
+ JOIN pg_class source ON source.oid=c.conrelid
+ JOIN pg_namespace ns ON ns.oid=source.relnamespace
+ JOIN pg_class target ON target.oid=c.confrelid
+ JOIN pg_namespace target_ns ON target_ns.oid=target.relnamespace
+ JOIN LATERAL unnest(c.conkey,c.confkey) AS pair(source_attnum,target_attnum) ON true
+ JOIN pg_attribute source_col ON source_col.attrelid=source.oid AND source_col.attnum=pair.source_attnum
+ JOIN pg_attribute target_col ON target_col.attrelid=target.oid AND target_col.attnum=pair.target_attnum
+ WHERE c.contype='f' AND ns.nspname=$1 AND target_ns.nspname=$1`,[schema]);
+ const fkSet=new Set(foreignKeys.rows.map(r=>[r.source_table,r.source_column,r.target_table,r.target_column].join('.')));
+ for(const relation of [
+  ["user_wallet_assignments","user_id","users","id"],
+  ["user_wallet_assignments","wallet_id","wallets","id"],
+  ["ledger_accounts","user_id","users","id"],
+  ["ledger_entries","transaction_id","ledger_transactions","id"],
+  ["ledger_entries","account_id","ledger_accounts","id"]
+ ]) if(!fkSet.has(relation.join('.'))) incompatible.push(relation.slice(0,2).join('.')+":foreign_key");
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
    missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
 }
