@@ -69,7 +69,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
    if(!uniqueIndex(table,column)) incompatible.push(table+"."+column+":unique_index");
  // Inspect actual FK constraints rather than inferring relationships from names.
  const foreignKeys=await client.query(`
- SELECT source.relname AS source_table, source_col.attname AS source_column,
+ SELECT c.convalidated AS validated, source.relname AS source_table, source_col.attname AS source_column,
         target.relname AS target_table, target_col.attname AS target_column
  FROM pg_constraint c
  JOIN pg_class source ON source.oid=c.conrelid
@@ -80,7 +80,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  JOIN pg_attribute source_col ON source_col.attrelid=source.oid AND source_col.attnum=pair.source_attnum
  JOIN pg_attribute target_col ON target_col.attrelid=target.oid AND target_col.attnum=pair.target_attnum
  WHERE c.contype='f' AND ns.nspname=$1 AND target_ns.nspname=$1`,[schema]);
- const fkSet=new Set(foreignKeys.rows.map(r=>[r.source_table,r.source_column,r.target_table,r.target_column].join('.')));
+ const fkSet=new Set(foreignKeys.rows.filter(r=>r.validated===true).map(r=>[r.source_table,r.source_column,r.target_table,r.target_column].join('.')));
  for(const relation of [
   ["user_wallet_assignments","user_id","users","id"],
   ["user_wallet_assignments","wallet_id","wallets","id"],
