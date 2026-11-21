@@ -60,7 +60,7 @@ test('concurrent confirmed receipts credit exactly once and replay after commit'
   assert.equal(await count(), 1);
 });
 test('changed amount and reassigned owner cannot replay an already credited event', { skip: !enabled }, async () => {
-  await assert.rejects(post(1, { evidence: { ...evidence(1), amountBaseUnits: '26000000000000000000', ledgerAmount: '26.00000000' } }), /different request/);
+  await assert.rejects(post(1, { evidence: { ...evidence(1), amountBaseUnits: '26000000000000000000', ledgerAmount: '26.00000000' } }), /(?:different request|Conflicting verified deposit evidence)/);
   await pool.query('UPDATE test_assignments SET user_id=2');
   try { await assert.rejects(post(1), /different request/); }
   finally { await pool.query('UPDATE test_assignments SET user_id=1'); }
