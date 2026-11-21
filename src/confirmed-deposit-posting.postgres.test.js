@@ -196,3 +196,42 @@ test('ledger audit is a consistent snapshot across concurrent commits and a fres
   assert.equal(limited.scanComplete, false);
   assert.equal(limited.clean, false);
 });
+
+test('verified BEP20 receipt posts one atomic PostgreSQL journal and replays idempotently', { skip: !enabled }, async () => {
+  const { rehearseVerifiedBep20Deposit } = await import('./bep20-deposit-rehearsal.js');
+  const txHash = '0x' + 'f'.repeat(64);
+  const blockHash = '0x' + 'e'.repeat(64);
+  const block = {hash:blockHash, number:'0x64'};
+  const transaction = {hash:txHash, blockHash, blockNumber:'0x64'};
+  const log = {
+    address:contract,
+    topics: [
+      '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+      '0x' + '0'.repeat(24) + 'b'.repeat(40),
+      '0x' + '0'.repeat(24) + address.slice(2)
+    ],
+    data:'0x' + (25n * 10n ** 18n).toString(16).padStart(64,'0'),
+    logIndex:'0x0', transactionHash:txHash, blockHash
+  };
+  const receipt = {transactionHash:txHash, blockHash, blockNumber:'0x64', status:'0x1', logs:[log]};
+  const args = {pool, receipt, transaction, block, head:'0x77',
+    tokenContract:contract, depositAddress:address, clearingAccountId:'1',
+    resolveAndLockAssignments:resolve};
+  const before = await count();
+  const first = await rehearseVerifiedBep20Deposit(args);
+  assert.equal(first.idempotent, false);
+  assert.equal((await rehearseVerifiedBep20Deposit(args)).idempotent, true);
+  assert.equal(await count(), before + 1);
+  const journal = await pool.query(
+    `SELECT le.entry_type, le.amount::text AS amount, la.account_type
+       FROM ledger_entries le JOIN ledger_accounts la ON la.id = le.account_id
+       JOIN ledger_transactions lt ON lt.id = le.transaction_id
+      WHERE lt.idempotency_key = $1 ORDER BY le.id`,
+    ['confirmed-deposit:bsc:56:' + txHash + ':0']);
+  assert.deepEqual(journal.rows.map(r=>[r.entry_type,r.amount,r.account_type]),[
+    ['debit','25.000000000000000000','CLEARING'],
+    ['credit','25.000000000000000000','AVAILABLE']
+  ]);
+  await assert.rejects(rehearseVerifiedBep20Deposit({...args, head:'0x76'}), /Insufficient confirmations/);
+  assert.equal(await count(), before + 1);
+});
