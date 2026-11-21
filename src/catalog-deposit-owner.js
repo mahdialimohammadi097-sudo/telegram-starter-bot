@@ -34,10 +34,10 @@ export function createCatalogDepositOwnerResolver({ tokenContract } = {}) {
                AND u.status = 'active') AS active
          FROM public.wallets w
          JOIN public.user_wallet_assignments a ON a.wallet_id = w.id
-         JOIN public.users u ON u.id = a.user_id
+         LEFT JOIN public.users u ON u.id = a.user_id
         WHERE w.chain_id = 56 AND lower(w.wallet_address) = $1
         ORDER BY a.id`, [evidence.depositAddress.toLowerCase()]);
-    // No attribution is safe if the catalog has no historical assignment
+    // Preserve orphaned assignment rows as inactive: an INNER JOIN would hide\n    // them and could incorrectly make a conflicting owner look unique.\n    // No attribution is safe if the catalog has no historical assignment
     // evidence; the caller must fail closed on empty or ambiguous results.
     return result.rows.map(row => ({
       userId: row.user_id, address: row.wallet_address,
