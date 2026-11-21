@@ -45,7 +45,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  [schema,["verified_deposit_evidence","ledger_transactions"]]);
  const uniqueIndex=(table,column)=>unique.rows.some(r=>r.tablename===table &&
    /CREATE UNIQUE INDEX/i.test(r.indexdef) &&
-   new RegExp('\\\\('+column+'\\\\)').test(r.indexdef));
+   r.indexdef.includes('('+column+')'));
  for(const [table,column] of [["verified_deposit_evidence","event_key"],
    ["ledger_transactions","idempotency_key"]])
    if(!uniqueIndex(table,column)) incompatible.push(table+"."+column+":unique_index");
