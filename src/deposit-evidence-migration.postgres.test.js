@@ -91,6 +91,20 @@ test("staged evidence migration creates constrained table and is idempotent",asy
     assert.equal(Number(columnMap.get(name)?.numeric_precision),78);
     assert.equal(Number(columnMap.get(name)?.numeric_scale),0);
   }
+  // Evidence-only migration must not introduce ledger posting triggers.
+  const triggers=await client.query(`SELECT tgname FROM pg_trigger
+    WHERE tgrelid='public.verified_deposit_evidence'::regclass
+      AND NOT tgisinternal`);
+  assert.deepEqual(triggers.rows,[],"Evidence table must not post balances via triggers");
+  const ledgerTouches=await client.query(`SELECT count(*)::int AS n FROM pg_depend d
+    JOIN pg_class source ON source.oid=d.objid
+    WHERE source.oid='public.verified_deposit_evidence'::regclass
+      AND d.refobjid IN (
+        to_regclass('public.ledger_accounts'),
+        to_regclass('public.ledger_entries'),
+        to_regclass('public.ledger_transactions')
+      )`);
+  assert.equal(ledgerTouches.rows[0].n,0,"Evidence table must not depend on ledger tables");
   const count=await client.query("SELECT count(*)::int AS n FROM public.verified_deposit_evidence");
   assert.equal(count.rows[0].n,1);
  }finally{
