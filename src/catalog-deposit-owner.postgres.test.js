@@ -23,6 +23,8 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
     await a.query("INSERT INTO public.wallets VALUES (1,$1,'active','BEP20','deposit',true,56)",[address]);
     await a.query("INSERT INTO public.user_wallet_assignments VALUES (1,1,1,'active',NULL,'deposit')");
     const resolve = createCatalogDepositOwnerResolver({tokenContract});
+    // Standalone queries must not silently release the ownership lock.
+    await assert.rejects(resolve(a,evidence), /Explicit database transaction required/);
     await a.query("BEGIN");
     assert.equal(requireUniqueDepositOwner(evidence,await resolve(a,evidence)).userId,"1");
     await b.query("BEGIN");
