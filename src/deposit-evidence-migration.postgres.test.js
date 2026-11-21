@@ -9,13 +9,14 @@ test("staged evidence migration creates constrained table and is idempotent",{sk
  const migration=await readFile(new URL("../migrations/20261121_verified_deposit_evidence.sql",import.meta.url),"utf8");
  try{
   await client.query("BEGIN");
-  await client.query("SET LOCAL search_path TO pg_temp");
+
   // The migration is explicitly schema-qualified. Test it in a disposable database
   // only, never a production database or an existing shared test schema.
   const check=await client.query("SELECT to_regclass('public.verified_deposit_evidence') AS name");
   assert.equal(check.rows[0].name,null,"CI database must not already contain production evidence table");
-  await client.query(migration);
-  await client.query(migration);
+  const ddl=migration.replace(/^BEGIN;|^COMMIT;/gm,"");
+  await client.query(ddl);
+  await client.query(ddl);
   const result=await client.query("SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='verified_deposit_evidence'");
   assert.ok(result.rows.some(r=>r.indexdef.includes("(event_key)")&&r.indexdef.includes("UNIQUE")));
   await assert.rejects(client.query(`INSERT INTO public.verified_deposit_evidence
