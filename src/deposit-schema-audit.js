@@ -49,12 +49,21 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  }
  // A unique index on the event key and the ledger idempotency key is mandatory.
  const unique=await client.query(`
- SELECT tablename,indexdef FROM pg_indexes
- WHERE schemaname=$1 AND tablename=ANY($2::text[])`,
- [schema,["verified_deposit_evidence","ledger_transactions"]]);
- const uniqueIndex=(table,column)=>unique.rows.some(r=>r.tablename===table &&
-   /CREATE UNIQUE INDEX/i.test(r.indexdef) &&
-   r.indexdef.includes('('+column+')'));
+ SELECT t.relname AS tablename,a.attname AS column_name,
+        i.indisvalid AS valid,i.indisready AS ready,
+        i.indpred IS NULL AS unfiltered,
+        i.indexprs IS NULL AS plain_column,
+        i.indnkeyatts AS key_count
+ FROM pg_index i
+ JOIN pg_class t ON t.oid=i.indrelid
+ JOIN pg_namespace n ON n.oid=t.relnamespace
+ JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=i.indkey[0]
+ WHERE n.nspname=$1 AND t.relname=ANY($2::text[]) AND i.indisunique
+ `,[schema,["verified_deposit_evidence","ledger_transactions"]]);
+ const uniqueIndex=(table,column)=>unique.rows.some(r=>
+   r.tablename===table && r.column_name===column &&
+   r.valid===true && r.ready===true && r.unfiltered===true &&
+   r.plain_column===true && Number(r.key_count)===1);
  for(const [table,column] of [["verified_deposit_evidence","event_key"],
    ["ledger_transactions","idempotency_key"]])
    if(!uniqueIndex(table,column)) incompatible.push(table+"."+column+":unique_index");
