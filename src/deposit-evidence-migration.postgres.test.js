@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import pg from "pg";
 import {readFile} from "node:fs/promises";
 const url=process.env.CATALOG_REHEARSAL_URL;
-test("staged evidence migration creates constrained table and is idempotent",{skip:!url},async()=>{
+const safeTarget=()=>{
+ if(!url || process.env.PROFINO_DISPOSABLE_POSTGRES!=="yes") return false;
+ try {
+  const target=new URL(url);
+  return ["localhost","127.0.0.1","::1"].includes(target.hostname) &&
+   target.pathname==="/catalog_rehearsal";
+ } catch {return false}
+};
+test("staged evidence migration creates constrained table and is idempotent",{skip:!safeTarget()},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const client=await pool.connect();
  const migration=await readFile(new URL("../migrations/20261121_verified_deposit_evidence.sql",import.meta.url),"utf8");
