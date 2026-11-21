@@ -52,6 +52,14 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
       {code:"55P03"}
     );
     await b.query("ROLLBACK");
+    // User status changes must not race with an in-flight attribution.
+    await b.query("BEGIN");
+    await b.query("SET LOCAL lock_timeout = '300ms'");
+    await assert.rejects(
+      b.query("UPDATE public.users SET status = 'blocked' WHERE id = 1"),
+      {code:"55P03"}
+    );
+    await b.query("ROLLBACK");
     await a.query("COMMIT");
     // After commit, the second transaction can resolve the same owner.
     await b.query("BEGIN");
