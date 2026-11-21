@@ -41,3 +41,23 @@ test("lock failure propagates without ownership lookup", async () => {
   await assert.rejects(resolve(client,evidence), /lock timeout/);
   assert.equal(count,4);
 });
+
+test("reject invalid trusted token configuration", () => {
+  for (const value of [undefined, "", "USDT", "0x123", null]) {
+    assert.throws(() => createCatalogDepositOwnerResolver({tokenContract:value}), TypeError);
+  }
+});
+test("normalize address and contract case while retaining owner attribution", async () => {
+  const client = mock([{...row, wallet_address:depositAddress.toUpperCase().replace("0X","0x")}]);
+  const upperEvidence = {...evidence, depositAddress:depositAddress.toUpperCase().replace("0X","0x"),
+    tokenContract:tokenContract.toUpperCase().replace("0X","0x")};
+  const owners = await resolve(client,upperEvidence);
+  assert.equal(requireUniqueDepositOwner(upperEvidence,owners).userId,"123");
+  assert.deepEqual(client.calls[4].params,[depositAddress]);
+});
+test("fail closed if transaction boundary is absent", async () => {
+  const calls=[];
+  const client={async query(sql){calls.push(sql);return {rows:sql.includes("current_setting(")?[{marker:""}]:[]};}};
+  await assert.rejects(resolve(client,evidence), /Explicit database transaction required/);
+  assert.equal(calls.length,2);
+});
