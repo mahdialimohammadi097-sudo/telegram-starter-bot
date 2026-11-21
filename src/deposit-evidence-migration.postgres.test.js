@@ -11,7 +11,8 @@ const safeTarget=()=>{
    target.pathname==="/catalog_rehearsal";
  } catch {return false}
 };
-test("staged evidence migration creates constrained table and is idempotent",{skip:!safeTarget()},async()=>{
+test("staged evidence migration creates constrained table and is idempotent",async()=>{
+ assert.equal(safeTarget(),true,"Explicit disposable local PostgreSQL target is required");
  const pool=new pg.Pool({connectionString:url});
  const client=await pool.connect();
  const migration=await readFile(new URL("../migrations/20261121_verified_deposit_evidence.sql",import.meta.url),"utf8");
