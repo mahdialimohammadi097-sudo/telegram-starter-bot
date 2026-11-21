@@ -61,6 +61,17 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
     const suspendedRows = await resolve(a,evidence);
     assert.throws(() => requireUniqueDepositOwner(evidence, suspendedRows));
     await a.query("ROLLBACK");
+    // Wrong wallet purpose and network must not authorize a credit.
+    await a.query("UPDATE public.wallets SET status = 'active', wallet_type = 'withdrawal' WHERE id = 1");
+    await a.query("BEGIN");
+    const wrongPurpose = await resolve(a,evidence);
+    assert.throws(() => requireUniqueDepositOwner(evidence,wrongPurpose));
+    await a.query("ROLLBACK");
+    await a.query("UPDATE public.wallets SET wallet_type = 'deposit', network = 'OTHER' WHERE id = 1");
+    await a.query("BEGIN");
+    const wrongNetwork = await resolve(a,evidence);
+    assert.throws(() => requireUniqueDepositOwner(evidence,wrongNetwork));
+    await a.query("ROLLBACK");
   } finally {
     await a.query("ROLLBACK").catch(()=>{});
     await b.query("ROLLBACK").catch(()=>{});
