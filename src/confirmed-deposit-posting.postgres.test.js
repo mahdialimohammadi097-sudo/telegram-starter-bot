@@ -12,6 +12,7 @@ let admin, pool, schema;
 const address = '0x' + 'a'.repeat(40);
 const contract = '0x' + 'c'.repeat(40);
 const evidence = n => ({ chainId: '56', tokenContract: contract, depositAddress: address,
+  blockHash: '0x' + 'b'.repeat(64), blockNumber: '100',
   eventKey: 'bsc:56:0x' + n.toString(16).padStart(64, '0') + ':0',
   amountBaseUnits: '25000000000000000000', ledgerAmount: '25.00000000' });
 
