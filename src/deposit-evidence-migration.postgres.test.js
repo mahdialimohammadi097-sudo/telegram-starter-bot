@@ -56,6 +56,17 @@ test("staged evidence migration creates constrained table and is idempotent",asy
    error=>error.code==="23514"
   );
   await client.query("ROLLBACK TO SAVEPOINT invalid_event_key");
+  // Reject malformed addresses and negative block numbers independently.
+  for (const [label, values] of [
+    ["invalid_address", ["'bsc:56:0x' || repeat('e',64) || ':1'","'0x' || repeat('a',64)","1","'0x' || repeat('b',40)","'not-an-address'","1"]],
+    ["negative_block", ["'bsc:56:0x' || repeat('e',64) || ':2'","'0x' || repeat('a',64)","-1","'0x' || repeat('b',40)","'0x' || repeat('c',40)","1"]]
+  ]) {
+    await client.query("SAVEPOINT " + label);
+    await assert.rejects(client.query(`INSERT INTO public.verified_deposit_evidence
+      (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
+      VALUES (${values.join(",")})`), error=>error.code==="23514");
+    await client.query("ROLLBACK TO SAVEPOINT " + label);
+  }
   const count=await client.query("SELECT count(*)::int AS n FROM public.verified_deposit_evidence");
   assert.equal(count.rows[0].n,1);
  }finally{
