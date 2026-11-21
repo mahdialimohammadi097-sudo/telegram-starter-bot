@@ -210,7 +210,16 @@ async function showUsers(ctx, page = 0, edit = false) {
         "Search by Telegram ID: /user <telegram_id>"
       ].join("\n");
 
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  if (edit) {
+    try {
+      return await ctx.editMessageText(message, { reply_markup: keyboard });
+    } catch (error) {
+      // Telegram returns 400 when text and inline keyboard are already identical.
+      // This is an idempotent UI refresh, not a failed language update.
+      if (error?.error_code === 400 && /message is not modified/i.test(error?.description ?? "")) return;
+      throw error;
+    }
+  }
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
