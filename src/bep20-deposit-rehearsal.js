@@ -1,3 +1,4 @@
+import {persistVerifiedDepositEvidence} from "./verified-deposit-evidence-store.js";
 // Rehearsal-only composition: trusted RPC snapshots -> receipt verification ->
 // exact USDT ledger units -> atomic ledger posting. Not wired to production.
 import {verifyBep20DepositReceipt} from "./bep20-receipt-evidence.js";
@@ -18,6 +19,7 @@ export async function rehearseVerifiedBep20Deposit({
   const ledgerAmount = bep20BaseUnitsToLedgerAmount(event.amountBaseUnits);
   return postConfirmedDeposit({
     pool, clearingAccountId, resolveAndLockAssignments,
+    persistVerifiedEvidence: persistVerifiedDepositEvidence,
     evidence: Object.freeze({...event,ledgerAmount})
   });
 }
