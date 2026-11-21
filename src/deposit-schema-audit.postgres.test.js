@@ -60,3 +60,18 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   await pool.end();
  }
 });
+
+test("schema audit rejects wrong financial amount precision on real PostgreSQL",{skip:!url},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_precision_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(36,8))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
