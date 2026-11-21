@@ -123,3 +123,19 @@ test("schema audit refuses NOT VALID ownership foreign keys",{skip:!url},async()
   await pool.end();
  }
 });
+
+test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:!url},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_nullable_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:not_null"));
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.amount_base_units:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
