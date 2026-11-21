@@ -1,5 +1,5 @@
 
-import { Keyboard } from "grammy";
+import { mainKeyboard, backKeyboard, canonicalMenuChoice, menuLanguage, menuTitle, sectionText } from "./owner-menu-language.js";
 import { randomBytes } from "node:crypto";
 import { pool } from "./database.js";
 import { formatUsdt } from "./ledger-safety.js";
@@ -14,17 +14,19 @@ const ADMIN_TIME_ZONE = "UTC";
 
 const adminDrafts = new Map();
 
-const mainMenu = new Keyboard()
-  .text("My Account").text("My Wallet").row()
-  .text("Investment Plans").text("My Investments").row()
-  .text("Deposit").text("Withdraw").row()
-  .text("Daily Profits").text("Referral Program").row()
-  .text("Transaction History").text("Support")
-  .resized();
-
-const backMenu = new Keyboard()
-  .text("⬅ Main Menu")
-  .resized();
+async function getOwnerMenuLanguage(ctx) {
+  if (ctx.from?.id !== ADMIN_ID) return "en";
+  try {
+    const result = await pool.query(
+      `SELECT ap.language FROM users u
+       LEFT JOIN admin_preferences ap ON ap.user_id = u.id
+       WHERE u.telegram_id = $1 LIMIT 1`, [ctx.from.id]
+    );
+    return menuLanguage(ctx.from.id, result.rows[0]?.language);
+  } catch {
+    return "en";
+  }
+}
 
 async function getOrCreateUser(ctx) {
   const result = await pool.query(
@@ -238,10 +240,12 @@ export function registerCommands(bot) {
         );
       }
 
+      const language = await getOwnerMenuLanguage(ctx);
       await ctx.reply(
-        `Welcome to PROFINO, ${user.first_name ?? "User"}!\n\n` +
-        "Your account is ready. Use the buttons below to continue.",
-        { reply_markup: mainMenu }
+        language === "fa"
+          ? `به PROFINO خوش آمدید، ${user.first_name ?? "کاربر"}!\n\nحساب شما آماده است. از دکمه‌های زیر استفاده کنید.`
+          : `Welcome to PROFINO, ${user.first_name ?? "User"}!\n\nYour account is ready. Use the buttons below to continue.`,
+        { reply_markup: mainKeyboard(language) }
       );
     } catch (error) {
       console.error("[registration] Failed:", error.message);
@@ -378,7 +382,8 @@ export function registerCommands(bot) {
   });
 
   bot.on("message:text", async (ctx) => {
-    const choice = ctx.message.text;
+    const language = await getOwnerMenuLanguage(ctx);
+    const choice = ctx.from.id === ADMIN_ID ? canonicalMenuChoice(ctx.message.text) : ctx.message.text;
     const userId = ctx.from.id;
 
     // Only the administrator can continue a post draft.
@@ -487,8 +492,8 @@ export function registerCommands(bot) {
     }
 
     if (choice === "⬅ Main Menu") {
-      return ctx.reply("Main Menu", {
-        reply_markup: mainMenu
+      return ctx.reply(menuTitle(language), {
+        reply_markup: mainKeyboard(language)
       });
     }
 
@@ -511,7 +516,7 @@ export function registerCommands(bot) {
         const account = result.rows[0];
 
         return ctx.reply(
-          "MY ACCOUNT\n\n" +
+          (language === "fa" ? "حساب من\n\n" : "MY ACCOUNT\n\n") +
           `Account ID: ${account.id}\n` +
           `Telegram ID: ${account.telegram_id}\n` +
           `Username: ${account.username ? "@" + account.username : "Not set"}\n` +
@@ -519,7 +524,7 @@ export function registerCommands(bot) {
           `Status: ${account.status.toUpperCase()}\n` +
           `Referral Code: ${account.referral_code}\n` +
           `Joined: ${new Date(account.created_at).toLocaleDateString("en-GB")}`,
-          { reply_markup: backMenu }
+          { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
         console.error("[account] Failed:", error.message);
@@ -550,52 +555,28 @@ export function registerCommands(bot) {
         const format = formatUsdt;
 
         return ctx.reply(
-          "MY WALLET\n\n" +
+          (language === "fa" ? "کیف پول من\n\n" : "MY WALLET\n\n") +
           `Available Balance: ${format(balances.AVAILABLE)} USDT\n` +
           `Invested Balance: ${format(balances.INVESTED)} USDT\n` +
           `Recorded Profit: ${format(balances.PROFIT)} USDT\n\n` +
           "Balances reflect posted ledger transactions only.",
-          { reply_markup: backMenu }
+          { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
         console.error("[wallet] Failed:", error.message);
 
         return ctx.reply(
           "Unable to load wallet balances. Please try again later.",
-          { reply_markup: backMenu }
+          { reply_markup: backKeyboard(language) }
         );
       }
     }
 
-    const sections = {
-      "Investment Plans":
-        "INVESTMENT PLANS\n\nAvailable plans will appear here after configuration and verification.",
+    const section = sectionText(choice, language);
 
-      "My Investments":
-        "MY INVESTMENTS\n\nYour active investments will appear here.",
-
-      "Deposit":
-        "DEPOSIT\n\nAutomatic deposit verification is not enabled yet. Do not send funds until an official deposit address is displayed.",
-
-      "Withdraw":
-        "WITHDRAW\n\nWithdrawal services are not enabled yet.",
-
-      "Daily Profits":
-        "DAILY PROFITS\n\nVerified profit records will appear here when available.",
-
-      "Referral Program":
-        "REFERRAL PROGRAM\n\nYour referral details will appear here.",
-
-      "Transaction History":
-        "TRANSACTION HISTORY\n\nYour transaction records will appear here.",
-
-      "Support":
-        "SUPPORT\n\nPlease contact our support team."
-    };
-
-    if (sections[choice]) {
-      return ctx.reply(sections[choice], {
-        reply_markup: backMenu
+    if (section) {
+      return ctx.reply(section, {
+        reply_markup: backKeyboard(language)
       });
     }
   });
