@@ -75,3 +75,18 @@ test("schema audit rejects wrong financial amount precision on real PostgreSQL",
   await pool.end();
  }
 });
+
+test("schema audit rejects insufficient total precision even when scale is correct",{skip:!url},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_capacity_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(20,18))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
