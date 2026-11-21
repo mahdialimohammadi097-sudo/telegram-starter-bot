@@ -22,6 +22,6 @@ try{
  // Do not echo driver errors: they may contain hostnames, SQL or connection details.
  process.stderr.write(JSON.stringify({audit:"deposit-schema",ready:false,
   error:"Audit execution failed; inspect private server logs without sharing secrets",
-  code:typeof error?.code==="string" && /^[A-Z0-9]{2,8}$/.test(error.code) ? error.code : "AUDIT_ERROR"})+"\\n");
+  code:typeof error?.code==="string" && /^[A-Z0-9]{2,8}$/.test(error.code) ? error.code : "AUDIT_ERROR"})+"\n");
  process.exitCode=3;
 }finally{await pool.end()}
