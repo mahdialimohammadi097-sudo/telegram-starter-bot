@@ -23,5 +23,7 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           find . -path ./node_modules -prune -o -name "*.js" -print0 | xargs -0 -n1 node --check
+      - name: Install dependencies for unit tests
+        run: npm ci
       - name: Run unit tests
         run: npm test
