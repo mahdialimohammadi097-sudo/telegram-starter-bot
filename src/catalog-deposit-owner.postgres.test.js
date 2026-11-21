@@ -37,6 +37,10 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
     await assert.rejects(resolve(b,evidence), {code:"55P03"});
     await b.query("ROLLBACK");
     await a.query("COMMIT");
+    // After commit, the second transaction can resolve the same owner.
+    await b.query("BEGIN");
+    assert.equal(requireUniqueDepositOwner(evidence,await resolve(b,evidence)).userId,"1");
+    await b.query("ROLLBACK");
     await b.query("INSERT INTO public.user_wallet_assignments VALUES (2,2,1,'active',NULL,'deposit')");
     await a.query("BEGIN");
     assert.throws(() => requireUniqueDepositOwner(evidence, []));
