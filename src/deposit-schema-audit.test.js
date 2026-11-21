@@ -19,3 +19,12 @@ test("schema audit fails closed without unique financial event indexes",async()=
  assert.ok(report.incompatible.includes("verified_deposit_evidence.event_key:unique_index"));
  assert.ok(report.incompatible.includes("ledger_transactions.idempotency_key:unique_index"));
 });
+
+test("schema audit refuses missing ownership and ledger foreign keys",async()=>{
+ const client={query:async()=>({rows:[]})};
+ const report=await auditDepositSchema(client);
+ assert.equal(report.ready,false);
+ assert.ok(report.incompatible.includes("user_wallet_assignments.user_id:foreign_key"));
+ assert.ok(report.incompatible.includes("user_wallet_assignments.wallet_id:foreign_key"));
+ assert.ok(report.incompatible.includes("ledger_entries.account_id:foreign_key"));
+});
