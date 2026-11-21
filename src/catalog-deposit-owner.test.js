@@ -37,7 +37,7 @@ test("reject missing, ambiguous and inactive assignments", async () => {
 });
 test("lock failure propagates without ownership lookup", async () => {
   let count = 0;
-  const client = { async query() { if (++count === 4) throw new Error("lock timeout"); } };
+  const client = { async query(sql) { if (++count === 4) throw new Error("lock timeout"); return {rows: sql.includes("current_setting(") ? [{marker:"active"}] : []}; } };
   await assert.rejects(resolve(client,evidence), /lock timeout/);
   assert.equal(count,4);
 });
