@@ -106,3 +106,20 @@ test("schema audit rejects partial unique indexes for deposit event identity",{s
   await pool.end();
  }
 });
+
+test("schema audit refuses NOT VALID ownership foreign keys",{skip:!url},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_unvalidated_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".users (id bigint PRIMARY KEY)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint)');
+  await pool.query('ALTER TABLE "'+schema+'".user_wallet_assignments ADD CONSTRAINT owner_fk FOREIGN KEY (user_id) REFERENCES "'+schema+'".users(id) NOT VALID');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("user_wallet_assignments.user_id:foreign_key"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
