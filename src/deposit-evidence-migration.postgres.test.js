@@ -78,6 +78,19 @@ test("staged evidence migration creates constrained table and is idempotent",asy
       VALUES (${values.join(",")})`), error=>error.code==="23514");
     await client.query("ROLLBACK TO SAVEPOINT " + label);
   }
+  // The production candidate must not modify ledger or user balances.
+  const columns=await client.query(`SELECT column_name,data_type,numeric_precision,numeric_scale,is_nullable
+    FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='verified_deposit_evidence'`);
+  const columnMap=new Map(columns.rows.map(row=>[row.column_name,row]));
+  for(const name of ["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"]) {
+    assert.equal(columnMap.get(name)?.is_nullable,"NO",name+" must be NOT NULL");
+  }
+  for(const name of ["block_number","amount_base_units"]) {
+    assert.equal(columnMap.get(name)?.data_type,"numeric");
+    assert.equal(Number(columnMap.get(name)?.numeric_precision),78);
+    assert.equal(Number(columnMap.get(name)?.numeric_scale),0);
+  }
   const count=await client.query("SELECT count(*)::int AS n FROM public.verified_deposit_evidence");
   assert.equal(count.rows[0].n,1);
  }finally{
