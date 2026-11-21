@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 import { postConfirmedDeposit } from './confirmed-deposit-posting.js';
+import {persistVerifiedDepositEvidence} from './verified-deposit-evidence-store.js';
 
 const enabled = Boolean(process.env.DATABASE_URL);
 let admin, pool, schema;
@@ -42,7 +43,8 @@ async function resolve(client) {
     tokenContract: contract, chainId: 56, currency: 'USDT' }));
 }
 const post = (n, overrides = {}) => postConfirmedDeposit({ pool, evidence: evidence(n),
-  clearingAccountId: '1', resolveAndLockAssignments: resolve, ...overrides });
+  clearingAccountId: '1', resolveAndLockAssignments: resolve,
+  persistVerifiedEvidence: persistVerifiedDepositEvidence, ...overrides });
 const count = async () => Number((await pool.query('SELECT count(*) FROM ledger_transactions')).rows[0].count);
 
 test('concurrent confirmed receipts credit exactly once and replay after commit', { skip: !enabled }, async () => {
