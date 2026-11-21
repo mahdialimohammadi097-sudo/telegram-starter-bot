@@ -29,6 +29,11 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
     await b.query("SET LOCAL lock_timeout = '300ms'");
     await assert.rejects(b.query("INSERT INTO public.user_wallet_assignments VALUES (2,2,1,'active',NULL,'deposit')"), {code:"55P03"});
     await b.query("ROLLBACK");
+    // A second resolver must also fail rather than read while owner is locked.
+    await b.query("BEGIN");
+    await b.query("SET LOCAL lock_timeout = '300ms'");
+    await assert.rejects(resolve(b,evidence), {code:"55P03"});
+    await b.query("ROLLBACK");
     await a.query("COMMIT");
     await b.query("INSERT INTO public.user_wallet_assignments VALUES (2,2,1,'active',NULL,'deposit')");
     await a.query("BEGIN");
