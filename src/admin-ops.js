@@ -533,7 +533,15 @@ async function showAdminLanguage(ctx, edit = false) {
   const message = language === "fa"
     ? "تنظیم زبان پنل مدیریت\n\nزبان موردنظر را انتخاب کنید. این تنظیم فقط روی پنل خصوصی ادمین اثر دارد؛ رابط کاربران PROFINO انگلیسی باقی می‌ماند."
     : "ADMIN PANEL LANGUAGE\n\nChoose the language for the private admin panel. This preference does not change the customer-facing PROFINO interface, which remains English.";
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  if (edit) {
+    try {
+      return await ctx.editMessageText(message, { reply_markup: keyboard });
+    } catch (error) {
+      // Selecting the current language is a successful no-op.
+      if (error?.error_code === 400 && /message is not modified/i.test(error?.description || "")) return;
+      throw error;
+    }
+  }
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
