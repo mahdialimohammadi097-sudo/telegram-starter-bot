@@ -37,6 +37,17 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
     assert.equal(rows.length,2);
     assert.throws(() => requireUniqueDepositOwner(evidence,rows));
     await a.query("ROLLBACK");
+    // Even an inactive historical assignment must fail closed.
+    await a.query("UPDATE public.user_wallet_assignments SET status = 'inactive' WHERE id = 2");
+    await a.query("UPDATE public.users SET status = 'blocked' WHERE id = 1");
+    await a.query("BEGIN");
+    assert.throws(() => requireUniqueDepositOwner(evidence, await resolve(a,evidence)));
+    await a.query("ROLLBACK");
+    await a.query("UPDATE public.users SET status = 'active' WHERE id = 1");
+    await a.query("UPDATE public.wallets SET status = 'suspended' WHERE id = 1");
+    await a.query("BEGIN");
+    assert.throws(() => requireUniqueDepositOwner(evidence, await resolve(a,evidence)));
+    await a.query("ROLLBACK");
   } finally {
     await a.query("ROLLBACK").catch(()=>{});
     await b.query("ROLLBACK").catch(()=>{});
