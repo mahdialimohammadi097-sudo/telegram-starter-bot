@@ -1,0 +1,21 @@
+name: Catalog ownership tests
+on:
+  pull_request:
+    paths:
+      - 'src/catalog-deposit-owner*'
+      - 'src/deposit-owner-guard.js'
+      - '.github/workflows/catalog-owner-tests.yml'
+  push:
+    branches:
+      - feature/catalog-owner-adapter
+permissions:
+  contents: read
+jobs:
+  ownership:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test src/catalog-deposit-owner.test.js
