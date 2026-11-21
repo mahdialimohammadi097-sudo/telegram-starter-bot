@@ -28,3 +28,11 @@ test("reject malformed confirmation settings and noncanonical block numbers",()=
   assert.throws(()=>verifyBep20DepositReceipt({...base,...change}));
  }
 });
+
+test("reject duplicate event indices to prevent double-credit attribution",()=>{
+ assert.throws(()=>verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[log,{...log} ]}}),/Duplicate transfer log index/);
+});
+test("allow distinct transfer logs within a single receipt",()=>{
+ const events=verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[log,{...log,logIndex:"0x1"}]}});
+ assert.deepEqual(events.map(e=>e.eventKey),[`bsc:56:${txHash}:0`,`bsc:56:${txHash}:1`]);
+});
