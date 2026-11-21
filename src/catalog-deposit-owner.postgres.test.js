@@ -44,6 +44,14 @@ test("catalog locks prevent concurrent assignment writes", {skip: !url}, async (
       {code:"55P03"}
     );
     await b.query("ROLLBACK");
+    // Wallet address reassignment is serialized by the same catalog lock.
+    await b.query("BEGIN");
+    await b.query("SET LOCAL lock_timeout = '300ms'");
+    await assert.rejects(
+      b.query("UPDATE public.wallets SET wallet_address = $1 WHERE id = 1", ["0x" + "d".repeat(40)]),
+      {code:"55P03"}
+    );
+    await b.query("ROLLBACK");
     await a.query("COMMIT");
     // After commit, the second transaction can resolve the same owner.
     await b.query("BEGIN");
