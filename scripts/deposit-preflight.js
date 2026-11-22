@@ -8,20 +8,28 @@ export async function inspectDepositAssignments(client) {
  FROM (
    SELECT wallet_id FROM public.user_wallet_assignments
    WHERE status='active' AND assignment_type='deposit'
-   GROUP BY wallet_id HAVING COUNT(DISTINCT user_id)>1
+   GROUP BY wallet_id HAVING COUNT(*)>1
  ) d`);
  const indexes=await client.query(`
  SELECT i.indisunique,i.indisvalid,i.indisready,
-        pg_get_indexdef(i.indexrelid) AS definition
+        i.indnkeyatts,i.indexprs IS NULL AS plain_columns,
+        a.attname AS key_column,
+        pg_get_expr(i.indpred,i.indrelid) AS predicate
  FROM pg_index i
  JOIN pg_class t ON t.oid=i.indrelid
  JOIN pg_namespace n ON n.oid=t.relnamespace
+ LEFT JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=i.indkey[0]
  WHERE n.nspname='public' AND t.relname='user_wallet_assignments'`);
- const defs=indexes.rows.filter(r=>r.indisunique===true&&r.indisvalid===true&&r.indisready===true)
-   .map(r=>String(r.definition).toLowerCase().replace(/\s+/g," "));
- // Only recognize the narrow known safe index shape. Other shapes require review.
- const walletUnique=defs.some(d=>/\(wallet_id\) where/.test(d)&&
-   /status/.test(d)&&/active/.test(d)&&/assignment_type/.test(d)&&/deposit/.test(d));
+ // Accept only the reviewed PostgreSQL canonical predicate, with no extra conditions.
+ // Unknown shapes fail closed until reviewed against disposable PostgreSQL.
+ const acceptedPredicates=new Set([
+  "((status = 'active'::text) AND (assignment_type = 'deposit'::text))",
+  "((assignment_type = 'deposit'::text) AND (status = 'active'::text))"
+ ]);
+ const walletUnique=indexes.rows.some(r=>r.indisunique===true&&
+   r.indisvalid===true&&r.indisready===true&&r.plain_columns===true&&
+   Number(r.indnkeyatts)===1&&r.key_column==='wallet_id'&&
+   acceptedPredicates.has(String(r.predicate??'').trim()));
  return Object.freeze({
   conflictingActiveDepositWallets:Number(duplicates.rows[0]?.groups??0),
   activeDepositWalletUniquenessEnforced:walletUnique
