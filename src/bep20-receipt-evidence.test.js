@@ -36,3 +36,12 @@ test("allow distinct transfer logs within a single receipt",()=>{
  const events=verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[log,{...log,logIndex:"0x1"}]}});
  assert.deepEqual(events.map(e=>e.eventKey),[`bsc:56:${txHash}:0`,`bsc:56:${txHash}:1`]);
 });
+
+test("reject removed transfer logs and inconsistent log block numbers",()=>{
+ for(const badLog of [
+  {...log,removed:true},
+  {...log,blockNumber:"0x65"},
+  {...log,blockNumber:"0x64",removed:true}
+ ]) assert.throws(()=>verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[badLog]}}),/Inconsistent transfer log/);
+ assert.equal(verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[{...log,blockNumber:"0x64",removed:false}]}}).length,1);
+});
