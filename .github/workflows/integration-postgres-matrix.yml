@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - feature/simulated-deposit-wallet
+      - feature/integrated-postgres-matrix
   workflow_dispatch:
 
 permissions:
@@ -56,6 +57,13 @@ jobs:
         run: psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
       - name: Unit and PostgreSQL integration tests
         run: npm test
+      - name: Reset isolated catalog database before focused PostgreSQL tests
+        if: matrix.node-version == 22
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE catalog_rehearsal WITH (FORCE)'
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
       - name: Focused PostgreSQL tests
         if: matrix.node-version == 22
         run: npm run test:postgres
