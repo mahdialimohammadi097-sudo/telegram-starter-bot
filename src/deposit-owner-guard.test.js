@@ -29,3 +29,37 @@ test("rejects zero credit and wrong token contract",()=>{
  assert.throws(()=>requireUniqueDepositOwner(evidence,[{...owner,tokenContract:"0x"+"d".repeat(40)}]));
  assert.throws(()=>requireUniqueDepositOwner({...evidence,chainId:"97"},[owner]));
 });
+
+test("rejects malformed assignment collections and missing wallet identity",()=>{
+ for(const assignments of [null,undefined,{},[null],[{}]]) {
+  assert.throws(()=>requireUniqueDepositOwner(evidence,assignments));
+ }
+ for(const candidate of [
+  {...owner,userId:"-1"},
+  {...owner,userId:"42x"},
+  {...owner,address:null},
+  {...owner,tokenContract:null},
+  {...owner,active:1},
+  {...owner,currency:"USDC"}
+ ]) {
+  assert.throws(()=>requireUniqueDepositOwner(evidence,[candidate]));
+ }
+});
+test("rejects wrong receipt attribution before any posting",()=>{
+ for(const changed of [
+  {...evidence,depositAddress:"0x"+"d".repeat(40)},
+  {...evidence,tokenContract:"0x"+"d".repeat(40)},
+  {...evidence,chainId:"1"},
+  {...evidence,eventKey:"bsc:97:0x"+"b".repeat(64)+":0"},
+  {...evidence,ledgerAmount:"-10.00000000"},
+  {...evidence,ledgerAmount:"0.00000001"}
+ ]) {
+  // A positive dust amount is valid attribution evidence; minimum deposit
+  // enforcement belongs to a separately reviewed product policy.
+  if(changed.ledgerAmount==="0.00000001") {
+   assert.equal(requireUniqueDepositOwner(changed,[owner]).ledgerAmount,"0.00000001");
+  } else {
+   assert.throws(()=>requireUniqueDepositOwner(changed,[owner]));
+  }
+ }
+});
