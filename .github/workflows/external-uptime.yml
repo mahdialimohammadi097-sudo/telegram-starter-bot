@@ -41,12 +41,23 @@ jobs:
         id: check
         shell: bash
         run: |
-          HEALTH_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app/healthz" || true)"
-          ROOT_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app" || true)"
+          # A main push can overlap FadeHost's restart. Retry briefly before
+          # declaring an outage; sustained failures still fail the workflow.
+          HEALTH_STATUS="000"
+          ROOT_STATUS="000"
+          for ATTEMPT in 1 2 3; do
+            HEALTH_STATUS="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app/healthz" || true)"
+            ROOT_STATUS="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app" || true)"
+            echo "Attempt $ATTEMPT: health HTTP $HEALTH_STATUS; root HTTP $ROOT_STATUS"
+            if [ "$HEALTH_STATUS" = "200" ] && [ "$ROOT_STATUS" = "200" ]; then
+              break
+            fi
+            if [ "$ATTEMPT" -lt 3 ]; then sleep 5; fi
+          done
           echo "Health endpoint HTTP status: $HEALTH_STATUS"
           echo "Root endpoint HTTP status: $ROOT_STATUS"
 
-          if [ "$HEALTH_STATUS" = "200" ]; then
+          if [ "$HEALTH_STATUS" = "200" ] && [ "$ROOT_STATUS" = "200" ]; then
             echo "status=up" >> "$GITHUB_OUTPUT"
           else
             echo "status=down" >> "$GITHUB_OUTPUT"
