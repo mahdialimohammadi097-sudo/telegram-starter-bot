@@ -40,7 +40,16 @@ test("proposed evidence migration creates audited catalog and fails closed on re
     JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=i.indkey[0]
     WHERE n.nspname=$1 AND t.relname='verified_deposit_evidence'`,[schema]);
   assert.ok(indexes.rows.some(r=>r.indisunique&&r.indisvalid&&r.indisready&&r.unfiltered&&Number(r.indnkeyatts)===1&&r.column_name==="event_key"));
-  await assert.rejects(pool.query(scoped),/already exists/);
+  const table='"'+schema+'".verified_deposit_evidence';
+  const event="bsc:56:0x"+"a".repeat(64)+":0";
+  const valid=[event,"0x"+"b".repeat(64),"100","0x"+"c".repeat(40),"0x"+"d".repeat(40),"1000000000000000000"];
+  const statement=`INSERT INTO ${table} (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
+    VALUES ($1,$2,$3,$4,$5,$6)`;
+  await pool.query(statement,valid);
+  await assert.rejects(pool.query(statement,valid),/duplicate key/);
+  await assert.rejects(pool.query(statement,[event.replace(/:0$/,":1"),...valid.slice(1,4),"invalid-address",valid[5]]),/check constraint/);
+  await assert.rejects(pool.query(statement,[event.replace(/:0$/,":2"),...valid.slice(1,5),"0"]),/check constraint/);
+    await assert.rejects(pool.query(scoped),/already exists/);
  }finally {
   await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
   await pool.end();
