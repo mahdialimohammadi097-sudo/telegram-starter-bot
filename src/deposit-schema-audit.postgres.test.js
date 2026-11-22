@@ -191,3 +191,35 @@ test("schema audit rejects nullable wallet ownership fields",{skip:skipUnsafeTar
   await pool.end();
  }
 });
+
+test("schema audit rejects an existing evidence table without format constraints",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_checks_missing_"+randomUUID().replaceAll("-","");
+ try {
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text PRIMARY KEY, block_hash text NOT NULL, block_number numeric(78,0) NOT NULL, token_contract text NOT NULL, deposit_address text NOT NULL, amount_base_units numeric(78,0) NOT NULL)');
+  const report=await auditDepositSchema(pool,{schema});
+  assert.equal(report.ready,false);
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_address_format:check_constraint"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects NOT VALID evidence format constraints",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_checks_invalid_"+randomUUID().replaceAll("-","");
+ try {
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text PRIMARY KEY)');
+  await pool.query('ALTER TABLE "'+schema+'".verified_deposit_evidence ADD CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key <> \'\') NOT VALID');
+  const report=await auditDepositSchema(pool,{schema});
+  assert.equal(report.ready,false);
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
