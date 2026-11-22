@@ -31,8 +31,10 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   await q(`
    CREATE TABLE ${prefix}users(id bigint PRIMARY KEY,status text NOT NULL);
    CREATE TABLE ${prefix}wallets(id bigint PRIMARY KEY,wallet_address text NOT NULL,
-     chain_id integer NOT NULL,network text NOT NULL,status text NOT NULL);
+     chain_id integer NOT NULL,network text NOT NULL,status text NOT NULL,
+     wallet_type text NOT NULL,is_platform_controlled boolean NOT NULL);
    CREATE TABLE ${prefix}user_wallet_assignments(
+     id bigint PRIMARY KEY,ended_at timestamptz,
      user_id bigint NOT NULL REFERENCES ${prefix}users(id),
      wallet_id bigint NOT NULL REFERENCES ${prefix}wallets(id),
      assignment_type text NOT NULL,status text NOT NULL);

@@ -28,3 +28,14 @@ test("schema audit refuses missing ownership and ledger foreign keys",async()=>{
  assert.ok(report.incompatible.includes("user_wallet_assignments.wallet_id:foreign_key"));
  assert.ok(report.incompatible.includes("ledger_entries.account_id:foreign_key"));
 });
+
+test("schema audit requires every column consumed by transactional owner resolver",async()=>{
+ const client={query:async()=>({rows:[]})};
+ const report=await auditDepositSchema(client);
+ for(const column of [
+  "wallets.wallet_type",
+  "wallets.is_platform_controlled",
+  "user_wallet_assignments.id",
+  "user_wallet_assignments.ended_at"
+ ]) assert.ok(report.missing.includes(column),column);
+});

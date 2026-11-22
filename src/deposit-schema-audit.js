@@ -2,8 +2,8 @@
 // the reviewed contract. This does not create or alter tables.
 const required={
  users:["id","status"],
- wallets:["id","wallet_address","chain_id","network","status"],
- user_wallet_assignments:["user_id","wallet_id","assignment_type","status"],
+ wallets:["id","wallet_address","chain_id","network","status","wallet_type","is_platform_controlled"],
+ user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"],
  ledger_accounts:["id","user_id","account_type","currency"],
  ledger_transactions:["id","idempotency_key","status","transaction_type","reference_id"],
  ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
