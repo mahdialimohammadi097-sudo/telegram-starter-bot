@@ -141,3 +141,19 @@ test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:!url},a
   await pool.end();
  }
 });
+
+
+test("schema audit rejects a text platform-control flag instead of boolean",{skip:!url},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_type_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (is_platform_controlled text NOT NULL)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("wallets.is_platform_controlled"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
