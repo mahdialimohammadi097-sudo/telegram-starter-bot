@@ -2,11 +2,12 @@
 // Never starts Telegram, alters schema, or processes money.
 import pg from "pg";
 const required = {
- users:["id"], wallets:["id","wallet_address"],
- user_wallet_assignments:["user_id","wallet_id"],
+ users:["id","status"],
+ wallets:["id","wallet_address","chain_id","network","status","wallet_type","is_platform_controlled"],
+ user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"],
  ledger_accounts:["id","user_id","account_type","currency"],
- ledger_transactions:["id","idempotency_key"],
- ledger_entries:["transaction_id","account_id","entry_type","amount"],
+ ledger_transactions:["id","idempotency_key","status","transaction_type","reference_id"],
+ ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
  verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"]
 };
 const output = value => process.stdout.write(JSON.stringify(value)+"\n");
