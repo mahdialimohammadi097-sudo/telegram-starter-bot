@@ -62,7 +62,511 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
    CREATE TABLE ${prefix}verified_deposit_evidence(
      event_key text PRIMARY KEY,block_hash text NOT NULL,
      block_number numeric(78,0) NOT NULL,token_contract text NOT NULL,
-     deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL);
+     deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL,
+     CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)
+  `);
+  const result=await auditDepositSchema(pool,{schema});
+  assert.deepEqual(result.missing,[]);
+  assert.deepEqual(result.incompatible,[]);
+  assert.equal(result.ready,true);
+ }finally{
+  await q('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects wrong financial amount precision on real PostgreSQL",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_precision_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(36,8))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects insufficient total precision even when scale is correct",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_capacity_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(20,18))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects partial unique indexes for deposit event identity",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_partial_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  await pool.query('CREATE UNIQUE INDEX ON "'+schema+'".verified_deposit_evidence(event_key) WHERE event_key IS NOT NULL');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:unique_index"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit refuses NOT VALID ownership foreign keys",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_unvalidated_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".users (id bigint PRIMARY KEY)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint)');
+  await pool.query('ALTER TABLE "'+schema+'".user_wallet_assignments ADD CONSTRAINT owner_fk FOREIGN KEY (user_id) REFERENCES "'+schema+'".users(id) NOT VALID');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("user_wallet_assignments.user_id:foreign_key"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_nullable_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:not_null"));
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.amount_base_units:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+
+test("schema audit rejects a text platform-control flag instead of boolean",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_type_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (is_platform_controlled text NOT NULL)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("wallets.is_platform_controlled"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+
+test("schema audit rejects nullable wallet ownership fields",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_null_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (wallet_address text, is_platform_controlled boolean)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint, ended_at timestamptz)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  for(const name of ["wallets.wallet_address:not_null","wallets.is_platform_controlled:not_null","user_wallet_assignments.user_id:not_null"])
+   assert.ok(result.incompatible.includes(name),name);
+  assert.ok(!result.incompatible.includes("user_wallet_assignments.ended_at:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+),
+     CONSTRAINT verified_deposit_evidence_block_hash_format CHECK (block_hash ~ '^0x[0-9a-f]{64}
+  `);
+  const result=await auditDepositSchema(pool,{schema});
+  assert.deepEqual(result.missing,[]);
+  assert.deepEqual(result.incompatible,[]);
+  assert.equal(result.ready,true);
+ }finally{
+  await q('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects wrong financial amount precision on real PostgreSQL",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_precision_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(36,8))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects insufficient total precision even when scale is correct",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_capacity_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(20,18))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects partial unique indexes for deposit event identity",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_partial_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  await pool.query('CREATE UNIQUE INDEX ON "'+schema+'".verified_deposit_evidence(event_key) WHERE event_key IS NOT NULL');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:unique_index"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit refuses NOT VALID ownership foreign keys",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_unvalidated_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".users (id bigint PRIMARY KEY)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint)');
+  await pool.query('ALTER TABLE "'+schema+'".user_wallet_assignments ADD CONSTRAINT owner_fk FOREIGN KEY (user_id) REFERENCES "'+schema+'".users(id) NOT VALID');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("user_wallet_assignments.user_id:foreign_key"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_nullable_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:not_null"));
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.amount_base_units:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+
+test("schema audit rejects a text platform-control flag instead of boolean",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_type_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (is_platform_controlled text NOT NULL)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("wallets.is_platform_controlled"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+
+test("schema audit rejects nullable wallet ownership fields",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_null_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (wallet_address text, is_platform_controlled boolean)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint, ended_at timestamptz)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  for(const name of ["wallets.wallet_address:not_null","wallets.is_platform_controlled:not_null","user_wallet_assignments.user_id:not_null"])
+   assert.ok(result.incompatible.includes(name),name);
+  assert.ok(!result.incompatible.includes("user_wallet_assignments.ended_at:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+),
+     CONSTRAINT verified_deposit_evidence_token_format CHECK (token_contract ~ '^0x[0-9a-f]{40}
+  `);
+  const result=await auditDepositSchema(pool,{schema});
+  assert.deepEqual(result.missing,[]);
+  assert.deepEqual(result.incompatible,[]);
+  assert.equal(result.ready,true);
+ }finally{
+  await q('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects wrong financial amount precision on real PostgreSQL",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_precision_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(36,8))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects insufficient total precision even when scale is correct",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_capacity_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(20,18))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects partial unique indexes for deposit event identity",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_partial_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  await pool.query('CREATE UNIQUE INDEX ON "'+schema+'".verified_deposit_evidence(event_key) WHERE event_key IS NOT NULL');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:unique_index"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit refuses NOT VALID ownership foreign keys",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_unvalidated_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".users (id bigint PRIMARY KEY)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint)');
+  await pool.query('ALTER TABLE "'+schema+'".user_wallet_assignments ADD CONSTRAINT owner_fk FOREIGN KEY (user_id) REFERENCES "'+schema+'".users(id) NOT VALID');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("user_wallet_assignments.user_id:foreign_key"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_nullable_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:not_null"));
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.amount_base_units:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+
+test("schema audit rejects a text platform-control flag instead of boolean",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_type_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (is_platform_controlled text NOT NULL)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("wallets.is_platform_controlled"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+
+test("schema audit rejects nullable wallet ownership fields",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_null_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (wallet_address text, is_platform_controlled boolean)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint, ended_at timestamptz)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  for(const name of ["wallets.wallet_address:not_null","wallets.is_platform_controlled:not_null","user_wallet_assignments.user_id:not_null"])
+   assert.ok(result.incompatible.includes(name),name);
+  assert.ok(!result.incompatible.includes("user_wallet_assignments.ended_at:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+),
+     CONSTRAINT verified_deposit_evidence_address_format CHECK (deposit_address ~ '^0x[0-9a-f]{40}
+  `);
+  const result=await auditDepositSchema(pool,{schema});
+  assert.deepEqual(result.missing,[]);
+  assert.deepEqual(result.incompatible,[]);
+  assert.equal(result.ready,true);
+ }finally{
+  await q('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects wrong financial amount precision on real PostgreSQL",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_precision_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(36,8))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects insufficient total precision even when scale is correct",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_capacity_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries (amount numeric(20,18))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("ledger_entries.amount"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects partial unique indexes for deposit event identity",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_partial_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  await pool.query('CREATE UNIQUE INDEX ON "'+schema+'".verified_deposit_evidence(event_key) WHERE event_key IS NOT NULL');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:unique_index"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit refuses NOT VALID ownership foreign keys",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_unvalidated_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".users (id bigint PRIMARY KEY)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint)');
+  await pool.query('ALTER TABLE "'+schema+'".user_wallet_assignments ADD CONSTRAINT owner_fk FOREIGN KEY (user_id) REFERENCES "'+schema+'".users(id) NOT VALID');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("user_wallet_assignments.user_id:foreign_key"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_nullable_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text, block_hash text, block_number numeric(78,0), token_contract text, deposit_address text, amount_base_units numeric(78,0))');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.event_key:not_null"));
+  assert.ok(result.incompatible.includes("verified_deposit_evidence.amount_base_units:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+
+test("schema audit rejects a text platform-control flag instead of boolean",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_type_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (is_platform_controlled text NOT NULL)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  assert.ok(result.incompatible.includes("wallets.is_platform_controlled"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+
+test("schema audit rejects nullable wallet ownership fields",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_null_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (wallet_address text, is_platform_controlled boolean)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint, ended_at timestamptz)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  for(const name of ["wallets.wallet_address:not_null","wallets.is_platform_controlled:not_null","user_wallet_assignments.user_id:not_null"])
+   assert.ok(result.incompatible.includes(name),name);
+  assert.ok(!result.incompatible.includes("user_wallet_assignments.ended_at:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+));
   `);
   const result=await auditDepositSchema(pool,{schema});
   assert.deepEqual(result.missing,[]);
