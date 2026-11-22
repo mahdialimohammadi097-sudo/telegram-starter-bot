@@ -32,6 +32,9 @@ test("proposed evidence migration creates audited catalog and fails closed on re
   const constraints=await pool.query(`SELECT conname,contype,convalidated FROM pg_constraint
    WHERE conrelid=($1::text || '.verified_deposit_evidence')::regclass`,[schema]);
   const named=new Map(constraints.rows.map(r=>[r.conname,r]));
+  assert.equal(named.get("verified_deposit_evidence_pkey")?.contype,"p");
+  for(const name of ["block_number_nonnegative","amount_positive"])
+   assert.equal(named.get("verified_deposit_evidence_"+name)?.convalidated,true,name);
   for(const name of ["event_key_format","block_hash_format","token_format","address_format"])
    assert.equal(named.get("verified_deposit_evidence_"+name)?.convalidated,true,name);
   const indexes=await pool.query(`SELECT i.indisunique,i.indisvalid,i.indisready,i.indnkeyatts,
@@ -49,6 +52,10 @@ test("proposed evidence migration creates audited catalog and fails closed on re
   await assert.rejects(pool.query(statement,valid),/duplicate key/);
   await assert.rejects(pool.query(statement,[event.replace(/:0$/,":1"),...valid.slice(1,4),"invalid-address",valid[5]]),/check constraint/);
   await assert.rejects(pool.query(statement,[event.replace(/:0$/,":2"),...valid.slice(1,5),"0"]),/check constraint/);
+  await assert.rejects(pool.query(statement,[event.replace(/:0$/,":3"),valid[1],"-1",...valid.slice(3)]),/check constraint/);
+  await assert.rejects(pool.query(statement,["invalid-event",...valid.slice(1)]),/check constraint/);
+  await assert.rejects(pool.query(statement,[event.replace(/:0$/,":4"),"invalid-block",...valid.slice(2)]),/check constraint/);
+  await assert.rejects(pool.query(statement,[event.replace(/:0$/,":5"),valid[1],valid[2],"invalid-token",...valid.slice(4)]),/check constraint/);
     await assert.rejects(pool.query(scoped),/already exists/);
  }finally {
   await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
