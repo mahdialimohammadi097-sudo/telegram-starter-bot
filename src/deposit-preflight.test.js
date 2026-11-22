@@ -30,3 +30,23 @@ test("read-only preflight rolls back when catalog audit fails",async()=>{
  assert.equal(commands.at(-1),"ROLLBACK");
  assert.ok(!commands.some(x=>/\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b/i.test(x)));
 });
+
+test("rejects misleading partial unique predicates and extra conditions",async()=>{
+ const client={query:async sql=>({rows:sql.includes("COUNT(*)")?[{groups:0}]:[{
+  indisunique:true,indisvalid:true,indisready:true,plain_columns:true,
+  indnkeyatts:1,key_column:"wallet_id",
+  predicate:"((status = 'active'::text) AND (assignment_type = 'deposit'::text) AND (ended_at IS NOT NULL))"
+ }]})};
+ const result=await inspectDepositAssignments(client);
+ assert.equal(result.activeDepositWalletUniquenessEnforced,false);
+});
+
+test("accepts only reviewed exact wallet key and predicate",async()=>{
+ const client={query:async sql=>({rows:sql.includes("COUNT(*)")?[{groups:0}]:[{
+  indisunique:true,indisvalid:true,indisready:true,plain_columns:true,
+  indnkeyatts:1,key_column:"wallet_id",
+  predicate:"((status = 'active'::text) AND (assignment_type = 'deposit'::text))"
+ }]})};
+ const result=await inspectDepositAssignments(client);
+ assert.equal(result.activeDepositWalletUniquenessEnforced,true);
+});
