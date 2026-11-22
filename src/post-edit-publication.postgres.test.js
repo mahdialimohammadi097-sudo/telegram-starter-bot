@@ -5,8 +5,17 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Bot } from "grammy";
 import pg from "pg";
 
+// This test creates and drops PostgreSQL schemas; require a disposable local DB.
+function isDisposableDatabase() {
+  if (process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes" || !process.env.DATABASE_URL) return false;
+  try {
+    const target = new URL(process.env.DATABASE_URL);
+    return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) && target.pathname === "/profino_test";
+  } catch { return false; }
+}
+
 test("only the replacement preview can publish the saved post after an edit", {
-  skip: !process.env.DATABASE_URL
+  skip: !isDisposableDatabase()
 }, async t => {
   const { pool } = await import("./database.js");
   const { registerPostManagement } = await import("./post-management.js");
