@@ -30,3 +30,11 @@ test("rejects log identity mismatch, removed logs and duplicate indices",()=>{
  assert.throws(()=>check({...receipt,logs:[{...log,removed:true}]}));
  assert.throws(()=>check({...receipt,logs:[log,log]}));
 });
+
+test("accepts mined receipt logs without optional removed flag",()=>{
+ const {removed, ...minedLog}=log;
+ assert.equal(check({...receipt,logs:[minedLog]}).eventKey,"bsc:56:"+h+":0");
+});
+test("rejects malformed removed flags",()=>{
+ for(const removed of [null,0,"false",1]) assert.throws(()=>check({...receipt,logs:[{...log,removed}]}));
+});

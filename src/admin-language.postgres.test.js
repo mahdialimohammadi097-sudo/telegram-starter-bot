@@ -185,6 +185,23 @@ test("private admin language survives new updates and handles unavailable prefer
     assert.match(reviewText(), /Check @PROFINO1/);
     assert.equal((await client.query("SELECT status FROM scheduled_posts WHERE id=1")).rows[0].status, "publish_unknown");
     await client.query("UPDATE admin_preferences SET language='fa'");
+    await client.query("UPDATE scheduled_posts SET status='preview_unknown' WHERE id=2");
+    await update(history);
+    const previewFilter = buttons().find(button => button.text === "پیش‌نمایش‌های نامشخص").callback_data;
+    await update(previewFilter);
+    const previewRows = buttons().filter(button => button.callback_data.startsWith("posthist_detail:"));
+    assert.deepEqual(previewRows.map(button => button.callback_data), ["posthist_detail:2:preview_unknown:0"]);
+    await update(previewRows[0].callback_data);
+    assert.match(reviewText(), /گفت‌وگوی خصوصی با ربات/);
+    const previewBack = calls[0].payload.reply_markup.inline_keyboard.flat()[0].callback_data;
+    assert.equal(previewBack, "posthist_page:preview_unknown:0");
+    await client.query("UPDATE admin_preferences SET language='en'");
+    await update(previewBack);
+    assert.ok(buttons().some(button => button.text === "Uncertain previews"));
+    await update(previewRows[0].callback_data);
+    assert.match(reviewText(), /private chat with the bot/);
+    assert.equal((await client.query("SELECT status FROM scheduled_posts WHERE id=2")).rows[0].status, "preview_unknown");
+    await client.query("UPDATE admin_preferences SET language='fa'");
     await update("posthist_filter:published");
     assert.equal(buttons().find(button => button.text === "همه پست‌ها").callback_data, "posthist_filter:all");
     await client.query("UPDATE scheduled_posts SET status = 'failed'");
@@ -207,6 +224,12 @@ test("private admin language survives new updates and handles unavailable prefer
     assert.equal(back, "posthist_page:failed:1");
     await update(back);
     assert.match(calls.at(-1).payload.text, /9–16/);
+    // The filtered list shrinks while the admin is reading a detail on page two.
+    await client.query("UPDATE scheduled_posts SET status='scheduled' WHERE id <> $1", [postId]);
+    await update(back);
+    assert.match(calls.at(-1).payload.text, /نمایش 1–1 از 1/);
+    assert.ok(buttons().some(button => button.callback_data === "posthist_detail:" + postId + ":failed:0"));
+    assert.ok(buttons().every(button => !button.callback_data.startsWith("posthist_page:")));
     await update("posthist_detail:" + postId);
     assert.equal(calls[1].payload.reply_markup.inline_keyboard[0][0].callback_data, "posthist_filter:all");
     assert.deepEqual(await update(history, admin, "group"), ["answerCallbackQuery"]);

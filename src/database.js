@@ -1,4 +1,5 @@
 import pg from "pg";
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { resolveDatabaseTls } from "./database-tls-policy.js";
 
 const { Pool } = pg;
@@ -13,6 +14,12 @@ export const pool = new Pool({
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
   ssl: resolveDatabaseTls(),
+});
+
+// pg removes a disconnected idle client; handle its error without crashing
+// the bot or exposing connection strings from the driver error message.
+pool.on("error", error => {
+  console.error("[database] idle client error:", safeDiagnosticCode(error));
 });
 
 export async function testDatabaseConnection() {

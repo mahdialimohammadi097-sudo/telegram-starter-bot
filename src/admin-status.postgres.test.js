@@ -4,8 +4,16 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { Bot } from "grammy";
 
+const isDisposablePostgres = (() => {
+  if (process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes" || !process.env.DATABASE_URL) return false;
+  try {
+    const target = new URL(process.env.DATABASE_URL);
+    return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) && target.pathname === "/profino_test";
+  } catch { return false; }
+})();
+
 test("private status confirmations commit once with their audit row and survive delivery failures", {
-  skip: !process.env.DATABASE_URL
+  skip: !isDisposablePostgres
 }, async t => {
   const { pool } = await import("./database.js");
   const { registerAdminOps } = await import("./admin-ops.js");

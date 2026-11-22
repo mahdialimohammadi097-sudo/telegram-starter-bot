@@ -3,6 +3,7 @@
 
 import { Bot } from "grammy";
 import { registerCommands } from "./src/commands.js";
+import { createStagingSimulationHandlers } from "./src/staging-simulation.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
 import { startScheduler } from "./src/scheduler.js";
 import { ensurePostHistorySchema } from "./src/post-history.js";
@@ -38,6 +39,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const bot = new Bot(token);
 const runtimeHealth = createRuntimeHealthState();
 let healthServer = null;
+let pollingBatchLoop = null;
 let webhookHandler = null;
 let botUsername = "PROFINO";
 let healthMonitor = null;
@@ -83,14 +85,6 @@ async function retryUntilAvailable(operation, label) {
   throw new Error(`Startup cancelled while waiting for ${label}.`);
 }
 
-async function closeHttpServer() {
-  if (!healthServer?.listening) return;
-  await new Promise((resolve) => {
-    healthServer.close(() => resolve());
-    healthServer.closeIdleConnections?.();
-  });
-}
-
 async function shutdown(signal = "shutdown") {
   if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
@@ -98,16 +92,18 @@ async function shutdown(signal = "shutdown") {
   console.log(`[shutdown] ${signal}: stopping PROFINO services`);
 
   shutdownPromise = (async () => {
+    const httpDrained = healthServer?.drain();
     const schedulerDrained = scheduler?.stop();
     healthMonitor?.stop();
 
     try {
-      bot.stop();
+      await bot.stop();
     } catch (error) {
       console.error("[shutdown] Telegram bot stop warning:", safeDiagnosticCode(error));
     }
 
-    await Promise.all([closeHttpServer(), schedulerDrained]);
+    await Promise.all([httpDrained, schedulerDrained]);
+    await Promise.allSettled([pollingBatchLoop, ...webhookUpdates]);
 
     try {
       await closeDatabase();
@@ -120,7 +116,20 @@ async function shutdown(signal = "shutdown") {
   return shutdownPromise;
 }
 
-registerCommands(bot);
+// grammY can finish an HTTP response before the underlying middleware settles.
+const webhookUpdates = new Set();
+if (mode === "webhook") {
+  bot.use(async (_ctx, next) => {
+    if (shuttingDown) throw new Error("Webhook receiver is shutting down");
+    const work = next();
+    webhookUpdates.add(work);
+    try { await work; }
+    finally { webhookUpdates.delete(work); }
+  });
+} else {
+  // stop() confirms the current polling offset. Leave the unconfirmed tail for the next receiver.
+  bot.use((_ctx, next) => shuttingDown ? undefined : next());
+}
 
 bot.catch((error) => {
   console.error("[bot] update handler error:", safeDiagnosticCode(error?.error ?? error));
@@ -138,6 +147,7 @@ async function sendStartupReport(botUsername) {
       console.error("[health] database schema inspection failed:", schemaError);
     }
 
+    if (shuttingDown) return;
     const report = formatStartupHealthReport({
       botUsername,
       mode,
@@ -165,13 +175,19 @@ async function startPolling() {
 
     try {
       await bot.api.deleteWebhook({ drop_pending_updates: false });
+      if (shuttingDown) return;
       console.log("[bot] starting Telegram long polling");
-      await bot.start({
+      pollingBatchLoop = bot.start({
         onStart: () => {
           runtimeHealth.setTelegramReceiverActive(true);
           console.log("[bot] Telegram polling is active; updates can be received.");
         }
       });
+      try {
+        await pollingBatchLoop;
+      } finally {
+        pollingBatchLoop = null;
+      }
 
       runtimeHealth.setTelegramReceiverActive(false);
       if (!shuttingDown) {
@@ -214,29 +230,44 @@ async function main() {
     port,
     runtimeHealth,
     getBotUsername: () => botUsername,
+    webhookPath: webhook && new URL(webhook.url).pathname,
     getWebhookHandler: () => webhookHandler
   });
+
+  if (shuttingDown) {
+    await healthServer.drain();
+    return;
+  }
 
   const dbResult = await retryUntilAvailable(
     testDatabaseConnection,
     "PostgreSQL connection"
   );
+  if (shuttingDown) return;
   runtimeHealth.setDatabaseReady(true);
   console.log("[database] PostgreSQL connected successfully.");
   console.log("[database] server time:", dbResult.server_time);
 
   await ensurePostHistorySchema();
+  if (shuttingDown) return;
   console.log("[post-history] schema and audit trigger ready.");
   await ensureAdminOpsSchema();
+  if (shuttingDown) return;
   console.log("[admin-ops] audit log schema ready.");
 
   const me = await retryUntilAvailable(() => bot.api.getMe(), "Telegram API authentication");
+  if (shuttingDown) return;
   botUsername = me.username;
   runtimeHealth.setTelegramApiConnected(true);
   console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
 
+  // Never register financial simulation handlers before verifying bot identity and isolated DB.
+  const simulationHandlers = await createStagingSimulationHandlers(pool, process.env, me.username);
+  registerCommands(bot, simulationHandlers);
+
   await sendStartupReport(me.username);
 
+  if (shuttingDown) return;
   healthMonitor = startHealthMonitor({
     bot,
     pool,
@@ -253,6 +284,7 @@ async function main() {
   });
 
   scheduler = startScheduler(bot);
+  scheduler.ready.then(runtimeHealth.setSchedulerReady);
 
   if (mode === "webhook") {
     webhookHandler = telegramWebhookHandler(bot, webhook);
@@ -261,6 +293,7 @@ async function main() {
       drop_pending_updates: false
     }), "Telegram webhook registration");
 
+    if (shuttingDown) return;
     runtimeHealth.setTelegramReceiverActive(true);
     console.log("[bot] webhook registered.");
     return;
@@ -279,6 +312,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 main().catch(async (error) => {
+  if (shuttingDown) return;
   console.error("[startup] PROFINO could not start:", safeDiagnosticCode(error));
   process.exitCode = 1;
   await shutdown("startup failure");

@@ -51,6 +51,33 @@ try {
   // Compare the application-visible snapshot across databases before replaying operations.
   console.log(JSON.stringify({ requests, balances, receipt }));
   if (mode === "verify") {
+    const posted = "SELECT id FROM ledger_transactions WHERE idempotency_key = 'drill-deposit'";
+    await assert.rejects(
+      pool.query("UPDATE ledger_transactions SET description = 'restore probe' WHERE id IN (" + posted + ")"),
+      { code: "P0001", message: /posted transactions are immutable/i }
+    );
+    await assert.rejects(
+      pool.query("DELETE FROM ledger_entries WHERE transaction_id IN (" + posted + ")"),
+      { code: "P0001", message: /entries of posted transactions cannot be changed/i }
+    );
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: [journal] } = await client.query(
+        "INSERT INTO ledger_transactions(transaction_type) VALUES ('restore-probe') RETURNING id"
+      );
+      await client.query(`INSERT INTO ledger_entries(transaction_id, account_id, entry_type, amount)
+        SELECT $1, id, 'credit', 1 FROM ledger_accounts WHERE account_code='available'`, [journal.id]);
+      await client.query("UPDATE ledger_transactions SET status='posted' WHERE id=$1", [journal.id]);
+      await assert.rejects(client.query("COMMIT"), { code: "P0001", message: /not balanced/i });
+      const probe = await client.query("SELECT id FROM ledger_transactions WHERE id=$1", [journal.id]);
+      assert.equal(probe.rowCount, 0);
+    } finally {
+      try { await client.query("ROLLBACK"); }
+      finally { client.release(); }
+    }
+    console.error("Restored ledger rejected posted mutations and rolled back an unbalanced commit.");
     assert.equal(await cancelWithdrawal(pool, 1, requests[0].id), requests[0].release_id);
     assert.equal((await reserveWithdrawal(pool, 1, "open", "7.25")).id, requests[1].id);
     await cancelWithdrawal(pool, 1, requests[1].id);

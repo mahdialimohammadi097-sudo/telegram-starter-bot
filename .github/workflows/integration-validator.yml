@@ -55,6 +55,8 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/profino_test
+      PROFINO_DISPOSABLE_POSTGRES: 'yes'
+      CATALOG_REHEARSAL_URL: postgres://postgres:postgres@localhost:5432/catalog_rehearsal
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,7 +66,28 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
+      - name: Audit production dependencies
+        if: matrix.node-version == 22
+        run: npm audit --omit=dev --audit-level=high
+      - name: Create isolated catalog migration rehearsal database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
       - name: Unit and PostgreSQL integration tests
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/profino-tests.tap"
+          grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-tests.tap"
+          # Some gated suites intentionally skip without their dedicated rehearsal target.
+          # Require the deposit evidence migration test itself to run and pass.
+          grep -Eq '^ok [0-9]+ - staged evidence migration creates constrained table and is idempotent$' "$RUNNER_TEMP/profino-tests.tap"
+      - name: Reset isolated catalog rehearsal database before focused tests
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # CI-only disposable database; never use the production DATABASE_URL.
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE catalog_rehearsal WITH (FORCE)'
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
       - name: Focused PostgreSQL tests
         run: npm run test:postgres
