@@ -5,7 +5,18 @@ import {readFile} from "node:fs/promises";
 import {randomUUID} from "node:crypto";
 import {auditDepositSchema} from "./deposit-schema-audit.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
-test("read-only audit queries real PostgreSQL catalog and fails closed on incomplete schema",{skip:!url},async()=>{
+// These tests CREATE and DROP schemas. Never run them against shared or
+// production databases, even if CATALOG_REHEARSAL_URL is set by mistake.
+function safeDisposableTarget() {
+ if (!url || process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes") return false;
+ try {
+  const target = new URL(url);
+  return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) &&
+   target.pathname === "/catalog_rehearsal";
+ } catch { return false; }
+}
+const skipUnsafeTarget = !safeDisposableTarget();
+test("read-only audit queries real PostgreSQL catalog and fails closed on incomplete schema",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_"+randomUUID().replaceAll("-","");
  try {
@@ -21,7 +32,7 @@ test("read-only audit queries real PostgreSQL catalog and fails closed on incomp
  }
 });
 
-test("read-only audit accepts complete PostgreSQL ownership and ledger contract",{skip:!url},async()=>{
+test("read-only audit accepts complete PostgreSQL ownership and ledger contract",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_ok_"+randomUUID().replaceAll("-","");
  const q=async sql=>pool.query(sql);
@@ -63,7 +74,7 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
  }
 });
 
-test("schema audit rejects wrong financial amount precision on real PostgreSQL",{skip:!url},async()=>{
+test("schema audit rejects wrong financial amount precision on real PostgreSQL",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_precision_"+randomUUID().replaceAll("-","");
  try{
@@ -78,7 +89,7 @@ test("schema audit rejects wrong financial amount precision on real PostgreSQL",
  }
 });
 
-test("schema audit rejects insufficient total precision even when scale is correct",{skip:!url},async()=>{
+test("schema audit rejects insufficient total precision even when scale is correct",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_capacity_"+randomUUID().replaceAll("-","");
  try{
@@ -93,7 +104,7 @@ test("schema audit rejects insufficient total precision even when scale is corre
  }
 });
 
-test("schema audit rejects partial unique indexes for deposit event identity",{skip:!url},async()=>{
+test("schema audit rejects partial unique indexes for deposit event identity",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_partial_"+randomUUID().replaceAll("-","");
  try{
@@ -109,7 +120,7 @@ test("schema audit rejects partial unique indexes for deposit event identity",{s
  }
 });
 
-test("schema audit refuses NOT VALID ownership foreign keys",{skip:!url},async()=>{
+test("schema audit refuses NOT VALID ownership foreign keys",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_unvalidated_"+randomUUID().replaceAll("-","");
  try{
@@ -126,7 +137,7 @@ test("schema audit refuses NOT VALID ownership foreign keys",{skip:!url},async()
  }
 });
 
-test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:!url},async()=>{
+test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_nullable_"+randomUUID().replaceAll("-","");
  try{
@@ -143,7 +154,7 @@ test("schema audit rejects nullable evidence fields in PostgreSQL",{skip:!url},a
 });
 
 
-test("schema audit rejects a text platform-control flag instead of boolean",{skip:!url},async()=>{
+test("schema audit rejects a text platform-control flag instead of boolean",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_owner_type_"+randomUUID().replaceAll("-","");
  try{
@@ -159,7 +170,7 @@ test("schema audit rejects a text platform-control flag instead of boolean",{ski
 });
 
 
-test("schema audit rejects nullable wallet ownership fields",{skip:!url},async()=>{
+test("schema audit rejects nullable wallet ownership fields",{skip:skipUnsafeTarget},async()=>{
  const pool=new pg.Pool({connectionString:url});
  const schema="audit_owner_null_"+randomUUID().replaceAll("-","");
  try{
