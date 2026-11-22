@@ -47,6 +47,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   "verified_deposit_evidence.block_number":{precision:78,scale:0}
  };
  for(const [name,expected] of Object.entries({
+   "wallets.is_platform_controlled":"boolean",
    "ledger_entries.amount":"numeric",
    "verified_deposit_evidence.event_key":"text",
    "ledger_transactions.idempotency_key":"text",
