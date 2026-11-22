@@ -131,7 +131,9 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   "verified_deposit_evidence_event_key_format",
   "verified_deposit_evidence_block_hash_format",
   "verified_deposit_evidence_token_format",
-  "verified_deposit_evidence_address_format"
+  "verified_deposit_evidence_address_format",
+  "verified_deposit_evidence_block_number_nonnegative",
+  "verified_deposit_evidence_amount_positive"
  ]) if(!validChecks.has(name)) incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
    missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
