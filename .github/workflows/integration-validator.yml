@@ -82,5 +82,12 @@ jobs:
           # Some gated suites intentionally skip without their dedicated rehearsal target.
           # Require the deposit evidence migration test itself to run and pass.
           grep -Eq '^ok [0-9]+ - staged evidence migration creates constrained table and is idempotent$' "$RUNNER_TEMP/profino-tests.tap"
+      - name: Reset isolated catalog rehearsal database before focused tests
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # CI-only disposable database; never use the production DATABASE_URL.
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE catalog_rehearsal WITH (FORCE)'
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
       - name: Focused PostgreSQL tests
         run: npm run test:postgres
