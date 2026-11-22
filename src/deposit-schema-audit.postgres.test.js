@@ -157,3 +157,22 @@ test("schema audit rejects a text platform-control flag instead of boolean",{ski
   await pool.end();
  }
 });
+
+
+test("schema audit rejects nullable wallet ownership fields",{skip:!url},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_owner_null_"+randomUUID().replaceAll("-","");
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".wallets (wallet_address text, is_platform_controlled boolean)');
+  await pool.query('CREATE TABLE "'+schema+'".user_wallet_assignments (user_id bigint, ended_at timestamptz)');
+  const result=await auditDepositSchema(pool,{schema});
+  assert.equal(result.ready,false);
+  for(const name of ["wallets.wallet_address:not_null","wallets.is_platform_controlled:not_null","user_wallet_assignments.user_id:not_null"])
+   assert.ok(result.incompatible.includes(name),name);
+  assert.ok(!result.incompatible.includes("user_wallet_assignments.ended_at:not_null"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
