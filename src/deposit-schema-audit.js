@@ -28,6 +28,19 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
    if(!actual.get(table)?.has(column))missing.push(table+"."+column);
  const incompatible=[];
  for(const name of [
+  'users.id',
+  'wallets.id',
+  'wallets.wallet_address',
+  'wallets.chain_id',
+  'wallets.network',
+  'wallets.status',
+  'wallets.wallet_type',
+  'wallets.is_platform_controlled',
+  'user_wallet_assignments.id',
+  'user_wallet_assignments.user_id',
+  'user_wallet_assignments.wallet_id',
+  'user_wallet_assignments.assignment_type',
+  'user_wallet_assignments.status',
   'verified_deposit_evidence.event_key',
   'verified_deposit_evidence.block_hash',
   'verified_deposit_evidence.block_number',
