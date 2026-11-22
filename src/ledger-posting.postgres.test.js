@@ -12,7 +12,17 @@ import { formatUsdt } from "./ledger-safety.js";
 import { getWalletBalances, getRecentWalletEntries, getDailySimulatedProfits, getSimulationReceipt, getSimulatedTransferActivity } from "./wallet-balances.js";
 import { postLedgerTransaction, postJournalInTransaction, withLedgerTransaction } from "./ledger-posting.js";
 
-const enabled = Boolean(process.env.DATABASE_URL);
+// This suite creates and drops PostgreSQL schemas; require an explicit,
+// disposable local database instead of trusting any DATABASE_URL.
+function isDisposableDatabase() {
+  if (process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes" || !process.env.DATABASE_URL) return false;
+  try {
+    const target = new URL(process.env.DATABASE_URL);
+    return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) &&
+      target.pathname === "/profino_test";
+  } catch { return false; }
+}
+const enabled = isDisposableDatabase();
 let adminPool;
 let pool;
 let schema;
