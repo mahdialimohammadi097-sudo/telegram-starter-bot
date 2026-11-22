@@ -37,7 +37,7 @@ export function verifyBep20DepositReceipt({receipt, transaction, block, head, to
     const indexKey = index.toString();
     if (seenIndices.has(indexKey)) throw new Error("Duplicate transfer log index");
     seenIndices.add(indexKey);
-    if (amount === 0n || log.removed === true ||
+    if (amount === 0n || (log.removed !== undefined && log.removed !== false) ||
         log.transactionHash !== receipt.transactionHash ||
         log.blockHash !== block.hash ||
         (log.blockNumber !== undefined && log.blockNumber !== block.number))

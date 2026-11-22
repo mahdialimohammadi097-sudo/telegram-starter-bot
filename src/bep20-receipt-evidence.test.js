@@ -40,6 +40,9 @@ test("allow distinct transfer logs within a single receipt",()=>{
 test("reject removed transfer logs and inconsistent log block numbers",()=>{
  for(const badLog of [
   {...log,removed:true},
+  {...log,removed:"true"},
+  {...log,removed:1},
+  {...log,removed:null},
   {...log,blockNumber:"0x65"},
   {...log,blockNumber:"0x64",removed:true}
  ]) assert.throws(()=>verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[badLog]}}),/Inconsistent transfer log/);
