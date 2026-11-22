@@ -14,6 +14,15 @@ export const pool = new Pool({
   ssl: false,
 });
 
+// Idle clients can disconnect after network interruptions. PostgreSQL removes
+// the failed client automatically; handle the pool event to avoid a process crash.
+// Do not log raw error messages: they may include connection details.
+pool.on("error", (error) => {
+  const code = typeof error?.code === "string" && /^[A-Z0-9]{2,8}$/.test(error.code)
+    ? error.code : "UNKNOWN";
+  console.error("[database] idle PostgreSQL client disconnected", { code });
+});
+
 export async function testDatabaseConnection() {
   const result = await pool.query("SELECT NOW() AS server_time");
   return result.rows[0];
