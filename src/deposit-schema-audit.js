@@ -116,6 +116,23 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   ["ledger_entries","transaction_id","ledger_transactions","id"],
   ["ledger_entries","account_id","ledger_accounts","id"]
  ]) if(!fkSet.has(relation.join('.'))) incompatible.push(relation.slice(0,2).join('.')+":foreign_key");
+ // An existing evidence table can have all expected columns but lack the
+ // CHECK constraints required to reject malformed chain events and addresses.
+ // CREATE TABLE IF NOT EXISTS does not repair such a table.
+ const checks=await client.query(`
+ SELECT c.conname,c.convalidated AS validated
+ FROM pg_constraint c
+ JOIN pg_class t ON t.oid=c.conrelid
+ JOIN pg_namespace n ON n.oid=t.relnamespace
+ WHERE n.nspname=$1 AND t.relname='verified_deposit_evidence' AND c.contype='c'
+ `,[schema]);
+ const validChecks=new Set(checks.rows.filter(r=>r.validated===true).map(r=>r.conname));
+ for(const name of [
+  "verified_deposit_evidence_event_key_format",
+  "verified_deposit_evidence_block_hash_format",
+  "verified_deposit_evidence_token_format",
+  "verified_deposit_evidence_address_format"
+ ]) if(!validChecks.has(name)) incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
    missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
 }

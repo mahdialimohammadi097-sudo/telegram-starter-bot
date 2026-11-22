@@ -39,3 +39,20 @@ test("schema audit requires every column consumed by transactional owner resolve
   "user_wallet_assignments.ended_at"
  ]) assert.ok(report.missing.includes(column),column);
 });
+
+test("schema audit rejects evidence tables missing validated format checks",async()=>{
+ const checks=[
+  "verified_deposit_evidence_event_key_format",
+  "verified_deposit_evidence_block_hash_format",
+  "verified_deposit_evidence_token_format",
+  "verified_deposit_evidence_address_format"
+ ];
+ const client={query:async(sql)=>{
+  if(sql.includes("c.contype='c'")) return {rows:checks.slice(0,3).map(conname=>({conname,validated:true})).concat([{conname:checks[3],validated:false}])};
+  return {rows:[]};
+ }};
+ const report=await auditDepositSchema(client);
+ assert.equal(report.ready,false);
+ assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
+ assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
+});

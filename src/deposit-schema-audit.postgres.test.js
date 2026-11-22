@@ -62,7 +62,11 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
    CREATE TABLE ${prefix}verified_deposit_evidence(
      event_key text PRIMARY KEY,block_hash text NOT NULL,
      block_number numeric(78,0) NOT NULL,token_contract text NOT NULL,
-     deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL);
+     deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL,
+     CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'),
+     CONSTRAINT verified_deposit_evidence_block_hash_format CHECK (block_hash ~ '^0x[0-9a-f]{64}$'),
+     CONSTRAINT verified_deposit_evidence_token_format CHECK (token_contract ~ '^0x[0-9a-f]{40}$'),
+     CONSTRAINT verified_deposit_evidence_address_format CHECK (deposit_address ~ '^0x[0-9a-f]{40}$'));
   `);
   const result=await auditDepositSchema(pool,{schema});
   assert.deepEqual(result.missing,[]);
