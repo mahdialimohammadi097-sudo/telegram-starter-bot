@@ -149,7 +149,13 @@ async function showDashboard(ctx, edit = false) {
       ].join("\n");
 
   if (edit) {
-    return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language) });
+    try {
+      return await ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language) });
+    } catch (error) {
+      // Refreshing an unchanged dashboard is a successful no-op, not an outage.
+      if (error?.error_code === 400 && /message is not modified/i.test(error?.description ?? "")) return;
+      throw error;
+    }
   }
   return ctx.reply(message, { reply_markup: dashboardKeyboard(language) });
 }
