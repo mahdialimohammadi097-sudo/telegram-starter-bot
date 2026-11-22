@@ -37,8 +37,11 @@ export function verifyBep20DepositReceipt({receipt, transaction, block, head, to
     const indexKey = index.toString();
     if (seenIndices.has(indexKey)) throw new Error("Duplicate transfer log index");
     seenIndices.add(indexKey);
-    if (amount === 0n || log.transactionHash !== receipt.transactionHash ||
-        log.blockHash !== block.hash) throw new Error("Inconsistent transfer log");
+    if (amount === 0n || log.removed === true ||
+        log.transactionHash !== receipt.transactionHash ||
+        log.blockHash !== block.hash ||
+        (log.blockNumber !== undefined && log.blockNumber !== block.number))
+      throw new Error("Inconsistent transfer log");
     results.push(Object.freeze({eventKey:`bsc:56:${receipt.transactionHash}:${index}`,
       chainId:"56",tokenContract:tokenContract.toLowerCase(),depositAddress:depositAddress.toLowerCase(),
       amountBaseUnits:amount.toString(),blockHash:block.hash,blockNumber:height.toString()}));
