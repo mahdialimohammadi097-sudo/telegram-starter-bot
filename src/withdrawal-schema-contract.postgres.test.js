@@ -5,7 +5,17 @@ import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { createSimulationWithdrawalTables } from "../test-support/withdrawal-schema.js";
 
-const enabled = Boolean(process.env.DATABASE_URL);
+// These integration tests create and DROP PostgreSQL schemas. Never run them
+// against a production or shared database, even when DATABASE_URL is present.
+function isDisposableDatabase() {
+ if (process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes" || !process.env.DATABASE_URL) return false;
+ try {
+  const target = new URL(process.env.DATABASE_URL);
+  return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) &&
+   target.pathname === "/profino_test";
+ } catch { return false; }
+}
+const enabled = isDisposableDatabase();
 let admin, pool, schema;
 before(async () => {
   if (!enabled) return;

@@ -4,7 +4,15 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { formatCoreSchema, inspectCoreSchema } from "./database-diagnostics.js";
 
-const enabled = Boolean(process.env.DATABASE_URL);
+// This test creates and drops schemas. Only a disposable local test DB is allowed.
+function isDisposableDatabase() {
+  if (process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes" || !process.env.DATABASE_URL) return false;
+  try {
+    const target = new URL(process.env.DATABASE_URL);
+    return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) && target.pathname === "/profino_test";
+  } catch { return false; }
+}
+const enabled = isDisposableDatabase();
 let adminPool;
 let pool;
 let schema;
