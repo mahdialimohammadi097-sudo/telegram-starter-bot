@@ -4,7 +4,15 @@ import pg from "pg";
 import {readFile} from "node:fs/promises";
 import {persistVerifiedDepositEvidence} from "./verified-deposit-evidence-store.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
-test("durable receipt evidence is replay-safe and conflicts fail closed", {skip:!url},async()=>{
+function safeDisposableTarget() {
+ if (!url || process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes") return false;
+ try {
+  const target = new URL(url);
+  return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) &&
+   target.pathname === "/catalog_rehearsal";
+ } catch { return false; }
+}
+test("durable receipt evidence is replay-safe and conflicts fail closed", {skip:!safeDisposableTarget()},async()=>{
  const parsed=new URL(url);
  assert.ok(["localhost","127.0.0.1"].includes(parsed.hostname));
  assert.equal(parsed.pathname,"/catalog_rehearsal");
