@@ -37,3 +37,29 @@ test("rollback failure fails closed with rollback error",async()=>{
   client,transactionHash:"invalid",expected:{depositAddress:"invalid"}
  }),/Read-only rehearsal rollback failed/);
 });
+
+test("transaction start failure does not issue a spurious rollback",async()=>{
+ const statements=[];
+ const client={query:async sql=>{
+  statements.push(sql);
+  throw new Error("read-only BEGIN denied");
+ }};
+ await assert.rejects(rehearseBscDepositJournal({client}),/BEGIN denied/);
+ assert.deepEqual(statements,["BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"]);
+});
+test("timeout configuration failure rolls back before any evidence queries",async()=>{
+ const statements=[];
+ const client={query:async sql=>{
+  statements.push(sql);
+  if(sql.startsWith("SET LOCAL statement_timeout"))
+   throw new Error("timeout configuration failed");
+  return {rows:[]};
+ }};
+ await assert.rejects(rehearseBscDepositJournal({client}),/timeout configuration failed/);
+ assert.deepEqual(statements,[
+  "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",
+  "SET LOCAL lock_timeout = '2000ms'",
+  "SET LOCAL statement_timeout = '8000ms'",
+  "ROLLBACK"
+ ]);
+});
