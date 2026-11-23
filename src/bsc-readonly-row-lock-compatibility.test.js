@@ -35,3 +35,25 @@ test("invalid lock mode is rejected before database query",async()=>{
  }),/Invalid schema/);
  assert.equal(calls,0);
 });
+
+test("non-rehearsal ledger account inspection retains FOR SHARE locks",async()=>{
+ const client={query:async(sql)=>{
+  assert.match(sql,/FOR SHARE/);
+  return {rows:[
+   {id:"4",user_id:"12",account_type:"AVAILABLE",currency:"USDT"},
+   {id:"5",user_id:null,account_type:"CLEARING",currency:"USDT"}
+  ],rowCount:2};
+ }};
+ await inspectDepositJournalAccounts(client,{
+  userId:"12",userAvailableAccountId:"4",platformClearingAccountId:"5"
+ });
+});
+test("non-rehearsal historical ownership inspection retains row locks",async()=>{
+ const client={query:async(sql)=>{
+  assert.match(sql,/FOR SHARE OF h,w/);
+  return {rows:[],rowCount:0};
+ }};
+ await assert.rejects(inspectHistoricalWalletFromDatabase(client,{
+  eventBlockNumber:"1",walletAddress:"0x"+"a".repeat(40),expectedUserId:"12"
+ }),/Missing or ambiguous historical wallet owner/);
+});
