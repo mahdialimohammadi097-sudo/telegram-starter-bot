@@ -32,3 +32,40 @@ test("read-only schema audit rolls back when catalog inspection fails",async()=>
  assert.equal(rolledBack,true);
  assert.equal(released,true);
 });
+
+test("schema audit marks structure ready only with all required columns and unique event key",async()=>{
+ const required={
+  verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
+  wallets:["id","wallet_address","chain_id","is_platform_controlled"],
+  user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"]
+ };
+ const columns=Object.entries(required).flatMap(([table_name,names])=>
+  names.map(column_name=>({table_name,column_name})));
+ const client={query:async(sql)=>{
+  if(sql.includes("information_schema.columns"))return {rows:columns};
+  if(sql.includes("FROM pg_index"))return {rows:[{unique_key:true}]};
+  return {rows:[]};
+ },release:()=>{}};
+ const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
+ assert.equal(result.structuralReady,true);
+ assert.deepEqual(result.missing,[]);
+ assert.equal(result.financialActivationReady,false);
+ assert.equal(result.realDepositsEnabled,false);
+});
+test("schema audit rejects nonunique event index despite all columns existing",async()=>{
+ const required={
+  verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
+  wallets:["id","wallet_address","chain_id","is_platform_controlled"],
+  user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"]
+ };
+ const columns=Object.entries(required).flatMap(([table_name,names])=>
+  names.map(column_name=>({table_name,column_name})));
+ const client={query:async(sql)=>{
+  if(sql.includes("information_schema.columns"))return {rows:columns};
+  if(sql.includes("FROM pg_index"))return {rows:[{unique_key:false}]};
+  return {rows:[]};
+ },release:()=>{}};
+ const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
+ assert.equal(result.structuralReady,false);
+ assert.deepEqual(result.missing,["unique:verified_deposit_evidence.event_key"]);
+});
