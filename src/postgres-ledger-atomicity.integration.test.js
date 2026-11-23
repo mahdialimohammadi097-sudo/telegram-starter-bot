@@ -3,12 +3,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
+import {randomUUID} from "node:crypto";
 const url=process.env.PROFINO_TEST_DATABASE_URL;
 test("unique event claims and journal writes rollback atomically",{
  skip:!url?"requires PROFINO_TEST_DATABASE_URL":false
 },async()=>{
  const pool=new pg.Pool({connectionString:url,max:3});
- const schema="profino_atomicity_test";
  const admin=await pool.connect();
  try{
   await admin.query('BEGIN');
@@ -24,4 +24,40 @@ test("unique event claims and journal writes rollback atomically",{
   assert.equal(count.rows[0].n,0);
   await admin.query('ROLLBACK');
  }finally{admin.release();await pool.end();}
+});
+
+test("concurrent PostgreSQL transactions cannot claim the same deposit",{
+ skip:!url?"requires PROFINO_TEST_DATABASE_URL":false,
+ timeout:15000
+},async()=>{
+ // Only a disposable CI database may be supplied. Never use a production URL.
+ const pool=new pg.Pool({connectionString:url,max:3});
+ const schema="test_"+randomUUID().replaceAll("-","").slice(0,24);
+ const quoted='"'+schema+'"';
+ const admin=await pool.connect();
+ let first,second;
+ try{
+  await admin.query("CREATE SCHEMA "+quoted);
+  await admin.query("CREATE TABLE "+quoted+".claims (event_key text PRIMARY KEY)");
+  await admin.query("CREATE TABLE "+quoted+".journal (event_key text NOT NULL REFERENCES "+quoted+".claims(event_key), amount numeric(36,18) NOT NULL CHECK(amount>0))");
+  first=await pool.connect();
+  second=await pool.connect();
+  await first.query("BEGIN");
+  await second.query("BEGIN");
+  await first.query("INSERT INTO "+quoted+".claims(event_key) VALUES ($1)",["event-same"]);
+  await first.query("INSERT INTO "+quoted+".journal(event_key,amount) VALUES ($1,$2)",["event-same","10.00000000"]);
+  // The second writer waits on the first writer's unique-key decision.
+  const secondAttempt=second.query("INSERT INTO "+quoted+".claims(event_key) VALUES ($1)",["event-same"]);
+  await first.query("COMMIT");
+  await assert.rejects(secondAttempt,e=>e.code==="23505");
+  await second.query("ROLLBACK");
+  const claims=await admin.query("SELECT count(*)::int AS n FROM "+quoted+".claims");
+  const entries=await admin.query("SELECT count(*)::int AS n FROM "+quoted+".journal");
+  assert.equal(claims.rows[0].n,1);
+  assert.equal(entries.rows[0].n,1);
+ }finally{
+  if(first){try{await first.query("ROLLBACK")}catch{}first.release()}
+  if(second){try{await second.query("ROLLBACK")}catch{}second.release()}
+  try{await admin.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{admin.release();await pool.end()}
+ }
 });
