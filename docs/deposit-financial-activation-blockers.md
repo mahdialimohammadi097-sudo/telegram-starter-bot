@@ -21,3 +21,16 @@ This review covers the integrated **read-only** deposit preflight and evidence-t
 ## Release decision
 
 **BLOCKED** until all six gates are independently evidenced and the owner explicitly authorizes the appropriate action. No merging to `main`, no production schema writes, no live deposit acceptance, no balance credits, and no withdrawals are authorized by this document.
+
+## Mainnet evidence acceptance contract (implementation still missing)
+
+The existing `test-support/bsc-testnet-receipt.js` explicitly accepts testnet chain ID `0x61`; it must **not** be reused as proof of BSC mainnet deposits (chain ID 56 / `0x38`). Before crediting any mainnet USDT, implement and independently test all of the following, with an explicitly reviewed token allowlist:
+
+- Query receipt and canonical block data from trusted RPC providers, not client-supplied fields; verify successful transaction status, chain ID, block hash, block number and sufficient independently configured finality. On disagreement, outage or reorganization, **do not credit**.
+- Decode only an ERC-20 `Transfer(address,address,uint256)` event from the exact allowlisted token contract; require correct transaction hash, log index, unremoved log, recipient topic, positive amount and contract address. A transaction to a different contract or recipient must fail closed.
+- Resolve the recipient address against a **uniquely active assignment to the intended user at the event's relevant block/time**. A current assignment alone is insufficient when addresses can be reassigned. Lock the assignment and enforce account ownership during posting.
+- Verify token `decimals` against independently approved contract metadata. Convert base units to ledger units exactly, rejecting rounding, overflow, unsupported precision and mismatched amounts.
+- Persist canonical `chainId:transactionHash:logIndex` evidence and post a matching, balanced journal in **one** PostgreSQL transaction, under unique constraints and concurrency-safe locking. Test replay, multiple logs per transaction, rollback, duplicate notifications and simultaneous workers.
+- Reconcile independently observed finalized transfers with stored evidence, assigned users and ledger credits; alert on missing, orphaned, reversed or unmatched entries. Define an incident freeze procedure before any activation.
+
+**Security boundary:** `rehearseVerifiedDepositPosting` is disposable-database-only and accepts caller-supplied evidence and journal accounts; it is **not** a production verifier, authorization layer or crediting endpoint. Its green tests do not discharge the above requirements.
