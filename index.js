@@ -2,6 +2,7 @@
 // Polling is the default; webhook mode is optional.
 
 import { Bot, webhookCallback } from "grammy";
+import { requireWebhookSecret } from "./src/webhook-secret-validation.js";
 import { registerCommands } from "./src/commands.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
 import { startScheduler } from "./src/scheduler.js";
@@ -257,10 +258,7 @@ async function main() {
       throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
     }
 
-    const secret = (process.env.WEBHOOK_SECRET || "").trim();
-    if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
-      throw new Error("WEBHOOK_SECRET must be configured with a valid Telegram secret token in webhook mode.");
-    }
+    const secret = requireWebhookSecret(process.env.WEBHOOK_SECRET);
     webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
 
     await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
