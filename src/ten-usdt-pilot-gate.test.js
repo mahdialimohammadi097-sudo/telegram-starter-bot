@@ -10,7 +10,7 @@ test("accepts only a balanced-shape exact 10 USDT pilot proposal",()=>{
 });
 test("rejects incorrect, fractional and zero pilot amounts",()=>{
  for(const amount of ["0.00000000","9.99999999","10.00000001","20.00000000","10","10.000000001"]){
-  await assert.throws(()=>check({...valid,entries:[valid.entries[0],{...valid.entries[1],amount}]}));
+  assert.throws(()=>check({...valid,entries:[valid.entries[0],{...valid.entries[1],amount}]}));
  }
 });
 test("rejects missing entries, wrong currency, direction or idempotency",()=>{
