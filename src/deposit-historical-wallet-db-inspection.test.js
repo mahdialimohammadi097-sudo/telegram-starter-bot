@@ -17,6 +17,25 @@ test("history lookup fails closed for missing, ambiguous and forged wallet rows"
   await assert.rejects(inspect({query:async()=>({rows})},input));
  }
 });
+test("history lookup rejects wrong chain, identity and block boundaries",async()=>{
+ const cases=[
+  {...row,chain_id:"97"},
+  {...row,wallet_chain_id:"97"},
+  {...row,wallet_id_current:"2"},
+  {...row,start_block:"151"},
+  {...row,end_block:"150"},
+  {...row,wallet_address:"0x"+"b".repeat(40)},
+  {...row,is_platform_controlled:null}
+ ];
+ for(const candidate of cases){
+  await assert.rejects(inspect({query:async()=>({rows:[candidate]})},input));
+ }
+});
+test("history lookup rejects schema injection before any database query",async()=>{
+ const client={query:async()=>{throw Error("query should not run")}};
+ await assert.rejects(inspect(client,{...input,schema:"public;DROP TABLE wallets"}),/Invalid schema/);
+ await assert.rejects(inspect(client,{...input,schema:"Public"}),/Invalid schema/);
+});
 test("history lookup rejects invalid addresses and block numbers before query",async()=>{
  const client={query:async()=>{throw Error("query should not run")}};
  await assert.rejects(inspect(client,{...input,eventBlockNumber:"1 OR 1=1"}),/Invalid/);
