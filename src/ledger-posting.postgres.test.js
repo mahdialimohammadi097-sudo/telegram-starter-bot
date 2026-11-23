@@ -2347,3 +2347,26 @@ test("two concurrent verified-deposit rehearsals post exactly one balanced journ
   assert.deepEqual(sums.rows.map(x=>[x.entry_type,x.total]).sort((a,b)=>a[0].localeCompare(b[0])),
     [["credit","1.000000000000000000"],["debit","1.000000000000000000"]]);
 });
+
+test("deposit rehearsal rejects balanced but inflated journal and rolls back evidence", {skip: !enabled}, async () => {
+ const {rehearseVerifiedDepositPosting}=await import("./deposit-posting-rehearsal.js");
+ const clearing=await createAccount("CLEARING");
+ const customer=await createAccount("AVAILABLE");
+ const tx="0x"+randomUUID().replaceAll("-").padEnd(64,"a");
+ const eventKey="bsc:56:"+tx+":0";
+ const evidence={chainId:56,transactionHash:tx,logIndex:0,blockHash:"0x"+"b".repeat(64),
+  blockNumber:"123",tokenContract:"0x"+"c".repeat(40),depositAddress:"0x"+"d".repeat(40),
+  amountBaseUnits:"1000000000000000000"};
+ await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+  journalForUnits:({eventKey:key})=>({
+   transactionType:"verified-deposit-test",idempotencyKey:"verified-deposit:"+key,
+   entries:[
+    {account_id:clearing,entry_type:"debit",amount:"2.00000000",currency:"USDT"},
+    {account_id:customer,entry_type:"credit",amount:"2.00000000",currency:"USDT"}
+   ]
+  })}),/exactly match verified token units/);
+ const proof=await pool.query("SELECT count(*)::int AS count FROM verified_deposit_evidence WHERE event_key=$1",[eventKey]);
+ assert.equal(proof.rows[0].count,0);
+ const journals=await pool.query("SELECT count(*)::int AS count FROM ledger_transactions WHERE idempotency_key=$1",["verified-deposit:"+eventKey]);
+ assert.equal(journals.rows[0].count,0);
+});
