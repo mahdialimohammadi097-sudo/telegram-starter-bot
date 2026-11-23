@@ -57,3 +57,20 @@ test("schema audit rejects evidence tables missing validated format checks",asyn
  // Mock rows intentionally omit SQL definitions: fail closed even for validated names.
  assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
 });
+
+test("deposit preflight rejects bigint chain IDs and mismatched wallet identities",async()=>{
+ const client={query:async(sql)=>{
+  if(sql.includes("information_schema.columns"))return {rows:[
+   {table_name:"users",column_name:"id",data_type:"integer"},
+   {table_name:"wallets",column_name:"id",data_type:"bigint"},
+   {table_name:"wallets",column_name:"chain_id",data_type:"bigint"},
+   {table_name:"user_wallet_assignments",column_name:"user_id",data_type:"bigint"},
+   {table_name:"user_wallet_assignments",column_name:"wallet_id",data_type:"bigint"}
+  ]};
+  return {rows:[]};
+ }};
+ const report=await auditDepositSchema(client);
+ assert.equal(report.ready,false);
+ assert.ok(report.incompatible.includes("users.id:type"));
+ assert.ok(report.incompatible.includes("wallets.chain_id:type"));
+});
