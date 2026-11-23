@@ -34,9 +34,22 @@ try{
  const missingTables=tables.filter(t=>!presentTables.includes(t));
  const identityConstraints=constraints.rows.filter(r=>r.table_name==='deposit_address_ownership_history');
  const missingConstraintTypes=['p','f','x'].filter(t=>!identityConstraints.some(r=>r.type===t && r.validated===true));
- const structuralReady=missing.length===0 && missingTables.length===0 && missingConstraintTypes.length===0;
+ // Require the named database constraints from the reviewed migration, not merely
+ // any unrelated exclusion/unique constraint on the same table.
+ const requiredNamedConstraints=[
+  ["deposit_address_ownership_history_pkey","p"],
+  ["ownership_wallet_unique_start","u"],
+  ["ownership_wallet_interval_no_overlap","x"],
+  ["ownership_wallet_chain_unique_start","u"],
+  ["ownership_interval_no_overlap","x"]
+ ];
+ const missingNamedConstraints=requiredNamedConstraints
+  .filter(([name,type])=>!identityConstraints.some(r=>r.constraint_name===name && r.type===type && r.validated===true))
+  .map(([name])=>name);
+ const structuralReady=missing.length===0 && missingTables.length===0 &&
+  missingConstraintTypes.length===0 && missingNamedConstraints.length===0;
  console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:structuralReady,
-  missing,missingTables,missingConstraintTypes,columns:columns.rows,constraints:constraints.rows,
+  missing,missingTables,missingConstraintTypes,missingNamedConstraints,columns:columns.rows,constraints:constraints.rows,
   financialActivationReady:false,realDepositsEnabled:false}));
  if(!structuralReady) process.exitCode=2;
  await client.query("ROLLBACK");
