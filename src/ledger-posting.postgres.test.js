@@ -2342,4 +2342,8 @@ test("two concurrent verified-deposit rehearsals post exactly one balanced journ
   const entries=await pool.query("SELECT entry_type,amount::text AS amount FROM ledger_entries WHERE transaction_id=$1",[journals.rows[0].id]);
   assert.equal(entries.rowCount,2);
   assert.deepEqual(entries.rows.map(x=>x.entry_type).sort(),["credit","debit"]);
+  const sums=await pool.query(`SELECT entry_type, SUM(amount)::text AS total
+    FROM ledger_entries WHERE transaction_id=$1 GROUP BY entry_type`,[journals.rows[0].id]);
+  assert.deepEqual(sums.rows.map(x=>[x.entry_type,x.total]).sort((a,b)=>a[0].localeCompare(b[0])),
+    [["credit","1.000000000000000000"],["debit","1.000000000000000000"]]);
 });
