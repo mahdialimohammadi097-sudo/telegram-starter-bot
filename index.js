@@ -8,6 +8,7 @@ import { startScheduler } from "./src/scheduler.js";
 import { ensurePostHistorySchema } from "./src/post-history.js";
 import { ensureAdminOpsSchema } from "./src/admin-ops.js";
 import { inspectCoreSchema } from "./src/database-diagnostics.js";
+import { deliverAdminSchemaAudit } from "./src/admin-schema-audit.js";
 import { formatStartupHealthReport } from "./src/health-report.js";
 import { startHealthMonitor } from "./src/health-monitor.js";
 import { createRuntimeHealthState } from "./src/runtime-health.js";
@@ -225,6 +226,13 @@ async function main() {
   console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
 
   await sendStartupReport(me.username);
+  // Nonblocking, metadata-only diagnostic delivered to the existing Super Admin.
+  void deliverAdminSchemaAudit({
+    pool,
+    adminId:ADMIN_ID,
+    sendMessage:(id,message)=>bot.api.sendMessage(id,message),
+    logCode:(code)=>console.error("[deposit-audit] read-only inspection unavailable:",code)
+  });
 
   const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
   healthMonitor = startHealthMonitor({
