@@ -23,7 +23,7 @@ const history={wallet_id:"3",user_id:"12",chain_id:"56",wallet_address:address,
  wallet_address_current:address,is_platform_controlled:true};
 const accounts=[{id:"4",user_id:"12",account_type:"AVAILABLE",currency:"USDT"},
  {id:"5",user_id:null,account_type:"CLEARING",currency:"USDT"}];
-function mockClient({duplicate=false,failAt=null}={}){
+function mockClient({duplicate=false,ledgerDuplicate=false,failAt=null}={}){
  const statements=[];
  const client={query:async(sql,params)=>{
   statements.push({sql,params});
@@ -31,7 +31,7 @@ function mockClient({duplicate=false,failAt=null}={}){
   if(sql.includes("deposit_address_ownership_history"))return {rows:[history],rowCount:1};
   if(sql.includes("ledger_accounts"))return {rows:accounts,rowCount:2};
   if(sql.includes("verified_deposit_evidence"))return {rows:[{
-   evidence_exists:duplicate,ledger_exists:false
+   evidence_exists:duplicate,ledger_exists:ledgerDuplicate
   }],rowCount:1};
   if(sql==="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" ||
      sql.startsWith("SET LOCAL") || sql==="ROLLBACK")return {rows:[]};
@@ -60,4 +60,17 @@ test("database read failure rolls back without returning a journal",async()=>{
  const {client,statements}=mockClient({failAt:"ledger_accounts"});
  await assert.rejects(rehearseBscDepositJournal({client,...input}),/simulated query failure/);
  assert.equal(statements.at(-1).sql,"ROLLBACK");
+});
+
+test("ledger-only duplicate event blocks rehearsal even without evidence row",async()=>{
+ const {client,statements}=mockClient({ledgerDuplicate:true});
+ await assert.rejects(rehearseBscDepositJournal({client,...input}),/already recorded/);
+ assert.equal(statements.at(-1).sql,"ROLLBACK");
+ assert.ok(statements.every(s=>!s.sql.includes("COMMIT")));
+});
+test("idempotency lookup failure rolls back and never returns a proposal",async()=>{
+ const {client,statements}=mockClient({failAt:"verified_deposit_evidence"});
+ await assert.rejects(rehearseBscDepositJournal({client,...input}),/simulated query failure/);
+ assert.equal(statements.at(-1).sql,"ROLLBACK");
+ assert.ok(statements.every(s=>!s.sql.includes("COMMIT")));
 });
