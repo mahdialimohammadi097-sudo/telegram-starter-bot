@@ -26,8 +26,9 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
  if(!transaction || transaction.hash?.toLowerCase()!==transactionHash.toLowerCase() ||
     transaction.blockHash?.toLowerCase()!==receipt.blockHash?.toLowerCase() ||
     transaction.blockNumber!==receipt.blockNumber ||
-    (receipt.transactionIndex!==undefined && transaction.transactionIndex!==undefined &&
-     receipt.transactionIndex!==transaction.transactionIndex))
+    ((receipt.transactionIndex!==undefined || transaction.transactionIndex!==undefined) &&
+    (receipt.transactionIndex===undefined || transaction.transactionIndex===undefined ||
+     receipt.transactionIndex!==transaction.transactionIndex)))
   throw new Error("RPC transaction provenance mismatch");
  const blockHeight=height(receipt.blockNumber);
  const blockTag="0x"+blockHeight.toString(16);
