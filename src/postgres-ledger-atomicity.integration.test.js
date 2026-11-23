@@ -118,3 +118,27 @@ test("competing deposit claim succeeds after the first transaction rolls back",{
   try{await admin.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{admin.release();await pool.end()}
  }
 });
+
+test("PostgreSQL numeric(36,18) preserves exact eight-decimal USDT journal balance",{
+ skip:!url?"requires PROFINO_TEST_DATABASE_URL":false,
+ timeout:15000
+},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const client=await pool.connect();
+ try{
+  await client.query("BEGIN");
+  await client.query("CREATE TEMP TABLE journal_precision (account_id bigint NOT NULL, entry_type text NOT NULL CHECK(entry_type IN ('debit','credit')), amount numeric(36,18) NOT NULL CHECK(amount>0)) ON COMMIT DROP");
+  await client.query("INSERT INTO journal_precision VALUES (1,'debit',$1::numeric),(2,'credit',$1::numeric)",["0.00000001"]);
+  const result=await client.query(`SELECT
+   SUM(CASE WHEN entry_type='credit' THEN amount ELSE -amount END)::text AS net,
+   MIN(amount)::text AS smallest
+   FROM journal_precision`);
+  assert.equal(result.rows[0].net,"0.000000000000000000");
+  assert.equal(result.rows[0].smallest,"0.000000010000000000");
+  await assert.rejects(client.query("INSERT INTO journal_precision VALUES (3,'credit',0)"),e=>e.code==="23514");
+  await client.query("ROLLBACK");
+ }finally{
+  try{await client.query("ROLLBACK")}catch{}
+  client.release();await pool.end();
+ }
+});
