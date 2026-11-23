@@ -41,6 +41,8 @@ try{
   ["deposit_address_ownership_history.chain_id","bigint"],
   ["deposit_address_ownership_history.start_block","numeric"],
   ["deposit_address_ownership_history.end_block","numeric"],
+  ["user_wallet_assignments.user_id","bigint"],
+  ["user_wallet_assignments.wallet_id","bigint"],
   ["wallets.id","bigint"],["wallets.chain_id","bigint"],
   ["wallets.is_platform_controlled","boolean"]
  ];
@@ -51,7 +53,9 @@ try{
   "deposit_address_ownership_history.user_id",
   "deposit_address_ownership_history.chain_id",
   "deposit_address_ownership_history.wallet_address",
-  "deposit_address_ownership_history.start_block"
+  "deposit_address_ownership_history.start_block",
+  "user_wallet_assignments.user_id",
+  "user_wallet_assignments.wallet_id"
  ].filter(name=>byName.has(name) && byName.get(name).is_nullable!=="NO");
  const tables=['wallets','user_wallet_assignments','deposit_address_ownership_history'];
  const presentTables=[...new Set(columns.rows.map(r=>r.table_name))];
