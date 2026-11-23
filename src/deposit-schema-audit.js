@@ -139,7 +139,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  for(const [name,expression] of expectedChecks) {
   const matching=checks.rows.some(r=>r.conname===name && r.validated===true &&
    expression.test(String(r.definition??"")) &&
-   !/\\bOR\\b/i.test(String(r.definition??"")));
+   !/\bOR\b/i.test(String(r.definition??"")));
   if(!matching) incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  }
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
