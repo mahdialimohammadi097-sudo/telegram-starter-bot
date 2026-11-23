@@ -8,6 +8,7 @@ import { startScheduler } from "./src/scheduler.js";
 import { ensurePostHistorySchema } from "./src/post-history.js";
 import { ensureAdminOpsSchema } from "./src/admin-ops.js";
 import { inspectCoreSchema } from "./src/database-diagnostics.js";
+import { inspectDepositSchemaReadOnly } from "./src/admin-schema-audit.js";
 import { formatStartupHealthReport } from "./src/health-report.js";
 import { startHealthMonitor } from "./src/health-monitor.js";
 import { createRuntimeHealthState } from "./src/runtime-health.js";
@@ -225,6 +226,17 @@ async function main() {
   console.log(`[bot] authenticated as @${me.username} (${mode} mode)`);
 
   await sendStartupReport(me.username);
+  // No FadeHost terminal required: deliver only schema metadata to the existing
+  // Super Admin after startup, without blocking Telegram on diagnostic errors.
+  try {
+    const audit = await inspectDepositSchemaReadOnly(pool);
+    const message = "PROFINO read-only deposit schema audit\\n" +
+      JSON.stringify(audit);
+    await bot.api.sendMessage(ADMIN_ID,message);
+  } catch (error) {
+    console.error("[deposit-audit] read-only inspection unavailable:",
+      typeof error?.code==="string" ? error.code : "UNKNOWN");
+  }
 
   const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
   healthMonitor = startHealthMonitor({
