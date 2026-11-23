@@ -137,3 +137,15 @@ test("rejects receipt transaction position changing during inspection",async()=>
  };
  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/receipt changed/);
 });
+
+test("rejects transaction index changing across RPC reads even if block identity is unchanged",async()=>{
+ let reads=0;
+ const rpc=async(method)=>{
+  if(method==="eth_getTransactionByHash"){
+   return {hash:tx,blockHash:hash,blockNumber:"0x64",transactionIndex:++reads===1?"0x2":"0x3"};
+  }
+  if(method==="eth_getTransactionReceipt")return {...receipt,transactionIndex:"0x2"};
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/transaction changed/);
+});
