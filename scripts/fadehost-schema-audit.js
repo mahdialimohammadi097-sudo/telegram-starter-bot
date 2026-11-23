@@ -134,6 +134,26 @@ if (!process.env.DATABASE_URL) {
     if(row.orphan_accounts)missing.push("data:ledger_entries.orphan_accounts");
     if(row.nonpositive_amounts)missing.push("data:ledger_entries.nonpositive_amounts");
    }
+   // Event identity and ledger idempotency must be unique in existing data,
+   // independently of catalog constraints (which may have been added later).
+   if(columns.has("verified_deposit_evidence.event_key")){
+    const duplicates=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.verified_deposit_evidence
+      GROUP BY event_key HAVING COUNT(*)>1
+    ) AS found`);
+    if(typeof duplicates?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed deposit evidence duplicate result");
+    if(duplicates.rows[0].found)missing.push("data:verified_deposit_evidence.duplicate_event_key");
+   }
+   if(columns.has("ledger_transactions.idempotency_key")){
+    const duplicates=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_transactions
+      GROUP BY idempotency_key HAVING COUNT(*)>1
+    ) AS found`);
+    if(typeof duplicates?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed ledger idempotency duplicate result");
+    if(duplicates.rows[0].found)missing.push("data:ledger_transactions.duplicate_idempotency_key");
+   }
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
