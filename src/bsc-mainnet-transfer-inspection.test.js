@@ -44,3 +44,18 @@ test("rejects missing or insufficient configured confirmations",()=>{
   assert.throws(()=>inspectBscMainnetTransfer(value),/finality/);
  }
 });
+
+test("rejects mismatched canonical block hash, receipt transaction and log provenance",()=>{
+ const otherHash="0x"+"f".repeat(64);
+ const variants=[
+  {...input,canonicalBlockHash:otherHash},
+  {...input,expected:{...input.expected,transactionHash:otherHash}},
+  {...input,receipt:{...input.receipt,transactionHash:otherHash}},
+  {...input,receipt:{...input.receipt,logs:[{...log,blockHash:otherHash}]}},
+  {...input,receipt:{...input.receipt,logs:[{...log,transactionHash:otherHash}]}},
+  {...input,receipt:{...input.receipt,logs:[{...log,blockNumber:101}]}},
+  {...input,receipt:{...input.receipt,logs:[{...log,logIndex:3}]}},
+  {...input,receipt:{...input.receipt,status:"0x0"}}
+ ];
+ for(const value of variants) assert.throws(()=>inspectBscMainnetTransfer(value));
+});
