@@ -22,6 +22,25 @@ CREATE TABLE public.deposit_address_ownership_history (
   (numrange(start_block,COALESCE(end_block,1e78::numeric),'[)')) WITH &&
  )
 );
+-- Reject forged wallet identity at insert time; lock the wallet row against concurrent edits.
+-- This does not independently authenticate the historical user or block interval.
+CREATE FUNCTION public.validate_deposit_ownership_wallet_identity()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE wallet_record record;
+BEGIN
+ SELECT chain_id,wallet_address,is_platform_controlled INTO wallet_record
+ FROM public.wallets WHERE id=NEW.wallet_id FOR SHARE;
+ IF NOT FOUND OR wallet_record.chain_id IS DISTINCT FROM NEW.chain_id
+    OR wallet_record.wallet_address IS DISTINCT FROM NEW.wallet_address
+    OR wallet_record.is_platform_controlled IS DISTINCT FROM true THEN
+  RAISE EXCEPTION 'Historical deposit wallet identity mismatch';
+ END IF;
+ RETURN NEW;
+END
+$$;
+CREATE TRIGGER deposit_ownership_wallet_identity
+BEFORE INSERT ON public.deposit_address_ownership_history
+FOR EACH ROW EXECUTE FUNCTION public.validate_deposit_ownership_wallet_identity();
 CREATE FUNCTION public.reject_deposit_ownership_history_mutation()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
