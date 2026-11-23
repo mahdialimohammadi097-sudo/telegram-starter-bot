@@ -106,3 +106,13 @@ test("rejects malformed or unsafe RPC block heights",()=>{
   assert.throws(()=>inspectBscMainnetTransfer(value));
  }
 });
+
+test("accepts canonical hexadecimal finalized head height",()=>{
+ const value={...input,finalizedBlockNumber:"0x78"};
+ assert.equal(inspectBscMainnetTransfer(value).blockNumber,"100");
+});
+test("rejects malformed or unsafe finalized head height",()=>{
+ for(const bad of ["0x078","0xzz","0x20000000000000",-1,120.5]){
+  assert.throws(()=>inspectBscMainnetTransfer({...input,finalizedBlockNumber:bad}),/finality/);
+ }
+});
