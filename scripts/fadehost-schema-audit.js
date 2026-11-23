@@ -51,6 +51,18 @@ if (!process.env.DATABASE_URL) {
     const column=rows.find(x=>x.table_name+"."+x.column_name===key);
     if(column && column.is_nullable!=="NO")missing.push("not_null:"+key);
    }
+   // Financial posting must not silently accept orphaned or nullable journal entries.
+   for(const key of [
+    "ledger_entries.transaction_id",
+    "ledger_entries.account_id",
+    "ledger_entries.entry_type",
+    "ledger_entries.amount",
+    "ledger_entries.currency",
+    "ledger_transactions.idempotency_key"
+   ]){
+    const column=rows.find(x=>x.table_name+"."+x.column_name===key);
+    if(column && column.is_nullable!=="NO")missing.push("not_null:"+key);
+   }
    for(const key of [
     "deposit_address_ownership_history.wallet_id",
     "deposit_address_ownership_history.user_id",
