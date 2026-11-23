@@ -63,3 +63,12 @@ test("journal balance audit fails closed on NULLs and rejects missing sides",asy
  assert.ok(source.includes("COUNT(*) FILTER (WHERE entry_type='debit')=0"));
  assert.ok(source.includes("COUNT(*) FILTER (WHERE entry_type='credit')=0"));
 });
+
+test("audit includes posted journal leg integrity checks",async()=>{
+ const {readFileSync}=await import("node:fs");
+ const source=readFileSync(script,"utf8");
+ assert.match(source,/data:ledger_transactions\.posted_insufficient_distinct_accounts/);
+ assert.match(source,/data:ledger_transactions\.posted_invalid_entries/);
+ assert.match(source,/COUNT\(DISTINCT e\.account_id\)<2/);
+ assert.match(source,/t\.status='posted'/);
+});
