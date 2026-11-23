@@ -87,3 +87,34 @@ test("failed journal posting rolls back its claimed deposit identity",{
   try{await client.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{client.release();await pool.end()}
  }
 });
+
+test("competing deposit claim succeeds after the first transaction rolls back",{
+ skip:!url?"requires PROFINO_TEST_DATABASE_URL":false,
+ timeout:15000
+},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:3});
+ const schema="test_"+randomUUID().replaceAll("-","").slice(0,24);
+ const quoted='"'+schema+'"';
+ const admin=await pool.connect();
+ let first,second;
+ try{
+  await admin.query("CREATE SCHEMA "+quoted);
+  await admin.query("CREATE TABLE "+quoted+".claims(event_key text PRIMARY KEY)");
+  first=await pool.connect();
+  second=await pool.connect();
+  await first.query("BEGIN");
+  await second.query("BEGIN");
+  await first.query("INSERT INTO "+quoted+".claims VALUES ($1)",["event-retry"]);
+  const pending=second.query("INSERT INTO "+quoted+".claims VALUES ($1)",["event-retry"]);
+  await first.query("ROLLBACK");
+  const result=await pending;
+  assert.equal(result.rowCount,1);
+  await second.query("COMMIT");
+  const count=await admin.query("SELECT count(*)::int AS n FROM "+quoted+".claims");
+  assert.equal(count.rows[0].n,1);
+ }finally{
+  if(first){try{await first.query("ROLLBACK")}catch{}first.release()}
+  if(second){try{await second.query("ROLLBACK")}catch{}second.release()}
+  try{await admin.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{admin.release();await pool.end()}
+ }
+});
