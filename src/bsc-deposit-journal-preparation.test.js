@@ -17,7 +17,8 @@ const row={wallet_id:"3",user_id:"12",chain_id:"56",wallet_address:address,start
  wallet_id_current:"3",wallet_chain_id:"56",wallet_address_current:address,is_platform_controlled:true};
 const expected={transactionHash:tx,tokenContract:token,depositAddress:address,logIndex:2,tokenDecimals:18,minConfirmations:12};
 const base={rpc,transactionHash:tx,expected,expectedUserId:"12",
- userAvailableAccountId:"4",platformClearingAccountId:"5"};
+ userAccount:{id:"4",user_id:"12",account_type:"AVAILABLE",currency:"USDT"},
+ clearingAccount:{id:"5",user_id:null,account_type:"CLEARING",currency:"USDT"}};
 test("prepares a deterministic balanced journal after historical ownership inspection",async()=>{
  let calls=0;
  const client={query:async()=>{calls++;return {rows:[row],rowCount:1}}};
@@ -34,11 +35,24 @@ test("does not produce journal when historical ownership is rejected",async()=>{
 });
 test("does not produce journal when account identities are invalid",async()=>{
  const client={query:async()=>({rows:[row],rowCount:1})};
- await assert.rejects(prepare({...base,client,userAvailableAccountId:"5"}),/journal proposal/);
+ await assert.rejects(prepare({...base,client,userAccount:{...base.userAccount,id:"5"}}),/journal proposal/);
 });
 test("rejects wrong network before any database inspection",async()=>{
  let calls=0;
  const client={query:async()=>{calls++;return {rows:[row],rowCount:1}}};
  await assert.rejects(prepare({...base,client,rpc:async method=>method==="eth_chainId"?"0x61":rpc(method)}));
  assert.equal(calls,0);
+});
+
+test("rejects cross-user, wrong-currency and non-clearing ledger accounts",async()=>{
+ const client={query:async()=>({rows:[row],rowCount:1})};
+ for(const patch of [
+  {userAccount:{...base.userAccount,user_id:"13"}},
+  {userAccount:{...base.userAccount,currency:"BTC"}},
+  {userAccount:{...base.userAccount,account_type:"INVESTED"}},
+  {clearingAccount:{...base.clearingAccount,user_id:"12"}},
+  {clearingAccount:{...base.clearingAccount,account_type:"AVAILABLE"}}
+ ]){
+  await assert.rejects(prepare({...base,...patch,client}),/account identity mismatch/);
+ }
 });
