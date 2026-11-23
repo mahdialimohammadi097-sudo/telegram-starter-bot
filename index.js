@@ -257,7 +257,10 @@ async function main() {
       throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
     }
 
-    const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined;
+    const secret = (process.env.WEBHOOK_SECRET || "").trim();
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
+      throw new Error("WEBHOOK_SECRET must be configured with a valid Telegram secret token in webhook mode.");
+    }
     webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
 
     await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
