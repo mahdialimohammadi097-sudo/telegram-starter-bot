@@ -29,3 +29,11 @@ test("rejects loss of ledger precision",()=>{
  const value={...input,receipt:{...input.receipt,logs:[{...log,data:"0x"+(10n**18n+1n).toString(16).padStart(64,"0")}]}};
  assert.throws(()=>inspectBscMainnetTransfer(value),/exactly/);
 });
+
+test("rejects zero sender, self-transfer and malformed sender topic",()=>{
+ const recipientTopic="0x"+"0".repeat(24)+recipient.slice(2);
+ for(const senderTopic of ["0x"+"0".repeat(64),recipientTopic,"0x1234"]){
+  const value={...input,receipt:{...input.receipt,logs:[{...log,topics:[topic,senderTopic,recipientTopic]}]}};
+  assert.throws(()=>inspectBscMainnetTransfer(value),/Transfer log/);
+ }
+});
