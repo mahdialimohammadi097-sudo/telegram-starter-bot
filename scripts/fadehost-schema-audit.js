@@ -105,11 +105,12 @@ if (!process.env.DATABASE_URL) {
        AND c.contype='c' AND c.convalidated`);
    if(!amountChecks || !Array.isArray(amountChecks.rows))
     throw new Error("Malformed ledger check-constraint catalog result");
-   const hasPositiveAmountCheck=amountChecks.rows.some(row=>
-    typeof row.definition==="string" &&
-    /\bamount\b/.test(row.definition) &&
-    /amount\s*>\s*\(?0(?:\.0+)?\)?(?:\s|\)|$)/.test(row.definition));
-   if(!hasPositiveAmountCheck)missing.push("check:ledger_entries.amount_positive");
+   // CHECK expressions can contain OR branches, functions and casts. A regex
+   // match on pg_get_constraintdef cannot prove positivity (e.g. OR TRUE).
+   // Never certify a financial schema from unverified SQL text.
+   if(!amountChecks.rows.some(row=>typeof row.definition==="string"))
+    missing.push("check:ledger_entries.amount_positive");
+   else missing.push("manual_review:ledger_entries.amount_positive_constraint");
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
