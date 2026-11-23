@@ -46,6 +46,8 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
    (wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
    VALUES (1,11,56,$1,300,400,'')`,[address]),error=>error.code==="23514");
   await assert.rejects(pool.query(insert,[2,12,address,"150","250"]),error=>error.code==="23P01");
+  // The same wallet ID cannot claim overlapping ownership, even if the address constraint changes.
+  await assert.rejects(pool.query(insert,[1,12,address,"150","190"]),error=>error.code==="23P01");
   await pool.query(insert,[2,12,address,"200",null]);
   await assert.rejects(pool.query(`UPDATE ${table} SET user_id=12 WHERE wallet_id=1`),/immutable/);
   await assert.rejects(pool.query(`DELETE FROM ${table} WHERE wallet_id=1`),/immutable/);
