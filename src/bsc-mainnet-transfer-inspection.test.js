@@ -125,3 +125,17 @@ test("accepts matching receipt and log transaction indexes",()=>{
  const receipt={...input.receipt,transactionIndex:"0x2",logs:[{...log,transactionIndex:"0x2"}]};
  assert.equal(inspectBscMainnetTransfer({...input,receipt}).units,"100000000");
 });
+
+test("fails closed on missing or malformed transaction position evidence",()=>{
+ const variants=[
+  {receiptIndex:"0x2",logIndex:undefined},
+  {receiptIndex:undefined,logIndex:"0x2"},
+  {receiptIndex:"bad",logIndex:"bad"},
+  {receiptIndex:"0x2",logIndex:"bad"}
+ ];
+ for(const v of variants){
+  const receipt={...input.receipt,transactionIndex:v.receiptIndex,
+   logs:[{...log,transactionIndex:v.logIndex}]};
+  assert.throws(()=>inspectBscMainnetTransfer({...input,receipt}),/Transfer log/);
+ }
+});
