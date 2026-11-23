@@ -25,7 +25,8 @@ try{
  const triggers=await client.query(`
   SELECT tg.tgname AS trigger_name, tg.tgenabled AS enabled,
          tg.tgtype AS trigger_type,
-         p.proname AS function_name, pn.nspname AS function_schema
+         p.proname AS function_name, pn.nspname AS function_schema,
+         pg_get_functiondef(p.oid) AS function_definition
   FROM pg_trigger tg
   JOIN pg_class rel ON rel.oid=tg.tgrelid
   JOIN pg_namespace ns ON ns.oid=rel.relnamespace
@@ -123,13 +124,24 @@ try{
   !triggers.rows.some(r=>r.trigger_name===name && r.function_name===fn &&
    r.enabled==="O" && r.function_schema==="public" && Number(r.trigger_type)===type))
   .map(([name])=>name);
+ // Reject trigger functions whose critical identity/immutability logic was replaced.
+ const requiredFunctionFragments=[
+  ["deposit_ownership_wallet_identity",["FOR SHARE","wallet_address","chain_id","is_platform_controlled","RAISE EXCEPTION"]],
+  ["deposit_ownership_history_immutable",["RAISE EXCEPTION"]]
+ ];
+ const weakTriggerFunctions=requiredFunctionFragments.filter(([name,fragments])=>{
+  const found=triggers.rows.find(r=>r.trigger_name===name);
+  return !found || !fragments.every(fragment=>found.function_definition.includes(fragment));
+ }).map(([name])=>name);
  const structuralReady=missing.length===0 && missingTables.length===0 &&
   missingConstraintTypes.length===0 && missingNamedConstraints.length===0 &&
   typeMismatches.length===0 && nullabilityMismatches.length===0 && missingTriggers.length===0 &&
-  mismatchedConstraintDefinitions.length===0 && missingOrWeakChecks.length===0;
+  mismatchedConstraintDefinitions.length===0 && missingOrWeakChecks.length===0 &&
+  weakTriggerFunctions.length===0;
  console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:structuralReady,
   missing,missingTables,missingConstraintTypes,missingNamedConstraints,typeMismatches,nullabilityMismatches,
-  missingTriggers,mismatchedConstraintDefinitions,missingOrWeakChecks,columns:columns.rows,
+  missingTriggers,mismatchedConstraintDefinitions,missingOrWeakChecks,weakTriggerFunctions,
+  columns:columns.rows,
   constraints:constraints.rows,triggers:triggers.rows,
   financialActivationReady:false,realDepositsEnabled:false}));
  if(!structuralReady) process.exitCode=2;
