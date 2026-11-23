@@ -122,3 +122,42 @@ test("wrong credit account rolls back evidence even when destination owner is va
   assert.equal(result.rows[0].count,0);
  }finally{await pool.end();}
 });
+
+test("valid owner posts exactly one balanced deposit journal and evidence atomically",{skip:!safe()},async()=>{
+ const {randomUUID}=await import("node:crypto");
+ const {readFile}=await import("node:fs/promises");
+ const schema="deposit_ok_"+randomUUID().replaceAll("-","");
+ const admin=new pg.Pool({connectionString:url});
+ let pool;
+ try{
+  await admin.query('CREATE SCHEMA "'+schema+'"');
+  pool=new pg.Pool({connectionString:url,options:"-c search_path="+schema,max:1});
+  await pool.query(await readFile(new URL("../test/fixtures/ledger-contract.sql",import.meta.url),"utf8"));
+  await pool.query(`CREATE TABLE verified_deposit_evidence (
+   event_key text PRIMARY KEY,block_hash text NOT NULL,block_number numeric(78,0) NOT NULL,
+   token_contract text NOT NULL,deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL)`);
+  await pool.query("INSERT INTO users(id) VALUES (12)");
+  await pool.query("INSERT INTO ledger_accounts(id,user_id,account_code,account_type,currency) VALUES (44,12,'customer-12','AVAILABLE','USDT'),(45,NULL,'deposit-clearing','CLEARING','USDT')");
+  const evidence={chainId:56,transactionHash:"0x"+"7".repeat(64),logIndex:7,
+   blockHash:"0x"+"b".repeat(64),blockNumber:"100",tokenContract:"0x"+"c".repeat(40),
+   depositAddress:"0x"+"d".repeat(40),amountBaseUnits:"1000000000000000000"};
+  const eventKey="bsc:56:"+evidence.transactionHash+":7";
+  const result=await rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+   destinationOwner:{accountId:"44",userId:"12"},
+   journalForUnits:({eventKey})=>({
+    transactionType:"deposit",idempotencyKey:"verified-deposit:"+eventKey,
+    entries:[{account_id:"45",entry_type:"debit",amount:"1",currency:"USDT"},
+             {account_id:"44",entry_type:"credit",amount:"1",currency:"USDT"}]
+   })});
+  assert.equal(result.posted,true);
+  const rows=await pool.query(`SELECT (SELECT count(*)::int FROM verified_deposit_evidence WHERE event_key=$1) AS evidence_count,
+   (SELECT count(*)::int FROM ledger_transactions WHERE idempotency_key=$2 AND status='posted') AS journal_count,
+   (SELECT count(*)::int FROM ledger_entries WHERE transaction_id=$3) AS entry_count`,
+   [eventKey,"verified-deposit:"+eventKey,result.transactionId]);
+  assert.deepEqual(rows.rows[0],{evidence_count:1,journal_count:1,entry_count:2});
+ }finally{
+  if(pool)await pool.end();
+  await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await admin.end();
+ }
+});
