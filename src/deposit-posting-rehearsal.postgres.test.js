@@ -172,3 +172,23 @@ test("valid owner posts exactly one balanced deposit journal and evidence atomic
   await admin.end();
  }
 });
+
+test("missing destination owner cannot post and rolls back evidence", {skip:!safe()},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const evidence={chainId:56,transactionHash:"0x"+"6".repeat(64),logIndex:6,
+  blockHash:"0x"+"b".repeat(64),blockNumber:"100",tokenContract:"0x"+"c".repeat(40),
+  depositAddress:"0x"+"d".repeat(40),amountBaseUnits:"1000000000000000000"};
+ const key="bsc:56:"+evidence.transactionHash+":6";
+ try{
+  await pool.query(`CREATE TEMP TABLE verified_deposit_evidence (
+   event_key text PRIMARY KEY,block_hash text NOT NULL,block_number numeric(78,0) NOT NULL,
+   token_contract text NOT NULL,deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL)`);
+  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+   journalForUnits:({eventKey})=>({idempotencyKey:"verified-deposit:"+eventKey,
+    entries:[{account_id:"45",entry_type:"debit",amount:"1",currency:"USDT"},
+             {account_id:"44",entry_type:"credit",amount:"1",currency:"USDT"}]})
+  }),/destination owner required/);
+  const rows=await pool.query("SELECT count(*)::int AS count FROM pg_temp.verified_deposit_evidence WHERE event_key=$1",[key]);
+  assert.equal(rows.rows[0].count,0);
+ }finally{await pool.end();}
+});
