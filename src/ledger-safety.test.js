@@ -31,11 +31,11 @@ test("ledger entries must balance per currency without rounding", () => {
   ]), /exceeds eight decimal places/);
 });
 
-test("ledger balancing is isolated by currency", () => {
+test("ledger rejects cross-currency entries before balance evaluation", () => {
   assert.throws(() => assertBalancedLedgerEntries([
     { currency: "USDT", entry_type: "debit", amount: "1" },
     { currency: "USDC", entry_type: "credit", amount: "1" }
-  ]), /Unbalanced/);
+  ]), /Invalid ledger entry/);
 });
 
 test("ledger entries reject invalid or non-positive amounts", () => {
