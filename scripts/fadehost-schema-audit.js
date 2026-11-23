@@ -238,6 +238,24 @@ if (!process.env.DATABASE_URL) {
     if(malformedPosted.rows[0].found)
      missing.push("data:ledger_transactions.posted_insufficient_distinct_accounts");
    }
+   // A posted transaction must never contain an invalid account leg even
+   // when aggregate debit/credit totals happen to balance.
+   if(["ledger_transactions.id","ledger_transactions.status",
+       "ledger_entries.transaction_id","ledger_entries.account_id",
+       "ledger_entries.entry_type","ledger_entries.amount"].every(k=>columns.has(k))){
+    const invalidPosted=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_transactions t
+      JOIN public.ledger_entries e ON e.transaction_id=t.id
+      WHERE t.status='posted'
+        AND (e.account_id IS NULL OR e.entry_type IS NULL
+          OR e.entry_type NOT IN ('debit','credit')
+          OR e.amount IS NULL OR e.amount<=0)
+    ) AS found`);
+    if(typeof invalidPosted?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed posted journal entry inspection result");
+    if(invalidPosted.rows[0].found)
+     missing.push("data:ledger_transactions.posted_invalid_entries");
+   }
    // An active wallet must not be assigned to multiple users at once.
    // This is an additional read-only safeguard; historical block ownership
    // remains authoritative for attribution of older deposits.
