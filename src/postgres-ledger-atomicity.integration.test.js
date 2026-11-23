@@ -175,3 +175,43 @@ test("row lock serializes competing debits and prevents available-balance overdr
   try{await admin.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{admin.release();await pool.end()}
  }
 });
+
+test("ledger-derived available balance cannot be spent twice under account row lock",{
+ skip:!url?"requires PROFINO_TEST_DATABASE_URL":false,
+ timeout:15000
+},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:3});
+ const schema="test_"+randomUUID().replaceAll("-","").slice(0,24);
+ const quoted='"'+schema+'"';
+ const admin=await pool.connect();
+ let first,second;
+ try{
+  await admin.query("CREATE SCHEMA "+quoted);
+  await admin.query("CREATE TABLE "+quoted+".accounts(id bigint PRIMARY KEY)");
+  await admin.query("CREATE TABLE "+quoted+".entries(account_id bigint REFERENCES "+quoted+".accounts(id), entry_type text CHECK(entry_type IN ('credit','debit')), amount numeric(36,18) CHECK(amount>0))");
+  await admin.query("INSERT INTO "+quoted+".accounts VALUES (1)");
+  await admin.query("INSERT INTO "+quoted+".entries VALUES (1,'credit',10)");
+  const spend=async(client)=>{
+   await client.query("SELECT id FROM "+quoted+".accounts WHERE id=1 FOR UPDATE");
+   const balance=await client.query("SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount ELSE -amount END),0)::text AS available FROM "+quoted+".entries WHERE account_id=1");
+   if(Number(balance.rows[0].available)<7)return false;
+   await client.query("INSERT INTO "+quoted+".entries VALUES (1,'debit',7)");
+   return true;
+  };
+  first=await pool.connect();
+  second=await pool.connect();
+  await first.query("BEGIN");
+  await second.query("BEGIN");
+  assert.equal(await spend(first),true);
+  const pending=spend(second);
+  await first.query("COMMIT");
+  assert.equal(await pending,false);
+  await second.query("COMMIT");
+  const balance=await admin.query("SELECT SUM(CASE WHEN entry_type='credit' THEN amount ELSE -amount END)::text AS available FROM "+quoted+".entries");
+  assert.equal(balance.rows[0].available,"3.000000000000000000");
+ }finally{
+  if(first){try{await first.query("ROLLBACK")}catch{}first.release()}
+  if(second){try{await second.query("ROLLBACK")}catch{}second.release()}
+  try{await admin.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{admin.release();await pool.end()}
+ }
+});
