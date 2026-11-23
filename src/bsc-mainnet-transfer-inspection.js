@@ -22,7 +22,13 @@ export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,fi
     expected.transactionHash.toLowerCase()!==receipt.transactionHash.toLowerCase())
    throw new Error("Unapproved token, recipient or transaction identity");
  const eventKey=normalizeDepositEventIdentity({chainId,transactionHash:receipt.transactionHash,logIndex:expected.logIndex});
- const matches=(Array.isArray(receipt.logs)?receipt.logs:[]).filter(log=>log?.logIndex===expected.logIndex);
+ const expectedLogIndex=BigInt(expected.logIndex);
+ const matches=(Array.isArray(receipt.logs)?receipt.logs:[]).filter(log=>{
+  const index=log?.logIndex;
+  if(typeof index==="number") return Number.isSafeInteger(index) && index>=0 && BigInt(index)===expectedLogIndex;
+  if(typeof index==="string" && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(index)) return BigInt(index)===expectedLogIndex;
+  return false;
+ });
  const log=matches[0];
  const topicRecipient="0x"+recipient.slice(2).padStart(64,"0");
  if(matches.length!==1 || (log.removed!==undefined && log.removed!==false) || log.address?.toLowerCase()!==token ||
