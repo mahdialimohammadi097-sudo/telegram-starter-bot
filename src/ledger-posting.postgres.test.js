@@ -2298,3 +2298,108 @@ test("isolated withdrawal fixture enforces all four states and payout linkage", 
   `);
   assert.ok(statuses, "withdrawal status constraint must retain all four lifecycle states");
 });
+
+test("two concurrent verified-deposit rehearsals post exactly one balanced journal", {skip: !enabled}, async () => {
+  const { rehearseVerifiedDepositPosting } = await import("./deposit-posting-rehearsal.js");
+  await pool.query(`CREATE TABLE verified_deposit_evidence (
+    event_key text PRIMARY KEY, block_hash text NOT NULL,
+    block_number numeric(78,0) NOT NULL, token_contract text NOT NULL,
+    deposit_address text NOT NULL, amount_base_units numeric(78,0) NOT NULL)`);
+  const clearing = await createAccount("CLEARING");
+  const customer = await createAccount("AVAILABLE");
+  const owner = await pool.query("INSERT INTO users DEFAULT VALUES RETURNING id");
+  const ownerId = String(owner.rows[0].id);
+  await pool.query("UPDATE ledger_accounts SET user_id=$1 WHERE id=$2",[ownerId,customer]);
+  const tx = "0x" + randomUUID().replaceAll("-", "").padEnd(64, "a");
+  const evidence = {chainId:56, transactionHash:tx, logIndex:0,
+    blockHash:"0x"+"b".repeat(64), blockNumber:"123",
+    tokenContract:"0x"+"c".repeat(40), depositAddress:"0x"+"d".repeat(40),
+    amountBaseUnits:"1000000000000000000"};
+  const eventKey = "bsc:56:" + tx + ":0";
+  const build = ({eventKey:key,units}) => {
+    assert.equal(key,eventKey);
+    assert.equal(units,"100000000");
+    return {transactionType:"deposit",
+      idempotencyKey:"verified-deposit:"+key,
+      entries:[
+        {account_id:clearing,entry_type:"debit",amount:"1.00000000",currency:"USDT"},
+        {account_id:customer,entry_type:"credit",amount:"1.00000000",currency:"USDT"}
+      ]};
+  };
+  const attempt = async () => {
+    try {
+      await rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,destinationOwner:{accountId:customer,userId:ownerId},journalForUnits:build});
+      return "committed";
+    } catch(error) {
+      if(error.code==="23505") return "duplicate";
+      throw error;
+    }
+  };
+  const outcomes=await Promise.all([attempt(),attempt()]);
+  assert.deepEqual(outcomes.sort(),["committed","duplicate"]);
+  const proof=await pool.query("SELECT count(*)::int AS count FROM verified_deposit_evidence WHERE event_key=$1",[eventKey]);
+  assert.equal(proof.rows[0].count,1);
+  const journals=await pool.query("SELECT id,status FROM ledger_transactions WHERE idempotency_key=$1",["verified-deposit:"+eventKey]);
+  assert.equal(journals.rowCount,1);
+  assert.equal(journals.rows[0].status,"posted");
+  const entries=await pool.query("SELECT entry_type,amount::text AS amount FROM ledger_entries WHERE transaction_id=$1",[journals.rows[0].id]);
+  assert.equal(entries.rowCount,2);
+  assert.deepEqual(entries.rows.map(x=>x.entry_type).sort(),["credit","debit"]);
+  const sums=await pool.query(`SELECT entry_type, SUM(amount)::text AS total
+    FROM ledger_entries WHERE transaction_id=$1 GROUP BY entry_type`,[journals.rows[0].id]);
+  assert.deepEqual(sums.rows.map(x=>[x.entry_type,x.total]).sort((a,b)=>a[0].localeCompare(b[0])),
+    [["credit","1.000000000000000000"],["debit","1.000000000000000000"]]);
+});
+
+test("deposit rehearsal rejects balanced but inflated journal and rolls back evidence", {skip: !enabled}, async () => {
+ const {rehearseVerifiedDepositPosting}=await import("./deposit-posting-rehearsal.js");
+ const clearing=await createAccount("CLEARING");
+ const customer=await createAccount("AVAILABLE");
+ const owner = await pool.query("INSERT INTO users DEFAULT VALUES RETURNING id");
+ const ownerId = String(owner.rows[0].id);
+ await pool.query("UPDATE ledger_accounts SET user_id=$1 WHERE id=$2",[ownerId,customer]);
+ const tx="0x"+randomUUID().replaceAll("-","").padEnd(64,"a");
+ const eventKey="bsc:56:"+tx+":0";
+ const evidence={chainId:56,transactionHash:tx,logIndex:0,blockHash:"0x"+"b".repeat(64),
+  blockNumber:"123",tokenContract:"0x"+"c".repeat(40),depositAddress:"0x"+"d".repeat(40),
+  amountBaseUnits:"1000000000000000000"};
+ await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+  destinationOwner:{accountId:customer,userId:ownerId},
+  journalForUnits:({eventKey:key})=>({
+   transactionType:"deposit",idempotencyKey:"verified-deposit:"+key,
+   entries:[
+    {account_id:clearing,entry_type:"debit",amount:"2.00000000",currency:"USDT"},
+    {account_id:customer,entry_type:"credit",amount:"2.00000000",currency:"USDT"}
+   ]
+  })}),/exactly match verified token units/);
+ const proof=await pool.query("SELECT count(*)::int AS count FROM verified_deposit_evidence WHERE event_key=$1",[eventKey]);
+ assert.equal(proof.rows[0].count,0);
+ const journals=await pool.query("SELECT count(*)::int AS count FROM ledger_transactions WHERE idempotency_key=$1",["verified-deposit:"+eventKey]);
+ assert.equal(journals.rows[0].count,0);
+});
+test("deposit rehearsal rejects balanced but understated journal and rolls back evidence", {skip: !enabled}, async () => {
+ const {rehearseVerifiedDepositPosting}=await import("./deposit-posting-rehearsal.js");
+ const clearing=await createAccount("CLEARING");
+ const customer=await createAccount("AVAILABLE");
+ const owner = await pool.query("INSERT INTO users DEFAULT VALUES RETURNING id");
+ const ownerId = String(owner.rows[0].id);
+ await pool.query("UPDATE ledger_accounts SET user_id=$1 WHERE id=$2",[ownerId,customer]);
+ const tx="0x"+randomUUID().replaceAll("-","").padEnd(64,"a");
+ const eventKey="bsc:56:"+tx+":0";
+ const evidence={chainId:56,transactionHash:tx,logIndex:0,blockHash:"0x"+"b".repeat(64),
+  blockNumber:"123",tokenContract:"0x"+"c".repeat(40),depositAddress:"0x"+"d".repeat(40),
+  amountBaseUnits:"1000000000000000000"};
+ await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+  destinationOwner:{accountId:customer,userId:ownerId},
+  journalForUnits:({eventKey:key})=>({
+   transactionType:"deposit",idempotencyKey:"verified-deposit:"+key,
+   entries:[
+    {account_id:clearing,entry_type:"debit",amount:"0.50000000",currency:"USDT"},
+    {account_id:customer,entry_type:"credit",amount:"0.50000000",currency:"USDT"}
+   ]
+  })}),/exactly match verified token units/);
+ const proof=await pool.query("SELECT count(*)::int AS count FROM verified_deposit_evidence WHERE event_key=$1",[eventKey]);
+ assert.equal(proof.rows[0].count,0);
+ const journals=await pool.query("SELECT count(*)::int AS count FROM ledger_transactions WHERE idempotency_key=$1",["verified-deposit:"+eventKey]);
+ assert.equal(journals.rows[0].count,0);
+});
