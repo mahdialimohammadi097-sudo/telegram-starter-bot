@@ -118,6 +118,7 @@ test("wrong credit account rolls back evidence even when destination owner is va
   await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
    destinationOwner:{accountId:"44",userId:"12"},
    journalForUnits:({eventKey})=>({
+    transactionType:"deposit",
     idempotencyKey:`verified-deposit:${eventKey}`,
     entries:[{account_id:"1",entry_type:"debit",amount:"1",currency:"USDT"},
              {account_id:"45",entry_type:"credit",amount:"1",currency:"USDT"}]
