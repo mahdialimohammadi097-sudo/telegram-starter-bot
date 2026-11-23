@@ -61,3 +61,29 @@ test("concurrent PostgreSQL transactions cannot claim the same deposit",{
   try{await admin.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{admin.release();await pool.end()}
  }
 });
+
+test("failed journal posting rolls back its claimed deposit identity",{
+ skip:!url?"requires PROFINO_TEST_DATABASE_URL":false,
+ timeout:15000
+},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:2});
+ const schema="test_"+randomUUID().replaceAll("-","").slice(0,24);
+ const quoted='"'+schema+'"';
+ const client=await pool.connect();
+ try{
+  await client.query("CREATE SCHEMA "+quoted);
+  await client.query("CREATE TABLE "+quoted+".claims(event_key text PRIMARY KEY)");
+  await client.query("CREATE TABLE "+quoted+".journal(event_key text NOT NULL REFERENCES "+quoted+".claims(event_key), amount numeric(36,18) NOT NULL CHECK(amount>0))");
+  await client.query("BEGIN");
+  await client.query("INSERT INTO "+quoted+".claims(event_key) VALUES ($1)",["event-failed"]);
+  await assert.rejects(client.query("INSERT INTO "+quoted+".journal(event_key,amount) VALUES ($1,$2)",["event-failed","0"]),e=>e.code==="23514");
+  await client.query("ROLLBACK");
+  const claims=await client.query("SELECT count(*)::int AS n FROM "+quoted+".claims");
+  const journal=await client.query("SELECT count(*)::int AS n FROM "+quoted+".journal");
+  assert.equal(claims.rows[0].n,0);
+  assert.equal(journal.rows[0].n,0);
+ }finally{
+  try{await client.query("ROLLBACK")}catch{}
+  try{await client.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{client.release();await pool.end()}
+ }
+});
