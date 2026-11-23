@@ -24,6 +24,7 @@ try{
   ORDER BY c.relname,con.conname`);
  const triggers=await client.query(`
   SELECT tg.tgname AS trigger_name, tg.tgenabled AS enabled,
+         tg.tgtype AS trigger_type,
          p.proname AS function_name
   FROM pg_trigger tg
   JOIN pg_class rel ON rel.oid=tg.tgrelid
@@ -85,12 +86,15 @@ try{
  const missingNamedConstraints=requiredNamedConstraints
   .filter(([name,type])=>!identityConstraints.some(r=>r.constraint_name===name && r.type===type && r.validated===true))
   .map(([name])=>name);
+ // PostgreSQL tgtype bits: ROW=1, BEFORE=2, INSERT=4, DELETE=8, UPDATE=16.
+ // A matching name/function alone is not enough if the trigger fires on the wrong event.
  const requiredTriggers=[
-  ["deposit_ownership_wallet_identity","validate_deposit_ownership_wallet_identity"],
-  ["deposit_ownership_history_immutable","reject_deposit_ownership_history_mutation"]
+  ["deposit_ownership_wallet_identity","validate_deposit_ownership_wallet_identity",7],
+  ["deposit_ownership_history_immutable","reject_deposit_ownership_history_mutation",27]
  ];
- const missingTriggers=requiredTriggers.filter(([name,fn])=>
-  !triggers.rows.some(r=>r.trigger_name===name && r.function_name===fn && r.enabled==="O"))
+ const missingTriggers=requiredTriggers.filter(([name,fn,type])=>
+  !triggers.rows.some(r=>r.trigger_name===name && r.function_name===fn &&
+   r.enabled==="O" && Number(r.trigger_type)===type))
   .map(([name])=>name);
  const structuralReady=missing.length===0 && missingTables.length===0 &&
   missingConstraintTypes.length===0 && missingNamedConstraints.length===0 &&
