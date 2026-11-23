@@ -47,6 +47,17 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
   await assert.rejects(inspectHistoricalWalletFromDatabase(pool,{
    schema,walletAddress:address,eventBlockNumber:"250",expectedUserId:"11"
   }));
+  // A history row must not authorize a different current wallet address.
+  await pool.query(`UPDATE "${schema}".wallets SET wallet_address=$1 WHERE id=1`,
+   ["0x"+"b".repeat(40)]);
+  await assert.rejects(inspectHistoricalWalletFromDatabase(pool,{
+   schema,walletAddress:address,eventBlockNumber:"150",expectedUserId:"11"
+  }),/mismatch/);
+  await pool.query(`UPDATE "${schema}".wallets SET wallet_address=$1 WHERE id=1`,[address]);
+  await pool.query(`UPDATE "${schema}".wallets SET is_platform_controlled=false WHERE id=1`);
+  await assert.rejects(inspectHistoricalWalletFromDatabase(pool,{
+   schema,walletAddress:address,eventBlockNumber:"150",expectedUserId:"11"
+  }),/mismatch/);
   const count=await pool.query(`SELECT count(*)::int AS count FROM ${table}`);
   assert.equal(count.rows[0].count,2);
  }finally{
