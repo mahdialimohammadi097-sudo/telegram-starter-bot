@@ -29,3 +29,24 @@
 - Obtain documented security review, accounting reconciliation, operational sign-off and **explicit owner authorization** for each production-changing step and, separately, live USDT operations.
 
 **No live deposit collection, withdrawal or settlement is authorized by this checklist.**
+
+## 5. Observed production read-only audit — 2026-11-23
+
+Source: Super Admin Telegram startup report emitted by the deployed read-only audit on `main`. This is **reported metadata**, not a backup or independent migration authorization.
+
+- Bot and PostgreSQL connected; core inventory: **25/25** expected tables, **69** indexes and **16** user-defined triggers.
+- `structuralReady=false`, `financialActivationReady=false`, `realDepositsEnabled=false`.
+- `verified_deposit_evidence`: six required columns absent in catalog; unique `event_key` index absent.
+- `deposit_address_ownership_history`: nine required columns absent in catalog.
+- All other required columns checked by the startup audit were reported present. This does **not** verify their types, constraints, ownership provenance, ledger integrity or chain finality.
+- The absence of columns is consistent with missing tables, but table absence itself has **not** been separately verified from the report.
+- The reviewed SQL files are `migrations/20261123_verified_deposit_evidence.review.sql` and `migrations/20261123_deposit_ownership_history.review.sql`. **Do not apply either to production yet.**
+
+### Next authorized decision gate
+
+1. Verify that an actual production backup exists and successfully restore it in an isolated PostgreSQL 17 environment; record only nonsecret evidence.
+2. Compare the production catalog with both reviewed SQL migrations and rehearse on the restored copy.
+3. Obtain explicit owner approval for the **specific production schema migration** after security and accounting review. This is separate from permission to activate real USDT.
+4. Repeat the read-only startup audit after any separately authorized migration and retain sanitized results.
+
+No backup restore evidence, production migration authorization, or live USDT activation has been provided in this report.
