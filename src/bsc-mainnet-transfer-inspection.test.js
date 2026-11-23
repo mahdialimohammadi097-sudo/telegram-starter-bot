@@ -84,3 +84,14 @@ test("accepts mined receipt logs where removed is omitted",()=>{
  const value={...input,receipt:{...input.receipt,logs:[minedLog]}};
  assert.equal(inspectBscMainnetTransfer(value).eventKey,"bsc:56:"+tx+":2");
 });
+
+test("accepts canonical hex RPC log index and rejects malformed or ambiguous indices",()=>{
+ const hexLog={...log,logIndex:"0x2"};
+ const value={...input,receipt:{...input.receipt,logs:[hexLog]}};
+ assert.equal(inspectBscMainnetTransfer(value).eventKey,"bsc:56:"+tx+":2");
+ for(const badIndex of ["0x02","0xzz","2",-1,2.5]){
+  const invalid={...input,receipt:{...input.receipt,logs:[{...log,logIndex:badIndex}]}};
+  assert.throws(()=>inspectBscMainnetTransfer(invalid));
+ }
+ assert.throws(()=>inspectBscMainnetTransfer({...input,receipt:{...input.receipt,logs:[log,hexLog]}}));
+});
