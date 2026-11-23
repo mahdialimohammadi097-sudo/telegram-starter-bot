@@ -103,3 +103,19 @@ test("admin audit ignores Telegram send failure and logs only sanitized code",as
  assert.equal(result,false);
  assert.deepEqual(codes,["UNKNOWN"]);
 });
+
+test("successful audit sends metadata only to configured admin ID",async()=>{
+ const sent=[];
+ const pool={connect:async()=>({query:async(sql)=>{
+  if(sql.includes("information_schema.columns"))return {rows:[]};
+  if(sql.includes("FROM pg_index"))return {rows:[]};
+  return {rows:[]};
+ },release:()=>{}})};
+ const result=await deliverAdminSchemaAudit({pool,adminId:8810232463,
+  sendMessage:async(id,message)=>sent.push({id,message})});
+ assert.equal(result,true);
+ assert.equal(sent.length,1);
+ assert.equal(sent[0].id,8810232463);
+ assert.match(sent[0].message,/financialActivationReady/);
+ assert.doesNotMatch(sent[0].message,/DATABASE_URL|password=|SECRET_TOKEN/);
+});
