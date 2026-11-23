@@ -30,7 +30,9 @@ export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,fi
     !Array.isArray(log.topics) || log.topics.length!==3 ||
     log.topics[0]?.toLowerCase()!==TOPIC ||
     !/^0x0{24}[0-9a-f]{40}$/i.test(log.topics[1]) ||
+    /^0x0{64}$/i.test(log.topics[1]) ||
     log.topics[2]?.toLowerCase()!==topicRecipient ||
+    log.topics[1]?.toLowerCase()===topicRecipient ||
     !/^0x[0-9a-f]{64}$/i.test(log.data))
    throw new Error("Transfer log does not match configured token and recipient");
  const amountBaseUnits=BigInt(log.data).toString();
