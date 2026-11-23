@@ -9,7 +9,7 @@ const log={logIndex:"0x2",address:token,transactionHash:tx,blockHash:hash,blockN
 const receipt={transactionHash:tx,blockHash:hash,blockNumber:"0x64",status:"0x1",logs:[log]};
 const expected={transactionHash:tx,tokenContract:token,depositAddress:to,logIndex:2,tokenDecimals:18,minConfirmations:12};
 const makeRpc=(overrides={})=>async(method)=>{
- const values={eth_chainId:"0x38",eth_getTransactionReceipt:receipt,
+ const values={eth_chainId:"0x38",eth_getTransactionReceipt:receipt,eth_getTransactionByHash:{hash:tx,blockHash:hash,blockNumber:"0x64"},
   eth_getBlockByNumber:{number:"0x64",hash},eth_blockNumber:"0x78",...overrides};
  return values[method];
 };
@@ -59,4 +59,22 @@ test("rejects a disappearing receipt after canonical block inspection",async()=>
   return makeRpc()(method);
  };
  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/Missing RPC evidence/);
+});
+
+test("rejects transaction provenance mismatch",async()=>{
+ for(const transaction of [
+  {hash:"0x"+"f".repeat(64),blockHash:hash,blockNumber:"0x64"},
+  {hash:tx,blockHash:"0x"+"f".repeat(64),blockNumber:"0x64"},
+  {hash:tx,blockHash:hash,blockNumber:"0x65"}
+ ]){
+  await assert.rejects(readBscDepositEvidence({rpc:makeRpc({eth_getTransactionByHash:transaction}),transactionHash:tx,expected}),/provenance/);
+ }
+});
+test("rejects chain identity changing during read",async()=>{
+ let calls=0;
+ const rpc=async(method)=>{
+  if(method==="eth_chainId")return ++calls===1?"0x38":"0x61";
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/chain changed/);
 });
