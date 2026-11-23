@@ -204,6 +204,8 @@ test("schema audit rejects an existing evidence table without format constraints
   assert.equal(report.ready,false);
   assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
   assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_address_format:check_constraint"));
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_block_number_nonnegative:check_constraint"));
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_amount_positive:check_constraint"));
  }finally{
   await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
   await pool.end();
