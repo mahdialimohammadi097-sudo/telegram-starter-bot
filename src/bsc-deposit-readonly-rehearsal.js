@@ -2,6 +2,7 @@
 // Uses a dedicated pg client supplied by the caller, never a shared pool.query.
 // All account/ownership row locks are held in the same explicit transaction.
 import {prepareBscDepositJournal} from "./bsc-deposit-journal-preparation.js";
+import {inspectDepositIdempotency} from "./deposit-idempotency-db-inspection.js";
 export async function rehearseBscDepositJournal({client,...input}){
  if(!client || typeof client.query!=="function")
   throw new TypeError("Dedicated PostgreSQL client required");
@@ -12,6 +13,7 @@ export async function rehearseBscDepositJournal({client,...input}){
   await client.query("SET LOCAL lock_timeout = '2000ms'");
   await client.query("SET LOCAL statement_timeout = '8000ms'");
   const result=await prepareBscDepositJournal({client,...input});
+  await inspectDepositIdempotency(client,{eventKey:result.evidence.eventKey,schema:input.schema});
   // Always roll back: never commit any transaction in a rehearsal.
   await client.query("ROLLBACK");
   begun=false;
