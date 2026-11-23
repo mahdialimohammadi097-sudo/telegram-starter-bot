@@ -14,3 +14,13 @@ test("fails closed when account ownership or type is not matched",async()=>{
  await assert.rejects(lockDepositDestinationAccount(client,{accountId:"44",userId:"12"}),/unverified/);
  await assert.rejects(lockDepositDestinationAccount(client,{accountId:"-1",userId:"12"}),/Invalid/);
 });
+
+test("rejects unsafe JavaScript numbers and PostgreSQL bigint overflow",async()=>{
+ let calls=0;
+ const client={query:async()=>{calls++;return {rowCount:1,rows:[{id:"44"}]};}};
+ for(const id of [Number.MAX_SAFE_INTEGER+1,"9223372036854775808","9".repeat(50),"0","1.5"]){
+  await assert.rejects(lockDepositDestinationAccount(client,{accountId:id,userId:"12"}),/Invalid/);
+  await assert.rejects(lockDepositDestinationAccount(client,{accountId:"44",userId:id}),/Invalid/);
+ }
+ assert.equal(calls,0);
+});
