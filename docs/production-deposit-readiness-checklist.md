@@ -60,3 +60,37 @@ The owner supplied the FadeHost `profino-db` panel showing PostgreSQL 17 running
 At the time of this inventory, all four PR #114 CI workflow suites passed: PostgreSQL 17 disposable restore drill, catalog ownership PostgreSQL, integration PostgreSQL financial matrix, and integration ledger validator regression. These suites do not use or validate the actual FadeHost backup.
 
 The owner plans to decide about hosting payments separately. This project step must not depend on buying a plan or incur extra charges. Keep production migrations and real USDT disabled until the independent production restore, security/accounting checks, and explicit owner authorization are complete.
+
+## 7. Production catalog compatibility — non-mutating Console query
+
+The 2026-11-23 startup report checks **column names**, not PostgreSQL data types, nullability, FK targets or whether the missing tables themselves exist. Before attempting either reviewed migration, run the following **SELECT-only** catalog query using the existing FadeHost database Console. It returns structural metadata only and cannot alter production data:
+
+```sql
+SELECT t.table_name,
+       CASE WHEN c.oid IS NULL THEN 'missing' ELSE 'present' END AS table_status,
+       COALESCE(a.attname, '(table only)') AS column_name,
+       CASE WHEN a.attnum IS NULL THEN NULL
+            ELSE format_type(a.atttypid,a.atttypmod) END AS column_type,
+       CASE WHEN a.attnum IS NULL THEN NULL ELSE a.attnotnull END AS not_null
+FROM (VALUES
+  ('users','id'),
+  ('wallets','id'),
+  ('wallets','chain_id'),
+  ('wallets','wallet_address'),
+  ('wallets','is_platform_controlled'),
+  ('user_wallet_assignments','user_id'),
+  ('user_wallet_assignments','wallet_id'),
+  ('verified_deposit_evidence','event_key'),
+  ('deposit_address_ownership_history','wallet_id')
+) AS t(table_name,expected_column)
+LEFT JOIN pg_namespace n ON n.nspname='public'
+LEFT JOIN pg_class c ON c.relnamespace=n.oid
+  AND c.relname=t.table_name AND c.relkind IN ('r','p')
+LEFT JOIN pg_attribute a ON a.attrelid=c.oid
+  AND a.attname=t.expected_column AND a.attnum>0 AND NOT a.attisdropped
+ORDER BY t.table_name,t.expected_column;
+```
+
+Interpretation: `users.id`, `wallets.id`, `wallets.chain_id`, and `user_wallet_assignments.user_id/wallet_id` must be compatible with the `bigint` FK contract in the proposed history migration. A mismatch means **revise the reviewed migration in a new PR and retest**, not cast or alter existing production columns. This query is diagnostic only; do not run `CREATE`, `ALTER`, `RESTORE`, `DELETE`, or `GRANT` from this checklist.
+
+The result does not waive the independent production backup-restore, security/accounting sign-off, or owner approval requirements.
