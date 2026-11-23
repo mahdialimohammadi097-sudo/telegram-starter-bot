@@ -52,3 +52,28 @@ test("concurrent read-only preflights cannot claim the same event",async()=>{
  assert.ok(results.every(r=>r.unrecordedAtInspection===true));
  assert.equal(results[0].eventKey,results[1].eventKey);
 });
+
+test("database failures fail closed without retrying or writing",async()=>{
+ for(const error of [new Error("connection reset"),new Error("statement timeout")]){
+  const statements=[];
+  const client={query:async(sql,params)=>{
+   statements.push({sql,params});
+   throw error;
+  }};
+  await assert.rejects(inspect(client,{eventKey}),err=>err===error);
+  assert.equal(statements.length,1);
+  assert.match(statements[0].sql.trim(),/^SELECT/);
+  assert.deepEqual(statements[0].params,[eventKey,"deposit:"+eventKey]);
+ }
+});
+test("preflight never treats malformed duplicate flags as safe",async()=>{
+ for(const flags of [
+  {evidence_exists:null,ledger_exists:false},
+  {evidence_exists:false,ledger_exists:null},
+  {evidence_exists:"false",ledger_exists:false},
+  {evidence_exists:false,ledger_exists:1}
+ ]){
+  await assert.rejects(inspect({query:async()=>({rows:[flags],rowCount:1})},
+   {eventKey}),/Malformed/);
+ }
+});
