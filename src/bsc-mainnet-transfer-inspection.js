@@ -11,7 +11,9 @@ export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,fi
     !HASH.test(receipt?.blockHash) || !HASH.test(canonicalBlockHash) ||
     receipt.blockHash.toLowerCase()!==canonicalBlockHash.toLowerCase() ||
     !Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber<0 ||
-    !Number.isSafeInteger(finalizedBlockNumber) || finalizedBlockNumber<receipt.blockNumber)
+    !Number.isSafeInteger(finalizedBlockNumber) || finalizedBlockNumber<receipt.blockNumber ||
+    !Number.isSafeInteger(expected?.minConfirmations) || expected.minConfirmations<1 ||
+    finalizedBlockNumber-receipt.blockNumber+1<expected.minConfirmations)
    throw new Error("Unverified mainnet receipt or block finality");
  const token=normalizeAddress(expected?.tokenContract);
  const recipient=normalizeAddress(expected?.depositAddress);
