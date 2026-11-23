@@ -3,6 +3,7 @@
 
 import { Bot, webhookCallback } from "grammy";
 import { requireWebhookSecret } from "./src/webhook-secret-validation.js";
+import { requireWebhookUrl } from "./src/webhook-url-validation.js";
 import { registerCommands } from "./src/commands.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
 import { startScheduler } from "./src/scheduler.js";
@@ -42,16 +43,8 @@ const webhookSecret = mode === "webhook"
 
 // Validate webhook destination before starting any runtime service.
 const webhookUrl = mode === "webhook"
-  ? (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "")
+  ? requireWebhookUrl(process.env.WEBHOOK_URL)
   : "";
-if (mode === "webhook") {
-  let parsed;
-  try { parsed = new URL(webhookUrl); } catch { /* fail closed below */ }
-  if (!parsed || parsed.protocol !== "https:" || !parsed.hostname ||
-      parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error("WEBHOOK_URL must be a valid HTTPS URL without credentials, query or fragment.");
-  }
-}
 
 const bot = new Bot(token);
 const runtimeHealth = createRuntimeHealthState();
