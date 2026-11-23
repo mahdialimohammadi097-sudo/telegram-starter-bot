@@ -2,8 +2,8 @@ import {verifyHistoricalWalletRecord} from "./deposit-historical-wallet-record.j
 
 // Read-only historical consistency inspection. Never credits balances.
 // Caller must independently verify chain evidence and historical provenance.
-export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumber,walletAddress,expectedUserId,schema="public"}){
- if(typeof schema!=="string" || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
+export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumber,walletAddress,expectedUserId,schema="public",lockRows=true}){
+ if(typeof lockRows!=="boolean" || typeof schema!=="string" || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
   throw new TypeError("Invalid schema");
  if(!client || typeof client.query!=="function" || typeof walletAddress!=="string" ||
     !/^0x[0-9a-f]{40}$/.test(walletAddress) ||
@@ -25,7 +25,7 @@ export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumb
     AND (h.end_block IS NULL OR $2::numeric < h.end_block)
   ORDER BY h.start_block
   LIMIT 2
-  FOR SHARE OF h,w`,[walletAddress,eventBlockNumber]);
+  ${lockRows ? "FOR SHARE OF h,w" : ""}`,[walletAddress,eventBlockNumber]);
  // A malformed or incomplete database response is never ownership proof.
  if(!result || !Array.isArray(result.rows) || result.rows.length!==1 ||
     (result.rowCount!==undefined && result.rowCount!==1))
