@@ -1,0 +1,26 @@
+// Safe one-shot read-only rehearsal. No ledger posting and no financial writes.
+// Uses a dedicated pg client supplied by the caller, never a shared pool.query.
+// All account/ownership row locks are held in the same explicit transaction.
+import {prepareBscDepositJournal} from "./bsc-deposit-journal-preparation.js";
+export async function rehearseBscDepositJournal({client,...input}){
+ if(!client || typeof client.query!=="function")
+  throw new TypeError("Dedicated PostgreSQL client required");
+ let begun=false;
+ try{
+  await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  begun=true;
+  await client.query("SET LOCAL lock_timeout = '2000ms'");
+  await client.query("SET LOCAL statement_timeout = '8000ms'");
+  const result=await prepareBscDepositJournal({client,...input});
+  // Always roll back: never commit any transaction in a rehearsal.
+  await client.query("ROLLBACK");
+  begun=false;
+  return result;
+ }catch(error){
+  if(begun){
+   try{await client.query("ROLLBACK")}
+   catch{throw new Error("Read-only rehearsal rollback failed",{cause:error})}
+  }
+  throw error;
+ }
+}
