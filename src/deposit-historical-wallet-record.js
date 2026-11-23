@@ -1,6 +1,7 @@
 // Offline consistency check only. This is NOT independent proof of chain ownership.
 const address=/^0x[0-9a-f]{40}$/;
-const uint=v=>typeof v==="string" && /^(0|[1-9][0-9]*)$/.test(v)?BigInt(v):null;
+// Historical block columns are numeric(78,0); reject unrepresentable values before BigInt parsing.
+const uint=v=>typeof v==="string" && /^(0|[1-9][0-9]{0,77})$/.test(v)?BigInt(v):null;
 const id=v=>typeof v==="string" && /^[1-9][0-9]*$/.test(v) && BigInt(v)<=9223372036854775807n;
 export function verifyHistoricalWalletRecord({history,wallet,eventBlockNumber,expectedUserId}){
  if(!history || !wallet || !id(history.wallet_id) || !id(history.user_id) ||
