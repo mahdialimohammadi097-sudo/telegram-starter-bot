@@ -27,12 +27,12 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
   await client.query(`INSERT INTO verified_deposit_evidence
    (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
    VALUES ($1,$2,$3,$4,$5,$6)`,[eventKey,evidence.blockHash,evidence.blockNumber,evidence.tokenContract,evidence.depositAddress,evidence.amountBaseUnits]);
-  if(destinationOwner!==undefined)
-   await lockDepositDestinationAccount(client,destinationOwner);
-  const journal=journalForUnits({eventKey,units});
-  // A test journal may not post to an unverified or unspecified customer account.
+  // Reject missing ownership before invoking caller-controlled journal construction.
+  // Any inserted evidence is rolled back by the enclosing transaction.
   if(destinationOwner===undefined)
    throw new Error("Verified deposit destination owner required");
+  await lockDepositDestinationAccount(client,destinationOwner);
+  const journal=journalForUnits({eventKey,units});
   if(journal?.idempotencyKey!==`verified-deposit:${eventKey}`)
    throw new Error("Deposit journal must use canonical event idempotency key");
   // A balanced but inflated journal must never credit more than chain evidence.
@@ -44,9 +44,8 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
      toUsdtUnitsExact(debit.amount)!==BigInt(units) ||
      toUsdtUnitsExact(credit.amount)!==BigInt(units))
    throw new Error("Deposit journal amount must exactly match verified token units");
-  if(destinationOwner!==undefined &&
-     (String(credit.account_id)!==String(destinationOwner.accountId) ||
-      String(debit.account_id)===String(destinationOwner.accountId)))
+  if(String(credit.account_id)!==String(destinationOwner.accountId) ||
+     String(debit.account_id)===String(destinationOwner.accountId))
    throw new Error("Deposit journal credit must target locked customer account");
   return postJournalInTransaction(client,journal);
  });
