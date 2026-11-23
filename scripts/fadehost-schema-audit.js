@@ -95,6 +95,21 @@ if (!process.env.DATABASE_URL) {
     if(!references.has(column+":public."+target))
      missing.push("foreign_key:ledger_entries."+column+"->"+target);
    }
+   // Ledger integrity requires the database to reject zero/negative postings,
+   // not merely application-side validators. Inspect validated CHECK constraints.
+   const amountChecks=await client.query(`SELECT pg_get_constraintdef(c.oid) AS definition
+     FROM pg_constraint c
+     JOIN pg_class t ON t.oid=c.conrelid
+     JOIN pg_namespace n ON n.oid=t.relnamespace
+     WHERE n.nspname='public' AND t.relname='ledger_entries'
+       AND c.contype='c' AND c.convalidated`);
+   if(!amountChecks || !Array.isArray(amountChecks.rows))
+    throw new Error("Malformed ledger check-constraint catalog result");
+   const hasPositiveAmountCheck=amountChecks.rows.some(row=>
+    typeof row.definition==="string" &&
+    /\\bamount\\b/.test(row.definition) &&
+    /amount\\s*>\\s*(?:\\(?0(?:\\.0+)?\\)?)(?=\\D|$)/.test(row.definition));
+   if(!hasPositiveAmountCheck)missing.push("check:ledger_entries.amount_positive");
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
