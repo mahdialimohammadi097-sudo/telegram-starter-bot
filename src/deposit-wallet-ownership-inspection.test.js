@@ -21,3 +21,12 @@ test("rejects wrong user, wrong ledger owner, duplicate assignment, wrong chain 
  ];
  for(const value of cases)assert.throws(()=>inspectDepositWalletOwnership(value),/ownership mismatch/);
 });
+
+test("rejects missing or invalid wallet and ledger identifiers",()=>{
+ for(const value of [
+  {...valid,ledgerAccount:{...valid.ledgerAccount,id:undefined}},
+  {...valid,ledgerAccount:{...valid.ledgerAccount,id:-1}},
+  {...valid,assignments:[{...row,wallet_id:undefined}]},
+  {...valid,assignments:[{...row,user_id:"12"}]}
+ ])assert.throws(()=>inspectDepositWalletOwnership(value),/ownership mismatch/);
+});
