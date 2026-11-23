@@ -14,11 +14,27 @@ export async function inspectDepositSchemaReadOnly(pool) {
  try {
   await client.query("BEGIN READ ONLY ISOLATION LEVEL REPEATABLE READ");
   await client.query("SET LOCAL statement_timeout = '5000ms'");
-  const result=await client.query(`SELECT table_name,column_name FROM information_schema.columns
+  const result=await client.query(`SELECT table_name,column_name,data_type FROM information_schema.columns
    WHERE table_schema='public' AND table_name=ANY($1::text[])`,[Object.keys(required)]);
   const present=new Set(result.rows.map(r=>r.table_name+"."+r.column_name));
   const missing=Object.entries(required).flatMap(([table,columns])=>
    columns.filter(column=>!present.has(table+"."+column)).map(column=>table+"."+column));
+  // Metadata-only compatibility check for reviewed historical-ownership migration.
+  // Never inspect user rows or infer financial activation from type matches.
+  const expectedTypes={
+   "users.id":"bigint",
+   "wallets.id":"bigint",
+   "wallets.chain_id":"bigint",
+   "user_wallet_assignments.user_id":"bigint",
+   "user_wallet_assignments.wallet_id":"bigint"
+  };
+  const observedTypes=Object.fromEntries(result.rows
+   .filter(r=>Object.hasOwn(expectedTypes,r.table_name+"."+r.column_name))
+   .map(r=>[r.table_name+"."+r.column_name,r.data_type??"unknown"]));
+  const incompatibleTypes=Object.entries(expectedTypes).filter(([key,type])=>
+   observedTypes[key]!==type).map(([key,type])=>({
+    column:key,expected:type,observed:observedTypes[key]??"missing"
+   }));
   const indexes=await client.query(`SELECT t.relname AS table_name,a.attname AS column_name
    FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid
    JOIN pg_namespace n ON n.oid=t.relnamespace
@@ -31,7 +47,7 @@ export async function inspectDepositSchemaReadOnly(pool) {
   for(const key of ["verified_deposit_evidence.event_key","ledger_transactions.idempotency_key"])
    if(!uniqueKeys.has(key))missing.push("unique:"+key);
   await client.query("ROLLBACK");
-  return {audit:"deposit-schema",structuralReady:missing.length===0,missing,
+  return {audit:"deposit-schema",structuralReady:missing.length===0,missing,\n   migrationTypeCompatible:incompatibleTypes.length===0,incompatibleTypes,
    financialActivationReady:false,realDepositsEnabled:false,
    outstandingSecurityGates:["independent-historical-ownership-proof","independent-chain-finality-verification","production-backup-restore","owner-financial-authorization"]};
  } catch(error) {
