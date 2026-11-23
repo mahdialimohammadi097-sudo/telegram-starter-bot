@@ -1,0 +1,35 @@
+name: Disposable PostgreSQL ledger atomicity test
+on:
+  push:
+    branches:
+      - "fix/**"
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+      - "feature/**"
+jobs:
+  postgres-atomicity:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: profino_test
+          POSTGRES_PASSWORD: disposable_test_only
+          POSTGRES_DB: profino_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U profino_test -d profino_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: npm ci
+      - name: Test PostgreSQL duplicate claims and rollback
+        env:
+          PROFINO_TEST_DATABASE_URL: postgresql://profino_test:disposable_test_only@127.0.0.1:5432/profino_test
+        run: node --test src/postgres-ledger-atomicity.integration.test.js
