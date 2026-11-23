@@ -15,7 +15,7 @@ export async function lockDepositDestinationAccount(client,{accountId,userId}) {
    WHERE id=$1::bigint AND user_id=$2::bigint
      AND account_type='AVAILABLE' AND currency='USDT'
    FOR UPDATE`,[String(accountId),String(userId)]);
- if(result.rowCount!==1)
+ if(result.rowCount!==1 || !result.rows?.[0] || String(result.rows[0].id)!==BigInt(String(accountId)).toString())
   throw new Error("Deposit destination account ownership is unverified");
  return String(result.rows[0].id);
 }
