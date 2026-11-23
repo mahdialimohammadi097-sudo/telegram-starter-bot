@@ -5,11 +5,11 @@ import {verifyDepositJournalAccounts} from "./deposit-journal-account-verificati
 const ID=/^[1-9][0-9]{0,18}$/;
 const validId=v=>typeof v==="string"&&ID.test(v)&&BigInt(v)<=9223372036854775807n;
 export async function inspectDepositJournalAccounts(client,{
- userId,userAvailableAccountId,platformClearingAccountId,schema="public"
+ userId,userAvailableAccountId,platformClearingAccountId,schema="public",lockRows=true
 }){
  if(!client || typeof client.query!=="function" ||
     typeof schema!=="string" || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema) ||
-    !validId(userId) || !validId(userAvailableAccountId) ||
+    typeof lockRows!=="boolean" || !validId(userId) || !validId(userAvailableAccountId) ||
     !validId(platformClearingAccountId) ||
     userAvailableAccountId===platformClearingAccountId)
   throw new TypeError("Invalid ledger account inspection input");
@@ -18,7 +18,7 @@ export async function inspectDepositJournalAccounts(client,{
   FROM "${schema}".ledger_accounts
   WHERE id IN ($1::bigint,$2::bigint)
   ORDER BY id
-  FOR SHARE`,[userAvailableAccountId,platformClearingAccountId]);
+  ${lockRows ? "FOR SHARE" : ""}`,[userAvailableAccountId,platformClearingAccountId]);
  if(!result || !Array.isArray(result.rows) || result.rows.length!==2 ||
     (result.rowCount!==undefined && result.rowCount!==2))
   throw new Error("Missing or ambiguous deposit ledger accounts");
