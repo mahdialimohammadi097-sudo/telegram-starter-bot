@@ -91,3 +91,20 @@ test("ledger balancing rejects missing or invalid sides", () => {
      {currency:"USDT",entry_type:"credit",amount:"1.000000001"}]
   ]) assert.throws(() => assertBalancedLedgerEntries(entries));
 });
+
+test("PROFINO ledger rejects non-USDT and mixed currency journals", () => {
+ for (const currency of ["BTC","ETH","USD","",null]) {
+  assert.throws(() => assertBalancedLedgerEntries([
+   {currency,entry_type:"debit",amount:"1"},
+   {currency,entry_type:"credit",amount:"1"}
+  ]), /Invalid ledger entry/);
+ }
+ assert.throws(() => assertBalancedLedgerEntries([
+  {currency:"USDT",entry_type:"debit",amount:"1"},
+  {currency:"BTC",entry_type:"credit",amount:"1"}
+ ]), /Invalid ledger entry/);
+ assert.equal(assertBalancedLedgerEntries([
+  {currency:"USDT",entry_type:"debit",amount:"1"},
+  {currency:"USDT",entry_type:"credit",amount:"1"}
+ ]),true);
+});
