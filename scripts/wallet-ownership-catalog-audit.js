@@ -29,8 +29,14 @@ try{
   'deposit_address_ownership_history.wallet_address','deposit_address_ownership_history.start_block',
   'deposit_address_ownership_history.end_block'];
  const missing=required.filter(x=>!names.has(x));
- console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:missing.length===0,
-  missing,columns:columns.rows,constraints:constraints.rows,
+ const tables=['wallets','user_wallet_assignments','deposit_address_ownership_history'];
+ const presentTables=[...new Set(columns.rows.map(r=>r.table_name))];
+ const missingTables=tables.filter(t=>!presentTables.includes(t));
+ const identityConstraints=constraints.rows.filter(r=>r.table_name==='deposit_address_ownership_history');
+ const missingConstraintTypes=['p','f','x'].filter(t=>!identityConstraints.some(r=>r.type===t && r.validated===true));
+ const structuralReady=missing.length===0 && missingTables.length===0 && missingConstraintTypes.length===0;
+ console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:structuralReady,
+  missing,missingTables,missingConstraintTypes,columns:columns.rows,constraints:constraints.rows,
   financialActivationReady:false,realDepositsEnabled:false}));
  await client.query("ROLLBACK");
 }catch(error){
