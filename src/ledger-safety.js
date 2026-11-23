@@ -32,7 +32,13 @@ export function toUsdtUnitsExact(value) {
   const sign = match[1] === "-" ? -1n : 1n;
   const whole = BigInt(match[2]);
   const paddedFraction = (fraction + "00000000").slice(0, 8);
-  return sign * (whole * SCALE + BigInt(paddedFraction));
+  const units = whole * SCALE + BigInt(paddedFraction);
+  // PostgreSQL numeric(36,18) stores at most 18 whole digits.
+  // Fail before posting instead of depending on a database overflow.
+  if (units >= 10n ** 26n) {
+    throw new RangeError("USDT amount exceeds ledger numeric capacity");
+  }
+  return sign * units;
 }
 
 export function formatUsdt(value) {
