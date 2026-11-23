@@ -146,6 +146,19 @@ test("valid owner posts exactly one balanced deposit journal and evidence atomic
    blockHash:"0x"+"b".repeat(64),blockNumber:"100",tokenContract:"0x"+"c".repeat(40),
    depositAddress:"0x"+"d".repeat(40),amountBaseUnits:"1000000000000000000"};
   const eventKey="bsc:56:"+evidence.transactionHash+":7";
+  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+   destinationOwner:{accountId:"44",userId:"12"},
+   journalForUnits:({eventKey})=>({
+    transactionType:"withdrawal",idempotencyKey:"verified-deposit:"+eventKey,
+    entries:[{account_id:"45",entry_type:"debit",amount:"1",currency:"USDT"},
+             {account_id:"44",entry_type:"credit",amount:"1",currency:"USDT"}]
+   })
+  }),/deposit transaction type/);
+  const rejected=await pool.query(`SELECT
+   (SELECT count(*)::int FROM verified_deposit_evidence WHERE event_key=$1) AS evidence_count,
+   (SELECT count(*)::int FROM ledger_transactions WHERE idempotency_key=$2) AS journal_count`,
+   [eventKey,"verified-deposit:"+eventKey]);
+  assert.deepEqual(rejected.rows[0],{evidence_count:0,journal_count:0});
   const result=await rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
    destinationOwner:{accountId:"44",userId:"12"},
    journalForUnits:({eventKey})=>({
