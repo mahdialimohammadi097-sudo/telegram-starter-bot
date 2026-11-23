@@ -24,7 +24,11 @@ try{
   ORDER BY c.relname,con.conname`);
  const names=new Set(columns.rows.map(r=>r.table_name+"."+r.column_name));
  const required=['wallets.id','wallets.chain_id','wallets.wallet_address',
-  'wallets.is_platform_controlled','deposit_address_ownership_history.wallet_id',
+  'wallets.is_platform_controlled','wallets.status',
+  'user_wallet_assignments.id','user_wallet_assignments.user_id',
+  'user_wallet_assignments.wallet_id','user_wallet_assignments.assignment_type',
+  'user_wallet_assignments.status','user_wallet_assignments.ended_at',
+  'deposit_address_ownership_history.wallet_id',
   'deposit_address_ownership_history.user_id','deposit_address_ownership_history.chain_id',
   'deposit_address_ownership_history.wallet_address','deposit_address_ownership_history.start_block',
   'deposit_address_ownership_history.end_block'];
