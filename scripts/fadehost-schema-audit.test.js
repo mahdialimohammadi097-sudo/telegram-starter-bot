@@ -22,3 +22,12 @@ test("invalid private database endpoint emits sanitized failure only",()=>{
  assert.equal(output.ready,false);
  assert.equal(output.error,"READ_ONLY_AUDIT_FAILED");
 });
+
+test("schema audit cannot certify positivity from SQL text matching alone",async()=>{
+ const {readFileSync}=await import("node:fs");
+ const source=readFileSync(script,"utf8");
+ assert.match(source,/manual_review:ledger_entries\.amount_positive_constraint/);
+ assert.doesNotMatch(source,/hasPositiveAmountCheck/);
+ assert.match(source,/BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY/);
+ assert.match(source,/default_transaction_read_only=on/);
+});
