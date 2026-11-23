@@ -4,7 +4,7 @@
 import {readBscDepositEvidence} from "./bsc-readonly-deposit-rpc.js";
 import {inspectHistoricalWalletFromDatabase} from "./deposit-historical-wallet-db-inspection.js";
 export async function inspectBscDepositWithHistoricalOwner({
- rpc,client,transactionHash,expected,expectedUserId,schema="public"
+ rpc,client,transactionHash,expected,expectedUserId,schema="public",lockRows=true
 }){
  if(!expected || typeof expected.depositAddress!=="string" ||
     !/^0x[0-9a-f]{40}$/i.test(expected.depositAddress))
@@ -13,7 +13,7 @@ export async function inspectBscDepositWithHistoricalOwner({
  const owner=await inspectHistoricalWalletFromDatabase(client,{
   walletAddress:evidence.depositAddress,
   eventBlockNumber:evidence.blockNumber,
-  expectedUserId,schema
+  expectedUserId,schema,lockRows
  });
  if(owner.userId!==expectedUserId)throw new Error("Historical wallet owner mismatch");
  return Object.freeze({...evidence,walletId:owner.walletId,userId:owner.userId});
