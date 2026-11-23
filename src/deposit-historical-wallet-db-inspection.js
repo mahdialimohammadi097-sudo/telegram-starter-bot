@@ -26,7 +26,10 @@ export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumb
   ORDER BY h.start_block
   LIMIT 2
   FOR SHARE OF h,w`,[walletAddress,eventBlockNumber]);
- if(result.rows.length!==1) throw new Error("Missing or ambiguous historical wallet owner");
+ // A malformed or incomplete database response is never ownership proof.
+ if(!result || !Array.isArray(result.rows) || result.rows.length!==1 ||
+    (result.rowCount!==undefined && result.rowCount!==1))
+  throw new Error("Missing or ambiguous historical wallet owner");
  const row=result.rows[0];
  return verifyHistoricalWalletRecord({
   history:{wallet_id:row.wallet_id,user_id:row.user_id,chain_id:row.chain_id,
