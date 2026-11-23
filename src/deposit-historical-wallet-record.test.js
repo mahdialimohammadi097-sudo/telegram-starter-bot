@@ -5,6 +5,8 @@ const address="0x"+"a".repeat(40);
 const valid=()=>({history:{wallet_id:"1",user_id:"12",chain_id:56,wallet_address:address,start_block:"100",end_block:"200"},wallet:{id:"1",chain_id:56,wallet_address:address,is_platform_controlled:true},eventBlockNumber:"150",expectedUserId:"12"});
 test("historical wallet identity and interval must match",()=>{
  assert.deepEqual(check(valid()),{walletId:"1",userId:"12"});
+ const pg=valid();pg.history.chain_id="56";pg.wallet.chain_id="56";
+ assert.deepEqual(check(pg),{walletId:"1",userId:"12"});
  for(const mutation of [
   p=>p.history.wallet_id="2",p=>p.history.user_id="13",
   p=>p.wallet.wallet_address="0x"+"b".repeat(40),
