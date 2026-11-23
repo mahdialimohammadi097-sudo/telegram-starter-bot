@@ -24,3 +24,8 @@ test("rejects unsafe JavaScript numbers and PostgreSQL bigint overflow",async()=
  }
  assert.equal(calls,0);
 });
+
+test("rejects unexpected row identity even if database adapter reports a match",async()=>{
+ const client={query:async()=>({rowCount:1,rows:[{id:"45"}]})};
+ await assert.rejects(lockDepositDestinationAccount(client,{accountId:"44",userId:"12"}),/unverified/);
+});
