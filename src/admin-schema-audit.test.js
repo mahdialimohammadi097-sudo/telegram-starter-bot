@@ -37,13 +37,16 @@ test("schema audit marks structure ready only with all required columns and uniq
  const required={
   verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
   wallets:["id","wallet_address","chain_id","is_platform_controlled"],
+  ledger_accounts:["id","user_id","account_type","currency"],
+  ledger_transactions:["id","idempotency_key","status","transaction_type","reference_id"],
+  ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
   user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"]
  };
  const columns=Object.entries(required).flatMap(([table_name,names])=>
   names.map(column_name=>({table_name,column_name})));
  const client={query:async(sql)=>{
   if(sql.includes("information_schema.columns"))return {rows:columns};
-  if(sql.includes("FROM pg_index"))return {rows:[{unique_key:true}]};
+  if(sql.includes("FROM pg_index"))return {rows:[{table_name:"verified_deposit_evidence",column_name:"event_key"},{table_name:"ledger_transactions",column_name:"idempotency_key"}]};
   return {rows:[]};
  },release:()=>{}};
  const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
@@ -56,13 +59,16 @@ test("schema audit rejects nonunique event index despite all columns existing",a
  const required={
   verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
   wallets:["id","wallet_address","chain_id","is_platform_controlled"],
+  ledger_accounts:["id","user_id","account_type","currency"],
+  ledger_transactions:["id","idempotency_key","status","transaction_type","reference_id"],
+  ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
   user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"]
  };
  const columns=Object.entries(required).flatMap(([table_name,names])=>
   names.map(column_name=>({table_name,column_name})));
  const client={query:async(sql)=>{
   if(sql.includes("information_schema.columns"))return {rows:columns};
-  if(sql.includes("FROM pg_index"))return {rows:[{unique_key:false}]};
+  if(sql.includes("FROM pg_index"))return {rows:[{table_name:"ledger_transactions",column_name:"idempotency_key"}]};
   return {rows:[]};
  },release:()=>{}};
  const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
