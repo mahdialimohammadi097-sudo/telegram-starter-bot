@@ -22,7 +22,7 @@ if (!process.env.DATABASE_URL) {
   const client=await pool.connect();
   try {
    await client.query("BEGIN READ ONLY");
-   const {rows}=await client.query(`SELECT table_name,column_name
+   const {rows}=await client.query(`SELECT table_name,column_name,is_nullable
      FROM information_schema.columns
      WHERE table_schema='public' AND table_name=ANY($1::text[])`,[Object.keys(required)]);
    const columns=new Set(rows.map(x=>x.table_name+"."+x.column_name));
@@ -39,6 +39,11 @@ if (!process.env.DATABASE_URL) {
    const keys=new Set(indexes.rows.map(x=>x.table_name+"."+x.column_name));
    for(const key of ["verified_deposit_evidence.event_key","ledger_transactions.idempotency_key"])
     if(!keys.has(key))missing.push("unique:"+key);
+   // PostgreSQL UNIQUE permits multiple NULL values; identity keys must also be NOT NULL.
+   for(const key of ["verified_deposit_evidence.event_key","ledger_transactions.idempotency_key"]){
+    const column=rows.find(x=>x.table_name+"."+x.column_name===key);
+    if(column && column.is_nullable!=="NO")missing.push("not_null:"+key);
+   }
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
