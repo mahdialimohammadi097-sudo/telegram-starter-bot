@@ -7,8 +7,8 @@ export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumb
   throw new TypeError("Invalid schema");
  if(!client || typeof client.query!=="function" || typeof walletAddress!=="string" ||
     !/^0x[0-9a-f]{40}$/.test(walletAddress) ||
-    typeof expectedUserId!=="string" || !/^[1-9][0-9]*$/.test(expectedUserId) ||
-    typeof eventBlockNumber!=="string" || !/^(0|[1-9][0-9]*)$/.test(eventBlockNumber))
+    typeof expectedUserId!=="string" || !/^[1-9][0-9]{0,18}$/.test(expectedUserId) || BigInt(expectedUserId)>9223372036854775807n ||
+    typeof eventBlockNumber!=="string" || !/^(0|[1-9][0-9]{0,77})$/.test(eventBlockNumber))
   throw new TypeError("Invalid historical inspection input");
  // Lock wallet identity against concurrent changes until the caller transaction ends.
  // Callers must hold an explicit transaction when using this for financial checks.
