@@ -53,7 +53,8 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
  if(!latestTransaction ||
     latestTransaction.hash?.toLowerCase()!==transaction.hash.toLowerCase() ||
     latestTransaction.blockHash?.toLowerCase()!==transaction.blockHash.toLowerCase() ||
-    latestTransaction.blockNumber!==transaction.blockNumber)
+    latestTransaction.blockNumber!==transaction.blockNumber ||
+    latestTransaction.transactionIndex!==transaction.transactionIndex)
   throw new Error("RPC transaction changed during evidence inspection");
  if(await request("eth_chainId",[])!=="0x38")
   throw new Error("RPC chain changed during evidence inspection");
