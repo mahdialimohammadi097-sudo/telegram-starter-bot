@@ -9,12 +9,15 @@ export function convertDepositBaseUnitsToLedgerUnits(amountBaseUnits, tokenDecim
   throw new TypeError("Invalid token decimals");
  }
  const baseUnits = BigInt(amountBaseUnits);
- const maxLedgerUnits = 10n ** 78n - 1n;
+ // ledger_entries.amount is numeric(36,18): at most 18 integer digits.
+ const maxLedgerUnits = 10n ** 26n - 1n;
  const shift = tokenDecimals - LEDGER_DECIMALS;
  if (shift > 0) {
   const divisor = 10n ** BigInt(shift);
   if (baseUnits % divisor !== 0n) throw new RangeError("Deposit cannot be represented exactly in ledger precision");
-  return (baseUnits / divisor).toString();
+  const ledgerUnits = baseUnits / divisor;
+  if (ledgerUnits > maxLedgerUnits) throw new RangeError("Deposit exceeds ledger numeric capacity");
+  return ledgerUnits.toString();
  }
  const ledgerUnits = baseUnits * (10n ** BigInt(-shift));
  if (ledgerUnits > maxLedgerUnits) throw new RangeError("Deposit exceeds ledger numeric capacity");
