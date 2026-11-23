@@ -123,3 +123,10 @@ test("ledger posting validation rejects noncanonical currency and entry directio
   ]),/Invalid ledger entry/);
  }
 });
+
+test("financial parsing rejects oversized decimal payloads before BigInt allocation",()=>{
+ assert.throws(()=>toUsdtUnitsExact("9".repeat(100000)),/ledger numeric capacity/);
+ assert.throws(()=>toUsdtUnitsExact("0".repeat(100000)+"1"),/ledger numeric capacity/);
+ assert.throws(()=>toUsdtUnitsExact("1."+"0".repeat(100000)),/ledger numeric capacity/);
+ assert.equal(toUsdtUnitsExact("00010.00000001"),1000000001n);
+});
