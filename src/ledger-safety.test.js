@@ -71,3 +71,23 @@ test("financial amounts respect PostgreSQL numeric(36,18) capacity", () => {
     { currency: "USDT", entry_type: "credit", amount: "1000000000000000000" }
   ]), /ledger numeric capacity/);
 });
+
+test("exact parser rejects hostile or ambiguous financial input", () => {
+  for (const bad of [null, undefined, "", "NaN", "Infinity", "1e3",
+    "0x10", "1,000", "1_000", "1.2.3", "1.000000000",
+    Number.NaN, -Infinity, 1e-9]) {
+    assert.throws(() => toUsdtUnitsExact(bad), undefined, String(bad));
+  }
+  assert.equal(toUsdtUnitsExact("00010.00000001"), 1000000001n);
+});
+test("ledger balancing rejects missing or invalid sides", () => {
+  for (const entries of [
+    [{currency:"USDT",entry_type:"debit",amount:"1"}],
+    [{currency:"USDT",entry_type:"debit",amount:"1"},
+     {currency:"USDT",entry_type:"credit",amount:"0"}],
+    [{currency:"USDT",entry_type:"debit",amount:"1"},
+     {currency:"USDT",entry_type:"unknown",amount:"1"}],
+    [{currency:"USDT",entry_type:"debit",amount:"1"},
+     {currency:"USDT",entry_type:"credit",amount:"1.000000001"}]
+  ]) assert.throws(() => assertBalancedLedgerEntries(entries));
+});
