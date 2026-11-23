@@ -91,7 +91,7 @@ LEFT JOIN pg_attribute a ON a.attrelid=c.oid
 ORDER BY t.table_name,t.expected_column;
 ```
 
-Interpretation: `users.id`, `wallets.id`, `wallets.chain_id`, and `user_wallet_assignments.user_id/wallet_id` must be compatible with the `bigint` FK contract in the proposed history migration. A mismatch means **revise the reviewed migration in a new PR and retest**, not cast or alter existing production columns. This query is diagnostic only; do not run `CREATE`, `ALTER`, `RESTORE`, `DELETE`, or `GRANT` from this checklist.
+Interpretation: `users.id`, `wallets.id`, `wallets.chain_id`, and `user_wallet_assignments.user_id/wallet_id` must match their reviewed FK types (`bigint` for IDs); `wallets.chain_id` is `integer` in production and the proposed history `chain_id` is now `integer` too. A mismatch means **revise the reviewed migration in a new PR and retest**, not cast or alter existing production columns. This query is diagnostic only; do not run `CREATE`, `ALTER`, `RESTORE`, `DELETE`, or `GRANT` from this checklist.
 
 The result does not waive the independent production backup-restore, security/accounting sign-off, or owner approval requirements.
 
@@ -102,3 +102,9 @@ The live Super Admin report confirmed `wallets.chain_id` is **integer**, not the
 The report also said `users.id` was `missing`. **This is a diagnostic coverage defect, not proof that the column is absent:** the deployed metadata query only selects tables in its `required` map, and `users` is absent from that map. Add `users: ['id']` to the metadata query and rerun before deciding the actual FK type. Do not infer a production schema defect from that false negative.
 
 Status: production structure incomplete; historical ownership migration **blocked**, no DDL or financial activation authorized.
+
+## 9. Production recheck — 2026-11-23 14:37 UTC
+
+The corrected read-only startup audit now includes `users.id` in its catalog scope. Its report has **no `users.id` mismatch**, confirming the previous `missing` diagnostic was a false negative. It still reports `wallets.chain_id` as PostgreSQL `integer`. The draft ownership-history migration and its catalog audit have therefore been changed to `integer` for the history chain ID and wallet chain ID type expectation. No existing production column was modified.
+
+The current PR #114 head passed all four CI suites after those changes. The live production schema is still structurally incomplete (missing evidence/history tables); passing CI is **not** authorization to execute either review-only migration. Actual FadeHost backup restoration, independent historical ownership and chain-finality verification, accounting/security review, and explicit owner approval remain outstanding.
