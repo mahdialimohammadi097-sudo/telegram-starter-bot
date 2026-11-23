@@ -36,6 +36,11 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
   await pool.query(`UPDATE "${schema}".wallets SET is_platform_controlled=false WHERE id=2`);
   await assert.rejects(pool.query(insert,[2,12,address,"50","60"]),/identity mismatch/);
   await pool.query(`UPDATE "${schema}".wallets SET is_platform_controlled=true WHERE id=2`);
+  // A historical row must reference an existing wallet and the matching chain.
+  await assert.rejects(pool.query(insert,[999,11,address,"50","60"]),error=>error.code==="P0001" || error.code==="23503");
+  await pool.query(`UPDATE "${schema}".wallets SET chain_id=97 WHERE id=2`);
+  await assert.rejects(pool.query(insert,[2,12,address,"50","60"]),/identity mismatch/);
+  await pool.query(`UPDATE "${schema}".wallets SET chain_id=56 WHERE id=2`);
   await pool.query(insert,[1,11,address,"100","200"]);
   await assert.rejects(pool.query(`INSERT INTO ${table}
    (wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
