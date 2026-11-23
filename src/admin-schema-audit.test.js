@@ -36,6 +36,7 @@ test("read-only schema audit rolls back when catalog inspection fails",async()=>
 
 test("schema audit marks structure ready only with all required columns and unique event key",async()=>{
  const required={
+  users:["id"],
   verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
   wallets:["id","wallet_address","chain_id","is_platform_controlled"],
   ledger_accounts:["id","user_id","account_type","currency"],
@@ -60,6 +61,7 @@ test("schema audit marks structure ready only with all required columns and uniq
 });
 test("schema audit rejects nonunique event index despite all columns existing",async()=>{
  const required={
+  users:["id"],
   verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
   wallets:["id","wallet_address","chain_id","is_platform_controlled"],
   ledger_accounts:["id","user_id","account_type","currency"],
