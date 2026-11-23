@@ -73,6 +73,24 @@ if (!process.env.DATABASE_URL) {
     const column=rows.find(x=>x.table_name+"."+x.column_name===key);
     if(column && column.is_nullable!=="NO")missing.push("not_null:"+key);
    }
+   // Reject orphan-prone ledger schemas: posting rows must reference real
+   // transactions and accounts through validated single-column foreign keys.
+   const foreignKeys=await client.query(`SELECT c.confrelid::regclass::text AS target,
+      a.attname AS source_column
+     FROM pg_constraint c
+     JOIN pg_class t ON t.oid=c.conrelid
+     JOIN pg_namespace n ON n.oid=t.relnamespace
+     JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=c.conkey[1]
+     WHERE n.nspname='public' AND t.relname='ledger_entries'
+       AND c.contype='f' AND array_length(c.conkey,1)=1
+       AND array_length(c.confkey,1)=1 AND c.convalidated`);
+   const references=new Set(foreignKeys.rows.map(x=>x.source_column+":"+x.target));
+   for(const [column,target] of [
+    ["transaction_id","ledger_transactions"],["account_id","ledger_accounts"]
+   ]){
+    if(!references.has(column+":public."+target) && !references.has(column+":"+target))
+     missing.push("foreign_key:ledger_entries."+column+"->"+target);
+   }
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
