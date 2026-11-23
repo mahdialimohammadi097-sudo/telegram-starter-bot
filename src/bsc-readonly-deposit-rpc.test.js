@@ -46,7 +46,7 @@ test("rejects receipt changes between RPC observations",async()=>{
  const rpc=async(method)=>{
   if(method==="eth_getTransactionReceipt"){
    reads++;
-   return reads===1?receipt:{...receipt,logs:[{...log,data:"0x"+(2n*10n**18n).toString(16).padStart(64,"0")]};
+   return reads===1?receipt:{...receipt,logs:[{...log,data:"0x"+(2n*10n**18n).toString(16).padStart(64,"0")}]};
   }
   return makeRpc()(method);
  };
