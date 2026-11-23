@@ -223,6 +223,20 @@ if (!process.env.DATABASE_URL) {
     if(ambiguous.rows[0].found)
      missing.push("data:user_wallet_assignments.multiple_active_owners");
    }
+   // Two active assignments to the same wallet are ambiguous even when
+   // both happen to reference the same user: fail closed for deposit routing.
+   if(["user_wallet_assignments.wallet_id","user_wallet_assignments.status",
+       "user_wallet_assignments.ended_at"].every(k=>columns.has(k))){
+    const duplicates=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.user_wallet_assignments
+      WHERE status='active' AND ended_at IS NULL
+      GROUP BY wallet_id HAVING COUNT(*)>1
+    ) AS found`);
+    if(typeof duplicates?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed active wallet assignment duplicate result");
+    if(duplicates.rows[0].found)
+     missing.push("data:user_wallet_assignments.duplicate_active_wallet");
+   }
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
