@@ -116,3 +116,12 @@ test("rejects malformed or unsafe finalized head height",()=>{
   assert.throws(()=>inspectBscMainnetTransfer({...input,finalizedBlockNumber:bad}),/finality/);
  }
 });
+
+test("rejects a Transfer log with a different transaction index",()=>{
+ const receipt={...input.receipt,transactionIndex:"0x2",logs:[{...log,transactionIndex:"0x3"}]};
+ assert.throws(()=>inspectBscMainnetTransfer({...input,receipt}),/Transfer log/);
+});
+test("accepts matching receipt and log transaction indexes",()=>{
+ const receipt={...input.receipt,transactionIndex:"0x2",logs:[{...log,transactionIndex:"0x2"}]};
+ assert.equal(inspectBscMainnetTransfer({...input,receipt}).units,"100000000");
+});
