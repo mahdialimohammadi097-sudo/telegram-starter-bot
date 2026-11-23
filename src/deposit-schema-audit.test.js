@@ -54,5 +54,6 @@ test("schema audit rejects evidence tables missing validated format checks",asyn
  const report=await auditDepositSchema(client);
  assert.equal(report.ready,false);
  assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
- assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
+ // Mock rows intentionally omit SQL definitions: fail closed even for validated names.
+ assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
 });

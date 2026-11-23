@@ -9,7 +9,8 @@
     "test": "node --test",
     "pretest:postgres": "node -e \"if (!process.env.DATABASE_URL) { console.error('Set DATABASE_URL to a disposable PostgreSQL test database.'); process.exit(1); }\"",
     "test:postgres": "node --test src/*.postgres.test.js",
-    "audit:deposit-schema": "node scripts/audit-deposit-schema.js"
+    "audit:deposit-schema": "node scripts/audit-deposit-schema.js",
+    "audit:deposit-preflight": "node scripts/deposit-preflight.js"
   },
   "engines": {
     "node": ">=20"

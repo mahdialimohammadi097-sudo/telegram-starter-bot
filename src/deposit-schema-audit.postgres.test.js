@@ -66,7 +66,9 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
      CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'),
      CONSTRAINT verified_deposit_evidence_block_hash_format CHECK (block_hash ~ '^0x[0-9a-f]{64}$'),
      CONSTRAINT verified_deposit_evidence_token_format CHECK (token_contract ~ '^0x[0-9a-f]{40}$'),
-     CONSTRAINT verified_deposit_evidence_address_format CHECK (deposit_address ~ '^0x[0-9a-f]{40}$'));
+     CONSTRAINT verified_deposit_evidence_address_format CHECK (deposit_address ~ '^0x[0-9a-f]{40}$'),
+     CONSTRAINT verified_deposit_evidence_block_number_nonnegative CHECK (block_number >= 0),
+     CONSTRAINT verified_deposit_evidence_amount_positive CHECK (amount_base_units > 0));
   `);
   const result=await auditDepositSchema(pool,{schema});
   assert.deepEqual(result.missing,[]);
@@ -202,6 +204,8 @@ test("schema audit rejects an existing evidence table without format constraints
   assert.equal(report.ready,false);
   assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
   assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_address_format:check_constraint"));
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_block_number_nonnegative:check_constraint"));
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_amount_positive:check_constraint"));
  }finally{
   await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
   await pool.end();
@@ -215,6 +219,21 @@ test("schema audit rejects NOT VALID evidence format constraints",{skip:skipUnsa
   await pool.query('CREATE SCHEMA "'+schema+'"');
   await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text PRIMARY KEY)');
   await pool.query('ALTER TABLE "'+schema+'".verified_deposit_evidence ADD CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key <> \'\') NOT VALID');
+  const report=await auditDepositSchema(pool,{schema});
+  assert.equal(report.ready,false);
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects a misleading named CHECK with a weak expression",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_weak_"+randomUUID().replaceAll("-","");
+ try {
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text PRIMARY KEY, CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key <> \'\'))');
   const report=await auditDepositSchema(pool,{schema});
   assert.equal(report.ready,false);
   assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
