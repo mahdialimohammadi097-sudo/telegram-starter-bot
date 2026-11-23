@@ -40,3 +40,23 @@ test("detects changing canonical block across RPC reads",async()=>{
  };
  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/canonical/);
 });
+
+test("rejects receipt changes between RPC observations",async()=>{
+ let reads=0;
+ const rpc=async(method)=>{
+  if(method==="eth_getTransactionReceipt"){
+   reads++;
+   return reads===1?receipt:{...receipt,logs:[{...log,data:"0x"+(2n*10n**18n).toString(16).padStart(64,"0")]};
+  }
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/receipt changed/);
+});
+test("rejects a disappearing receipt after canonical block inspection",async()=>{
+ let reads=0;
+ const rpc=async(method)=>{
+  if(method==="eth_getTransactionReceipt")return ++reads===1?receipt:null;
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/Missing RPC evidence/);
+});
