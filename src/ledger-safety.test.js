@@ -108,3 +108,18 @@ test("PROFINO ledger rejects non-USDT and mixed currency journals", () => {
   {currency:"USDT",entry_type:"credit",amount:"1"}
  ]),true);
 });
+
+test("ledger posting validation rejects noncanonical currency and entry direction",()=>{
+ for(const currency of ["usdt","Usdt"," USDT ","USDT ",42]){
+  assert.throws(()=>assertBalancedLedgerEntries([
+   {currency,entry_type:"debit",amount:"10"},
+   {currency:"USDT",entry_type:"credit",amount:"10"}
+  ]),/Invalid ledger entry/);
+ }
+ for(const entry_type of ["Debit","CREDIT"," credit ","DEBIT",null]){
+  assert.throws(()=>assertBalancedLedgerEntries([
+   {currency:"USDT",entry_type,amount:"10"},
+   {currency:"USDT",entry_type:"credit",amount:"10"}
+  ]),/Invalid ledger entry/);
+ }
+});
