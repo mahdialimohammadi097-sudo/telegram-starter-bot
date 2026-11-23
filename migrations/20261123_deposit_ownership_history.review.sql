@@ -9,7 +9,7 @@ CREATE TABLE public.deposit_address_ownership_history (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  wallet_id bigint NOT NULL REFERENCES public.wallets(id),
  user_id bigint NOT NULL REFERENCES public.users(id),
- chain_id bigint NOT NULL CHECK (chain_id = 56),
+ chain_id integer NOT NULL CHECK (chain_id = 56),
  wallet_address text NOT NULL CHECK (wallet_address ~ '^0x[0-9a-f]{40}$'),
  start_block numeric(78,0) NOT NULL CHECK (start_block >= 0),
  end_block numeric(78,0) CHECK (end_block IS NULL OR end_block > start_block),
