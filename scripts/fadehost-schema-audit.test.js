@@ -43,6 +43,7 @@ test("read-only audit includes duplicate identity and ledger integrity checks",a
   "data:ledger_entries.nonpositive_amounts",
   "data:ledger_entries.unbalanced_journals",
   "data:ledger_entries.invalid_currency",
+  "data:ledger_accounts.invalid_currency",
   "data:ledger_entries.account_currency_mismatch",
   "data:user_wallet_assignments.multiple_active_owners",
   "data:user_wallet_assignments.duplicate_active_wallet",
