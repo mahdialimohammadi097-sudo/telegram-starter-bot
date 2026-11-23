@@ -5,8 +5,8 @@ const id=v=>typeof v==="string" && /^[1-9][0-9]*$/.test(v) && BigInt(v)<=9223372
 export function verifyHistoricalWalletRecord({history,wallet,eventBlockNumber,expectedUserId}){
  if(!history || !wallet || !id(history.wallet_id) || !id(history.user_id) ||
     !id(wallet.id) || !id(expectedUserId) || history.wallet_id!==wallet.id ||
-    history.user_id!==expectedUserId || history.chain_id!==56 ||
-    wallet.chain_id!==56 || wallet.is_platform_controlled!==true ||
+    history.user_id!==expectedUserId || !([56,'56'].includes(history.chain_id)) ||
+    !([56,'56'].includes(wallet.chain_id)) || wallet.is_platform_controlled!==true ||
     typeof history.wallet_address!=="string" || !address.test(history.wallet_address) ||
     typeof wallet.wallet_address!=="string" || !address.test(wallet.wallet_address) ||
     history.wallet_address!==wallet.wallet_address)
