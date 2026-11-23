@@ -28,3 +28,9 @@ This document describes the current review-only BSC USDT deposit preparation for
 ## No-cost-first policy
 
 Use existing GitHub Actions and local/offline tests. Do not require a paid FadeHost terminal, subscription or new Telegram bot. Defer checks that require unavailable production access; never mark them passed by inference. Keep all real financial operations disabled until every production gate is satisfied.
+
+## Ledger code inspection — 2026-11-23
+
+- Existing `main:src/ledger-safety.js` contains exact eight-decimal parsing (`toUsdtUnitsExact`), per-currency double-entry balance assertions and an available-balance overdraft guard. Their unit tests are in `main:src/ledger-safety.test.js`.
+- These are **pure validation functions**, not evidence of a transactionally safe PostgreSQL posting service. The BSC deposit branch currently builds an **offline journal proposal** in `src/deposit-ledger-journal-draft.js` and only performs a read-only idempotency inspection in `src/deposit-idempotency-db-inspection.js`.
+- Therefore: **do not mark atomic posting, durable unique event claims, row-level serialization, balance updates or reconciliation as implemented** on the strength of those helpers or green CI. A production-compatible writer and independent database contract tests remain blocking.
