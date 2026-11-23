@@ -2,6 +2,7 @@
 // No user rows, wallet addresses, balances or secrets are queried or returned.
 export async function inspectDepositSchemaReadOnly(pool) {
  const required={
+  users:["id"],
   verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
   wallets:["id","wallet_address","chain_id","is_platform_controlled"],
   ledger_accounts:["id","user_id","account_type","currency"],
