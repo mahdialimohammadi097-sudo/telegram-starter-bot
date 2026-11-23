@@ -35,3 +35,20 @@ test("rejects invalid chain evidence before any database lookup",async()=>{
  await assert.rejects(inspect({rpc:async(method)=>method==="eth_chainId"?"0x61":rpc(method),client,transactionHash:tx,expected,expectedUserId:"12"}));
  assert.equal(queries,0);
 });
+
+test("rejects missing or ambiguous historical ownership without crediting",async()=>{
+ for(const rows of [[],[row,{...row,wallet_id:"2",wallet_id_current:"2"}]]){
+  const client={query:async()=>({rows,rowCount:rows.length})};
+  await assert.rejects(inspect({rpc,client,transactionHash:tx,expected,expectedUserId:"12"}),/Missing or ambiguous/);
+ }
+});
+test("rejects a wallet not controlled by the platform",async()=>{
+ const client={query:async()=>({rows:[{...row,is_platform_controlled:false}],rowCount:1})};
+ await assert.rejects(inspect({rpc,client,transactionHash:tx,expected,expectedUserId:"12"}),/identity mismatch/);
+});
+test("rejects a historical ownership interval that excludes the transfer block",async()=>{
+ for(const interval of [{start_block:"101"},{end_block:"100"},{start_block:"100",end_block:"100"}]){
+  const client={query:async()=>({rows:[{...row,...interval}],rowCount:1})};
+  await assert.rejects(inspect({rpc,client,transactionHash:tx,expected,expectedUserId:"12"}),/interval mismatch/);
+ }
+});
