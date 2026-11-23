@@ -15,6 +15,7 @@ test("read-only schema audit reports missing evidence without accessing user row
  assert.equal(result.structuralReady,false);
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
+ assert.ok(result.outstandingSecurityGates.includes("independent-historical-ownership-proof"));
  assert.ok(result.missing.includes("verified_deposit_evidence.event_key"));
  assert.ok(result.missing.includes("unique:verified_deposit_evidence.event_key"));
  assert.equal(statements[0],"BEGIN READ ONLY ISOLATION LEVEL REPEATABLE READ");
@@ -40,7 +41,8 @@ test("schema audit marks structure ready only with all required columns and uniq
   ledger_accounts:["id","user_id","account_type","currency"],
   ledger_transactions:["id","idempotency_key","status","transaction_type","reference_id"],
   ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
-  user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"]
+  user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"],
+  deposit_address_ownership_history:["id","wallet_id","user_id","chain_id","wallet_address","start_block","end_block","recorded_at","verified_source"]
  };
  const columns=Object.entries(required).flatMap(([table_name,names])=>
   names.map(column_name=>({table_name,column_name})));
@@ -52,6 +54,7 @@ test("schema audit marks structure ready only with all required columns and uniq
  const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
  assert.equal(result.structuralReady,true);
  assert.deepEqual(result.missing,[]);
+ assert.equal(result.outstandingSecurityGates.length,4);
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
 });
@@ -62,7 +65,8 @@ test("schema audit rejects nonunique event index despite all columns existing",a
   ledger_accounts:["id","user_id","account_type","currency"],
   ledger_transactions:["id","idempotency_key","status","transaction_type","reference_id"],
   ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
-  user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"]
+  user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"],
+  deposit_address_ownership_history:["id","wallet_id","user_id","chain_id","wallet_address","start_block","end_block","recorded_at","verified_source"]
  };
  const columns=Object.entries(required).flatMap(([table_name,names])=>
   names.map(column_name=>({table_name,column_name})));
