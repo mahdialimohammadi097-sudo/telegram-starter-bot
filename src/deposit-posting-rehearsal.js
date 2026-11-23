@@ -30,6 +30,9 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
   if(destinationOwner!==undefined)
    await lockDepositDestinationAccount(client,destinationOwner);
   const journal=journalForUnits({eventKey,units});
+  // A test journal may not post to an unverified or unspecified customer account.
+  if(destinationOwner===undefined)
+   throw new Error("Verified deposit destination owner required");
   if(journal?.idempotencyKey!==`verified-deposit:${eventKey}`)
    throw new Error("Deposit journal must use canonical event idempotency key");
   // A balanced but inflated journal must never credit more than chain evidence.
