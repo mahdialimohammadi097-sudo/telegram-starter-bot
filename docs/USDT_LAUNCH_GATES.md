@@ -34,3 +34,10 @@ Use existing GitHub Actions and local/offline tests. Do not require a paid FadeH
 - Existing `main:src/ledger-safety.js` contains exact eight-decimal parsing (`toUsdtUnitsExact`), per-currency double-entry balance assertions and an available-balance overdraft guard. Their unit tests are in `main:src/ledger-safety.test.js`.
 - These are **pure validation functions**, not evidence of a transactionally safe PostgreSQL posting service. The BSC deposit branch currently builds an **offline journal proposal** in `src/deposit-ledger-journal-draft.js` and only performs a read-only idempotency inspection in `src/deposit-idempotency-db-inspection.js`.
 - Therefore: **do not mark atomic posting, durable unique event claims, row-level serialization, balance updates or reconciliation as implemented** on the strength of those helpers or green CI. A production-compatible writer and independent database contract tests remain blocking.
+
+## Verified CI and review status — 2026-11-24
+
+- GitHub Actions on commit `a3df2256a06a361d45ced313589c789024d9a11f`: **Validate JavaScript**, **FadeHost schema audit safety tests**, and **Disposable PostgreSQL ledger atomicity test** all completed successfully.
+- The PostgreSQL workflow uses a disposable PostgreSQL 17 service and tests uniqueness, concurrent claims, rollback after invalid journal posting, and retry after rollback. Its fixture tables are **not** the production ledger schema and its test code is **not** a production posting implementation.
+- GitHub review queries for PR #119 and PR #120 returned **zero submitted reviews**. Neither PR is approved for merging; #120 depends on #119.
+- Keep both PRs unmerged pending independent financial/security review, production-schema evidence, and an actual atomic posting implementation.
