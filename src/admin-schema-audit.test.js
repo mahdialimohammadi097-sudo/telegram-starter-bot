@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {inspectDepositSchemaReadOnly} from "./admin-schema-audit.js";
+import {inspectDepositSchemaReadOnly,deliverAdminSchemaAudit} from "./admin-schema-audit.js";
 
 test("read-only schema audit reports missing evidence without accessing user rows",async()=>{
  const statements=[];
@@ -74,4 +74,28 @@ test("schema audit rejects nonunique event index despite all columns existing",a
  const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
  assert.equal(result.structuralReady,false);
  assert.deepEqual(result.missing,["unique:verified_deposit_evidence.event_key"]);
+});
+
+test("admin audit never leaks database exception messages or blocks bot startup",async()=>{
+ const messages=[],codes=[];
+ const pool={connect:async()=>{const error=new Error("SECRET_DATABASE_URL password=secret");
+  error.code="28P01";throw error;}};
+ const result=await deliverAdminSchemaAudit({pool,adminId:123,
+  sendMessage:async(id,message)=>messages.push({id,message}),
+  logCode:code=>codes.push(code)});
+ assert.equal(result,false);
+ assert.deepEqual(messages,[]);
+ assert.deepEqual(codes,["28P01"]);
+});
+test("admin audit ignores Telegram send failure and logs only sanitized code",async()=>{
+ const codes=[];
+ const pool={connect:async()=>({query:async(sql)=>{
+  if(sql.includes("information_schema"))return {rows:[]};
+  return {rows:[]};
+ },release:()=>{}})};
+ const result=await deliverAdminSchemaAudit({pool,adminId:123,
+  sendMessage:async()=>{throw Error("SECRET_TOKEN leaked");},
+  logCode:code=>codes.push(code)});
+ assert.equal(result,false);
+ assert.deepEqual(codes,["UNKNOWN"]);
 });
