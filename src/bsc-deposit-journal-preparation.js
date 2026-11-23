@@ -7,13 +7,13 @@ import {draftBscDepositJournal} from "./deposit-ledger-journal-draft.js";
 import {inspectDepositJournalAccounts} from "./deposit-journal-account-db-inspection.js";
 export async function prepareBscDepositJournal({
  rpc,client,transactionHash,expected,expectedUserId,
- userAvailableAccountId,platformClearingAccountId,schema="public"
+ userAvailableAccountId,platformClearingAccountId,schema="public",lockRows=true
 }){
  const evidence=await inspectBscDepositWithHistoricalOwner({
-  rpc,client,transactionHash,expected,expectedUserId,schema
+  rpc,client,transactionHash,expected,expectedUserId,schema,lockRows
  });
  const accounts=await inspectDepositJournalAccounts(client,{
-  userId:evidence.userId,userAvailableAccountId,platformClearingAccountId,schema
+  userId:evidence.userId,userAvailableAccountId,platformClearingAccountId,schema,lockRows
  });
  const journal=draftBscDepositJournal({evidence,...accounts});
  return Object.freeze({evidence,journal});
