@@ -84,6 +84,8 @@ if (!process.env.DATABASE_URL) {
      WHERE n.nspname='public' AND t.relname='ledger_entries'
        AND c.contype='f' AND array_length(c.conkey,1)=1
        AND array_length(c.confkey,1)=1 AND c.convalidated`);
+   if(!foreignKeys || !Array.isArray(foreignKeys.rows))
+    throw new Error("Malformed foreign-key catalog result");
    const references=new Set(foreignKeys.rows.map(x=>x.source_column+":"+x.target));
    for(const [column,target] of [
     ["transaction_id","ledger_transactions"],["account_id","ledger_accounts"]
