@@ -37,3 +37,20 @@ export async function inspectDepositSchemaReadOnly(pool) {
   throw error;
  } finally {client.release();}
 }
+
+/**
+ * Send only an allowlisted metadata report. Errors are deliberately swallowed:
+ * diagnostics must never prevent the existing Telegram bot from starting.
+ */
+export async function deliverAdminSchemaAudit({pool,sendMessage,adminId,logCode=()=>{}}) {
+ try {
+  const audit=await inspectDepositSchemaReadOnly(pool);
+  await sendMessage(adminId,"PROFINO read-only deposit schema audit\n"+JSON.stringify(audit));
+  return true;
+ } catch(error) {
+  const code=typeof error?.code==="string" && /^[A-Z0-9]{2,8}$/.test(error.code)
+   ? error.code : "UNKNOWN";
+  logCode(code);
+  return false;
+ }
+}
