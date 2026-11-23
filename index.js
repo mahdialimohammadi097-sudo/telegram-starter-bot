@@ -227,7 +227,7 @@ async function main() {
 
   await sendStartupReport(me.username);
   // Nonblocking, metadata-only diagnostic delivered to the existing Super Admin.
-  await deliverAdminSchemaAudit({
+  void deliverAdminSchemaAudit({
     pool,
     adminId:ADMIN_ID,
     sendMessage:(id,message)=>bot.api.sendMessage(id,message),
