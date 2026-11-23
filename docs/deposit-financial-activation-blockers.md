@@ -53,3 +53,22 @@ Before any live credit:
 ## Destination account locking integration status
 
 The disposable-only `rehearseVerifiedDepositPosting` now optionally accepts `destinationOwner` and locks the user's USDT AVAILABLE account in the evidence+journal transaction, checking that the credit entry targets it. **This is deliberately not a production authorization gate:** the argument is optional to preserve existing rehearsal fixtures, and no trusted historical wallet ownership or RPC verification is connected. Any future live implementation must require and independently derive destination ownership, recheck it under lock, and fail closed when absent. Do not interpret successful rehearsal CI as authorization to accept deposits.
+
+
+## Historical ownership migration is NOT a verified ownership source
+
+The review-only `deposit_address_ownership_history` table prevents overlapping
+block intervals and row updates/deletes, but **does not independently authenticate**
+its `wallet_id`, `wallet_address`, `user_id`, `start_block`,
+`end_block`, or free-text `verified_source` inputs. In particular, the
+foreign keys to `wallets(id)` and `users(id)` do not establish that the
+wallet row has the recorded address, chain, or platform-controlled status.
+The trigger does not prevent privileged TRUNCATE, DDL, or superuser changes.
+
+**Fail-closed production requirements:** review the actual wallet catalog,
+enforce wallet ID/address/chain correspondence at the database boundary,
+independently authenticate the source and exact chain-block assignment
+boundaries, define a controlled correction/close-interval process with audit
+evidence, and verify the ingest role cannot mutate history. Do not backfill
+unknown historical ownership from current wallet assignments. Until these
+controls exist and are tested, this table cannot authorize a live credit.
