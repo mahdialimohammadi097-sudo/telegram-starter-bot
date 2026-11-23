@@ -14,6 +14,11 @@ const ADMIN_TIME_ZONE = "UTC";
 
 const adminDrafts = new Map();
 
+function safeDatabaseErrorCode(error) {
+  return typeof error?.code === "string" && /^[A-Z0-9]{2,8}$/.test(error.code)
+    ? error.code : "UNKNOWN";
+}
+
 async function getOwnerMenuLanguage(ctx) {
   if (ctx.from?.id !== ADMIN_ID) return "en";
   try {
@@ -216,7 +221,7 @@ export function registerCommands(bot) {
         return ctx.reply(message);
       }
     } catch (error) {
-      console.error("[access-control] status check failed:", error.message);
+      console.error("[access-control] status check failed:", safeDatabaseErrorCode(error));
       const message = "We cannot verify your account right now. Please try again later.";
       if (ctx.callbackQuery) {
         return ctx.answerCallbackQuery({ text: message, show_alert: true });
@@ -248,7 +253,7 @@ export function registerCommands(bot) {
         { reply_markup: mainKeyboard(language) }
       );
     } catch (error) {
-      console.error("[registration] Failed:", error.message);
+      console.error("[registration] Failed:", safeDatabaseErrorCode(error));
 
       await ctx.reply(
         "Unable to load your account. Please try again later."
