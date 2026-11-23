@@ -8,7 +8,7 @@ test("read-only history lookup validates ownership and binds event block",async(
  let sql,params;
  const client={query:async(q,p)=>{sql=q;params=p;return {rows:[row]};}};
  assert.deepEqual(await inspect(client,input),{walletId:"1",userId:"12"});
- assert.match(sql,/LIMIT 2\\s+FOR SHARE OF h,w/);
+ assert.match(sql,/LIMIT 2\s+FOR SHARE OF h,w/);
  assert.deepEqual(params,[address,"150"]);
 });
 test("history lookup fails closed for missing, ambiguous and forged wallet rows",async()=>{
