@@ -2,7 +2,9 @@ import {verifyHistoricalWalletRecord} from "./deposit-historical-wallet-record.j
 
 // Read-only historical consistency inspection. Never credits balances.
 // Caller must independently verify chain evidence and historical provenance.
-export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumber,walletAddress,expectedUserId}){
+export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumber,walletAddress,expectedUserId,schema="public"}){
+ if(typeof schema!=="string" || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
+  throw new TypeError("Invalid schema");
  if(!client || typeof client.query!=="function" || typeof walletAddress!=="string" ||
     !/^0x[0-9a-f]{40}$/.test(walletAddress) ||
     typeof expectedUserId!=="string" || !/^[1-9][0-9]*$/.test(expectedUserId) ||
@@ -14,8 +16,8 @@ export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumb
          w.id::text AS wallet_id_current,w.chain_id::text AS wallet_chain_id,
          w.wallet_address AS wallet_address_current,
          w.is_platform_controlled
-  FROM public.deposit_address_ownership_history h
-  JOIN public.wallets w ON w.id=h.wallet_id
+  FROM "${schema}".deposit_address_ownership_history h
+  JOIN "${schema}".wallets w ON w.id=h.wallet_id
   WHERE h.chain_id=56 AND h.wallet_address=$1
     AND h.start_block <= $2::numeric
     AND (h.end_block IS NULL OR $2::numeric < h.end_block)
