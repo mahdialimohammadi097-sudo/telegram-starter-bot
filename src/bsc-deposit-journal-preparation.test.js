@@ -35,7 +35,7 @@ test("does not produce journal when historical ownership is rejected",async()=>{
 });
 test("does not produce journal when account identities are invalid",async()=>{
  const client={query:async()=>({rows:[row],rowCount:1})};
- await assert.rejects(prepare({...base,client,userAccount:{...base.userAccount,id:"5"}}),/journal proposal/);
+ await assert.rejects(prepare({...base,client,userAccount:{...base.userAccount,id:"5"}}),/account identity mismatch/);
 });
 test("rejects wrong network before any database inspection",async()=>{
  let calls=0;
