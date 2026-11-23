@@ -31,6 +31,10 @@ export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumb
     (result.rowCount!==undefined && result.rowCount!==1))
   throw new Error("Missing or ambiguous historical wallet owner");
  const row=result.rows[0];
+ // Do not trust a returned row merely because the SQL predicate was bound.
+ // Both historical and current wallet identities must match the requested address.
+ if(row.wallet_address!==walletAddress || row.wallet_address_current!==walletAddress)
+  throw new Error("Historical wallet address does not match requested deposit address");
  return verifyHistoricalWalletRecord({
   history:{wallet_id:row.wallet_id,user_id:row.user_id,chain_id:row.chain_id,
    wallet_address:row.wallet_address,start_block:row.start_block,end_block:row.end_block},
