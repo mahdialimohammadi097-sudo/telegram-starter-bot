@@ -38,6 +38,7 @@ try{
  console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:structuralReady,
   missing,missingTables,missingConstraintTypes,columns:columns.rows,constraints:constraints.rows,
   financialActivationReady:false,realDepositsEnabled:false}));
+ if(!structuralReady) process.exitCode=2;
  await client.query("ROLLBACK");
 }catch(error){
  try{await client.query("ROLLBACK")}catch{}
