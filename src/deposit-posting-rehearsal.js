@@ -4,7 +4,8 @@ import {withLedgerTransaction,postJournalInTransaction} from "./ledger-posting.j
 import {normalizeDepositEventIdentity} from "./deposit-event-identity.js";
 import {convertDepositBaseUnitsToLedgerUnits} from "./deposit-unit-conversion.js";
 import {toUsdtUnitsExact} from "./ledger-safety.js";
-export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals,journalForUnits}) {
+import {lockDepositDestinationAccount} from "./deposit-destination-account-lock.js";
+export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals,journalForUnits,destinationOwner}) {
  if(typeof journalForUnits!=="function") throw new TypeError("Journal builder required");
  const eventKey=normalizeDepositEventIdentity(evidence);
  const units=convertDepositBaseUnitsToLedgerUnits(evidence.amountBaseUnits,tokenDecimals);
@@ -26,6 +27,8 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
   await client.query(`INSERT INTO verified_deposit_evidence
    (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
    VALUES ($1,$2,$3,$4,$5,$6)`,[eventKey,evidence.blockHash,evidence.blockNumber,evidence.tokenContract,evidence.depositAddress,evidence.amountBaseUnits]);
+  if(destinationOwner!==undefined)
+   await lockDepositDestinationAccount(client,destinationOwner);
   const journal=journalForUnits({eventKey,units});
   if(journal?.idempotencyKey!==`verified-deposit:${eventKey}`)
    throw new Error("Deposit journal must use canonical event idempotency key");
@@ -38,6 +41,10 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
      toUsdtUnitsExact(debit.amount)!==BigInt(units) ||
      toUsdtUnitsExact(credit.amount)!==BigInt(units))
    throw new Error("Deposit journal amount must exactly match verified token units");
+  if(destinationOwner!==undefined &&
+     (String(credit.account_id)!==String(destinationOwner.accountId) ||
+      String(debit.account_id)===String(destinationOwner.accountId)))
+   throw new Error("Deposit journal credit must target locked customer account");
   return postJournalInTransaction(client,journal);
  });
 }
