@@ -95,7 +95,7 @@ Interpretation: `users.id`, `wallets.id`, `wallets.chain_id`, and `user_wallet_a
 
 The result does not waive the independent production backup-restore, security/accounting sign-off, or owner approval requirements.
 
-## 8. Observed production type preflight — 2026-11-23 13:55 UTC
+## 8. Historical production type preflight — 2026-11-23 13:55 UTC (superseded by section 9)
 
 The live Super Admin report confirmed `wallets.chain_id` is **integer**, not the `bigint` assumed by the reviewed ownership migration. **Do not execute that migration as written.** PostgreSQL can compare integer and bigint values, but the reviewed contract, audit expectations, and production DDL must be reconciled and tested against the actual catalog first. Do not alter the existing wallet column to fit a proposed migration.
 
@@ -108,3 +108,9 @@ Status: production structure incomplete; historical ownership migration **blocke
 The corrected read-only startup audit now includes `users.id` in its catalog scope. Its report has **no `users.id` mismatch**, confirming the previous `missing` diagnostic was a false negative. It still reports `wallets.chain_id` as PostgreSQL `integer`. The draft ownership-history migration and its catalog audit have therefore been changed to `integer` for the history chain ID and wallet chain ID type expectation. No existing production column was modified.
 
 The current PR #114 head passed all four CI suites after those changes. The live production schema is still structurally incomplete (missing evidence/history tables); passing CI is **not** authorization to execute either review-only migration. Actual FadeHost backup restoration, independent historical ownership and chain-finality verification, accounting/security review, and explicit owner approval remain outstanding.
+
+## 10. Deposit rehearsal CI verification — 2026-11-23
+
+- GitHub PR #114 commit `f98e3eb76e6d21c143c435793641dbf8f1de88df`: all four required workflow suites passed: catalog ownership PostgreSQL, PostgreSQL 17 disposable restore drill, integration ledger validator regression, and integration PostgreSQL financial test matrix.
+- The rehearsal journal now rejects non-`deposit` transaction types before posting. Regression fixtures cover invalid accounting classification with rollback, concurrent replay, and inflated/understated credits.
+- **These results do not independently establish BSC canonical finality, historical wallet provenance, actual FadeHost backup restoration, production accounting reconciliation, or operator permissions.** All production-changing steps remain blocked pending their separate approvals; no funds are accepted or credited.
