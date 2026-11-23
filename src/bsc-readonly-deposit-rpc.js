@@ -41,6 +41,8 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
     !Array.isArray(latestReceipt.logs) ||
     JSON.stringify(latestReceipt.logs)!==JSON.stringify(receipt.logs))
   throw new Error("RPC receipt changed during evidence inspection");
+ if(await request("eth_chainId",[])!=="0x38")
+  throw new Error("RPC chain changed during evidence inspection");
  const finalizedBlockNumber=height(head);
  // This head is confirmation-depth evidence, not independently verified finality.
  return inspectBscMainnetTransfer({receipt:latestReceipt,chainId:56,
