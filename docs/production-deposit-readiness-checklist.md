@@ -94,3 +94,11 @@ ORDER BY t.table_name,t.expected_column;
 Interpretation: `users.id`, `wallets.id`, `wallets.chain_id`, and `user_wallet_assignments.user_id/wallet_id` must be compatible with the `bigint` FK contract in the proposed history migration. A mismatch means **revise the reviewed migration in a new PR and retest**, not cast or alter existing production columns. This query is diagnostic only; do not run `CREATE`, `ALTER`, `RESTORE`, `DELETE`, or `GRANT` from this checklist.
 
 The result does not waive the independent production backup-restore, security/accounting sign-off, or owner approval requirements.
+
+## 8. Observed production type preflight — 2026-11-23 13:55 UTC
+
+The live Super Admin report confirmed `wallets.chain_id` is **integer**, not the `bigint` assumed by the reviewed ownership migration. **Do not execute that migration as written.** PostgreSQL can compare integer and bigint values, but the reviewed contract, audit expectations, and production DDL must be reconciled and tested against the actual catalog first. Do not alter the existing wallet column to fit a proposed migration.
+
+The report also said `users.id` was `missing`. **This is a diagnostic coverage defect, not proof that the column is absent:** the deployed metadata query only selects tables in its `required` map, and `users` is absent from that map. Add `users: ['id']` to the metadata query and rerun before deciding the actual FK type. Do not infer a production schema defect from that false negative.
+
+Status: production structure incomplete; historical ownership migration **blocked**, no DDL or financial activation authorized.
