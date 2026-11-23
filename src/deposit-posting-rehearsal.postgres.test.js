@@ -74,3 +74,26 @@ test("concurrent duplicate evidence inserts permit exactly one committed event",
   await pool.end();
  }
 });
+
+test("destination ownership mismatch rolls back evidence in the same transaction",{skip:!safe()},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const evidence={chainId:56,transactionHash:"0x"+"8".repeat(64),logIndex:8,
+  blockHash:"0x"+"b".repeat(64),blockNumber:"100",tokenContract:"0x"+"c".repeat(40),
+  depositAddress:"0x"+"d".repeat(40),amountBaseUnits:"1000000000000000000"};
+ const key="bsc:56:"+evidence.transactionHash+":8";
+ let journalCalled=false;
+ try{
+  await pool.query(`CREATE TEMP TABLE verified_deposit_evidence (
+   event_key text PRIMARY KEY,block_hash text NOT NULL,block_number numeric(78,0) NOT NULL,
+   token_contract text NOT NULL,deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL)`);
+  await pool.query(`CREATE TEMP TABLE ledger_accounts (
+   id bigint PRIMARY KEY,user_id bigint,account_type text,currency text)`);
+  await pool.query("INSERT INTO pg_temp.ledger_accounts VALUES (44,13,'AVAILABLE','USDT')");
+  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+   destinationOwner:{accountId:"44",userId:"12"},
+   journalForUnits:()=>{journalCalled=true;throw new Error("must not build journal");}}),/ownership is unverified/);
+  assert.equal(journalCalled,false);
+  const result=await pool.query("SELECT count(*)::int AS count FROM pg_temp.verified_deposit_evidence WHERE event_key=$1",[key]);
+  assert.equal(result.rows[0].count,0);
+ }finally{await pool.end();}
+});
