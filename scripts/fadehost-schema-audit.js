@@ -161,6 +161,18 @@ if (!process.env.DATABASE_URL) {
     if(invalidCurrency.rows[0].found)
      missing.push("data:ledger_entries.invalid_currency");
    }
+   // Even an unused account with a foreign currency violates the USDT-only
+   // financial schema policy. Inspect accounts separately from journal entries.
+   if(columns.has("ledger_accounts.currency")){
+    const invalidAccounts=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_accounts
+      WHERE currency IS NULL OR currency <> 'USDT'
+    ) AS found`);
+    if(typeof invalidAccounts?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed ledger account currency inventory result");
+    if(invalidAccounts.rows[0].found)
+     missing.push("data:ledger_accounts.invalid_currency");
+   }
    // Prevent cross-currency credits: every journal entry must use the
    // currency of its referenced account, not merely balance numerically.
    if(["ledger_entries.account_id","ledger_entries.currency",
