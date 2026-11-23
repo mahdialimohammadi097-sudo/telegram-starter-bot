@@ -52,12 +52,12 @@ try{
  const requiredTypes=[
   ["deposit_address_ownership_history.wallet_id","bigint"],
   ["deposit_address_ownership_history.user_id","bigint"],
-  ["deposit_address_ownership_history.chain_id","bigint"],
+  ["deposit_address_ownership_history.chain_id","integer"],
   ["deposit_address_ownership_history.start_block","numeric"],
   ["deposit_address_ownership_history.end_block","numeric"],
   ["user_wallet_assignments.user_id","bigint"],
   ["user_wallet_assignments.wallet_id","bigint"],
-  ["wallets.id","bigint"],["wallets.chain_id","bigint"],
+  ["wallets.id","bigint"],["wallets.chain_id","integer"],
   ["wallets.is_platform_controlled","boolean"]
  ];
  const typeMismatches=requiredTypes.filter(([name,type])=>
