@@ -227,3 +227,18 @@ test("schema audit rejects NOT VALID evidence format constraints",{skip:skipUnsa
   await pool.end();
  }
 });
+
+test("schema audit rejects a misleading named CHECK with a weak expression",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_weak_"+randomUUID().replaceAll("-","");
+ try {
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text PRIMARY KEY, CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key <> \'\'))');
+  const report=await auditDepositSchema(pool,{schema});
+  assert.equal(report.ready,false);
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
