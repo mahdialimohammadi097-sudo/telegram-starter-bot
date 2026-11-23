@@ -114,3 +114,9 @@ The current PR #114 head passed all four CI suites after those changes. The live
 - GitHub PR #114 commit `f98e3eb76e6d21c143c435793641dbf8f1de88df`: all four required workflow suites passed: catalog ownership PostgreSQL, PostgreSQL 17 disposable restore drill, integration ledger validator regression, and integration PostgreSQL financial test matrix.
 - The rehearsal journal now rejects non-`deposit` transaction types before posting. Regression fixtures cover invalid accounting classification with rollback, concurrent replay, and inflated/understated credits.
 - **These results do not independently establish BSC canonical finality, historical wallet provenance, actual FadeHost backup restoration, production accounting reconciliation, or operator permissions.** All production-changing steps remain blocked pending their separate approvals; no funds are accepted or credited.
+
+## 11. Integration branch divergence gate — 2026-11-23
+
+GitHub comparison of `main...feature/deposit-gate-integration-20261123` reports **diverged**, with **408 commits ahead** and **12 commits behind** `main` at the time of inspection. The draft PR's green branch CI therefore does **not** establish that its full combined changes are safe to merge into the deployed bot. The branch includes substantial historical changes outside the deposit gate.
+
+**Release action:** keep PR #114 draft and unmerged. Before any integration, reconcile against current `main` in an isolated branch, review the entire effective diff and production bot behavior, run all required CI against the reconciled candidate, and obtain independent security/accounting review. Prefer a minimal, scoped integration of audited changes rather than merging hundreds of unrelated commits. Do not change production configuration, run review-only migrations, or enable financial operations.
