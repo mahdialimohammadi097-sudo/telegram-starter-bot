@@ -1,0 +1,16 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {verifyHistoricalWalletRecord as check} from "./deposit-historical-wallet-record.js";
+const address="0x"+"a".repeat(40);
+const valid=()=>({history:{wallet_id:"1",user_id:"12",chain_id:56,wallet_address:address,start_block:"100",end_block:"200"},wallet:{id:"1",chain_id:56,wallet_address:address,is_platform_controlled:true},eventBlockNumber:"150",expectedUserId:"12"});
+test("historical wallet identity and interval must match",()=>{
+ assert.deepEqual(check(valid()),{walletId:"1",userId:"12"});
+ for(const mutation of [
+  p=>p.history.wallet_id="2",p=>p.history.user_id="13",
+  p=>p.wallet.wallet_address="0x"+"b".repeat(40),
+  p=>p.wallet.is_platform_controlled=false,p=>p.wallet.chain_id=97,
+  p=>p.eventBlockNumber="200",p=>p.eventBlockNumber="99",
+  p=>p.history.end_block="100",p=>p.history.start_block="bad",
+  p=>p.expectedUserId="13"
+ ]){const p=valid();mutation(p);assert.throws(()=>check(p));}
+});
