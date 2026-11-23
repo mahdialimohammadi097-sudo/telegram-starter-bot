@@ -2319,7 +2319,7 @@ test("two concurrent verified-deposit rehearsals post exactly one balanced journ
   const build = ({eventKey:key,units}) => {
     assert.equal(key,eventKey);
     assert.equal(units,"100000000");
-    return {transactionType:"verified-deposit-test",
+    return {transactionType:"deposit",
       idempotencyKey:"verified-deposit:"+key,
       entries:[
         {account_id:clearing,entry_type:"debit",amount:"1.00000000",currency:"USDT"},
@@ -2366,7 +2366,7 @@ test("deposit rehearsal rejects balanced but inflated journal and rolls back evi
  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
   destinationOwner:{accountId:customer,userId:ownerId},
   journalForUnits:({eventKey:key})=>({
-   transactionType:"verified-deposit-test",idempotencyKey:"verified-deposit:"+key,
+   transactionType:"deposit",idempotencyKey:"verified-deposit:"+key,
    entries:[
     {account_id:clearing,entry_type:"debit",amount:"2.00000000",currency:"USDT"},
     {account_id:customer,entry_type:"credit",amount:"2.00000000",currency:"USDT"}
@@ -2392,7 +2392,7 @@ test("deposit rehearsal rejects balanced but understated journal and rolls back 
  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
   destinationOwner:{accountId:customer,userId:ownerId},
   journalForUnits:({eventKey:key})=>({
-   transactionType:"verified-deposit-test",idempotencyKey:"verified-deposit:"+key,
+   transactionType:"deposit",idempotencyKey:"verified-deposit:"+key,
    entries:[
     {account_id:clearing,entry_type:"debit",amount:"0.50000000",currency:"USDT"},
     {account_id:customer,entry_type:"credit",amount:"0.50000000",currency:"USDT"}
