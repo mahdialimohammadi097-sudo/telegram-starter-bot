@@ -16,6 +16,9 @@ export function toUsdtUnits(value) {
 // Financial validation must never round an input into a different amount.
 // Keep toUsdtUnits() for display formatting, where rounding to eight places is intentional.
 export function toUsdtUnitsExact(value) {
+  if (typeof value !== "string" && typeof value !== "bigint" && typeof value !== "number") {
+    throw new TypeError("Financial USDT amount must be a primitive decimal value");
+  }
   // Floating-point numbers cannot safely express fractional USDT units.
   // Require an exact decimal string (or an integer BigInt) for financial use.
   if (typeof value === "number" &&
