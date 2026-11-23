@@ -7,7 +7,8 @@ export async function inspectDepositSchemaReadOnly(pool) {
   ledger_accounts:["id","user_id","account_type","currency"],
   ledger_transactions:["id","idempotency_key","status","transaction_type","reference_id"],
   ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
-  user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"]
+  user_wallet_assignments:["id","user_id","wallet_id","assignment_type","status","ended_at"],
+  deposit_address_ownership_history:["id","wallet_id","user_id","chain_id","wallet_address","start_block","end_block","recorded_at","verified_source"]
  };
  const client=await pool.connect();
  try {
@@ -31,7 +32,8 @@ export async function inspectDepositSchemaReadOnly(pool) {
    if(!uniqueKeys.has(key))missing.push("unique:"+key);
   await client.query("ROLLBACK");
   return {audit:"deposit-schema",structuralReady:missing.length===0,missing,
-   financialActivationReady:false,realDepositsEnabled:false};
+   financialActivationReady:false,realDepositsEnabled:false,
+   outstandingSecurityGates:["independent-historical-ownership-proof","independent-chain-finality-verification","production-backup-restore","owner-financial-authorization"]};
  } catch(error) {
   await client.query("ROLLBACK").catch(()=>{});
   throw error;
