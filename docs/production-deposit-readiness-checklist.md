@@ -50,3 +50,13 @@ Source: Super Admin Telegram startup report emitted by the deployed read-only au
 4. Repeat the read-only startup audit after any separately authorized migration and retain sanitized results.
 
 No backup restore evidence, production migration authorization, or live USDT activation has been provided in this report.
+
+## 6. FadeHost backup inventory observed by owner — 2026-11-23
+
+The owner supplied the FadeHost `profino-db` panel showing PostgreSQL 17 running, private-only networking, and eight encrypted off-node backup snapshots. The newest listed snapshot is **1405/09/02 17:14:44** (Iranian calendar), ID prefix **f62ddb8e**, displayed size **129.1 KB**. These are nonsecret snapshot identifiers and metadata; no passwords or connection URLs are retained here.
+
+**Evidence level: BACKUP LISTED, RESTORE UNVERIFIED.** A visible Restore button does not establish a successful isolated restore, consistency of ledger contents, or retention guarantees. Do not click Restore on the production instance. Do not delete existing snapshots.
+
+At the time of this inventory, all four PR #114 CI workflow suites passed: PostgreSQL 17 disposable restore drill, catalog ownership PostgreSQL, integration PostgreSQL financial matrix, and integration ledger validator regression. These suites do not use or validate the actual FadeHost backup.
+
+The owner plans to decide about hosting payments separately. This project step must not depend on buying a plan or incur extra charges. Keep production migrations and real USDT disabled until the independent production restore, security/accounting checks, and explicit owner authorization are complete.
