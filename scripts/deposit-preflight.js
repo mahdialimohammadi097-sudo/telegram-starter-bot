@@ -44,7 +44,7 @@ export async function runReadOnlyPreflight(client) {
   await client.query("ROLLBACK");
   return Object.freeze({audit:"deposit-preflight",ready:schema.ready&&
    assignments.conflictingActiveDepositWallets===0&&assignments.activeDepositWalletUniquenessEnforced,
-   schema,assignments,realDepositsEnabled:false});
+   schema,assignments,financialActivationReady:false,\n   outstandingSecurityGates:["historical-wallet-ownership","independent-mainnet-rpc-verification",\n    "production-backup-restore","owner-financial-authorization"],\n   realDepositsEnabled:false});
  } catch(error) {
   await client.query("ROLLBACK").catch(()=>{});
   throw error;
