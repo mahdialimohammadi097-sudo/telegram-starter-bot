@@ -61,3 +61,13 @@ test("financial parser rejects imprecise JavaScript numeric amounts", () => {
   assert.equal(toUsdtUnitsExact("9007199254740992"), 900719925474099200000000n);
   assert.equal(toUsdtUnitsExact(10), 1000000000n);
 });
+
+test("financial amounts respect PostgreSQL numeric(36,18) capacity", () => {
+  assert.equal(toUsdtUnitsExact("999999999999999999.99999999"), 10n ** 26n - 1n);
+  assert.throws(() => toUsdtUnitsExact("1000000000000000000"), /ledger numeric capacity/);
+  assert.throws(() => toUsdtUnitsExact("-1000000000000000000"), /ledger numeric capacity/);
+  assert.throws(() => assertBalancedLedgerEntries([
+    { currency: "USDT", entry_type: "debit", amount: "1000000000000000000" },
+    { currency: "USDT", entry_type: "credit", amount: "1000000000000000000" }
+  ]), /ledger numeric capacity/);
+});
