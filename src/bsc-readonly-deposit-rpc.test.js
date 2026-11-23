@@ -102,3 +102,12 @@ test("rejects transaction disappearing during final RPC read",async()=>{
  };
  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/Missing RPC evidence/);
 });
+
+test("rejects RPC head regression during evidence inspection",async()=>{
+ let reads=0;
+ const rpc=async(method)=>{
+  if(method==="eth_blockNumber")return ++reads===1?"0x78":"0x64";
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/head regressed/);
+});
