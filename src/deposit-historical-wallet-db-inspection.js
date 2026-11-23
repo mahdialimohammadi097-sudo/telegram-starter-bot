@@ -10,6 +10,8 @@ export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumb
     typeof expectedUserId!=="string" || !/^[1-9][0-9]*$/.test(expectedUserId) ||
     typeof eventBlockNumber!=="string" || !/^(0|[1-9][0-9]*)$/.test(eventBlockNumber))
   throw new TypeError("Invalid historical inspection input");
+ // Lock wallet identity against concurrent changes until the caller transaction ends.
+ // Callers must hold an explicit transaction when using this for financial checks.
  const result=await client.query(`
   SELECT h.wallet_id::text,h.user_id::text,h.chain_id::text,
          h.wallet_address,h.start_block::text,h.end_block::text,
@@ -21,7 +23,9 @@ export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumb
   WHERE h.chain_id=56 AND h.wallet_address=$1
     AND h.start_block <= $2::numeric
     AND (h.end_block IS NULL OR $2::numeric < h.end_block)
-  LIMIT 2`,[walletAddress,eventBlockNumber]);
+  ORDER BY h.start_block
+  LIMIT 2
+  FOR SHARE OF h,w`,[walletAddress,eventBlockNumber]);
  if(result.rows.length!==1) throw new Error("Missing or ambiguous historical wallet owner");
  const row=result.rows[0];
  return verifyHistoricalWalletRecord({
