@@ -129,12 +129,12 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  // Validate definitions as well as names: a weak CHECK with the expected name
  // must never satisfy the production deposit contract.
  const expectedChecks=new Map([
-  ["verified_deposit_evidence_event_key_format",/^CHECK.*event_key.*~.*bsc:56:0x\\[0-9a-f\\]\\{64\\}/i],
-  ["verified_deposit_evidence_block_hash_format",/^CHECK.*block_hash.*~.*0x\\[0-9a-f\\]\\{64\\}/i],
-  ["verified_deposit_evidence_token_format",/^CHECK.*token_contract.*~.*0x\\[0-9a-f\\]\\{40\\}/i],
-  ["verified_deposit_evidence_address_format",/^CHECK.*deposit_address.*~.*0x\\[0-9a-f\\]\\{40\\}/i],
-  ["verified_deposit_evidence_block_number_nonnegative",/^CHECK.*block_number\\s*>=\\s*\\(?0\\)?/i],
-  ["verified_deposit_evidence_amount_positive",/^CHECK.*amount_base_units\\s*>\\s*\\(?0\\)?/i]
+  ["verified_deposit_evidence_event_key_format",/^CHECK.*event_key.*~.*bsc:56:0x\[0-9a-f\]\{64\}/i],
+  ["verified_deposit_evidence_block_hash_format",/^CHECK.*block_hash.*~.*0x\[0-9a-f\]\{64\}/i],
+  ["verified_deposit_evidence_token_format",/^CHECK.*token_contract.*~.*0x\[0-9a-f\]\{40\}/i],
+  ["verified_deposit_evidence_address_format",/^CHECK.*deposit_address.*~.*0x\[0-9a-f\]\{40\}/i],
+  ["verified_deposit_evidence_block_number_nonnegative",/^CHECK.*block_number\s*>=\s*\(?0\)?/i],
+  ["verified_deposit_evidence_amount_positive",/^CHECK.*amount_base_units\s*>\s*\(?0\)?/i]
  ]);
  for(const [name,expression] of expectedChecks) {
   const matching=checks.rows.some(r=>r.conname===name && r.validated===true &&
