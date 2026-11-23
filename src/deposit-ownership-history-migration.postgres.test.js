@@ -4,7 +4,6 @@ import {randomUUID} from "node:crypto";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
 import {inspectHistoricalWalletFromDatabase} from "./deposit-historical-wallet-db-inspection.js";
-import {inspectHistoricalWalletFromDatabase} from "./deposit-historical-wallet-db-inspection.js";
 
 const url=process.env.DATABASE_URL;
 function disposable(){
@@ -40,10 +39,7 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
   await pool.query(insert,[2,12,address,"200",null]);
   await assert.rejects(pool.query(`UPDATE ${table} SET user_id=12 WHERE wallet_id=1`),/immutable/);
   await assert.rejects(pool.query(`DELETE FROM ${table} WHERE wallet_id=1`),/immutable/);
-  // Exercise the real read-only inspection query against isolated fixture tables.
-  // The query references public schema; run inside an isolated transaction with
-  // search_path cannot override explicit public, so create a temporary view is
-  // deliberately avoided. Instead verify the SQL contract in its unit tests.
+  // Exercise the read-only inspection query against the isolated schema.
   const owner=await inspectHistoricalWalletFromDatabase(pool,{
    schema,walletAddress:address,eventBlockNumber:"150",expectedUserId:"11"
   });
