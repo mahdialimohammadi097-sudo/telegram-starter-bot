@@ -95,3 +95,14 @@ test("accepts canonical hex RPC log index and rejects malformed or ambiguous ind
  }
  assert.throws(()=>inspectBscMainnetTransfer({...input,receipt:{...input.receipt,logs:[log,hexLog]}}));
 });
+
+test("accepts canonical hexadecimal RPC block heights without losing precision",()=>{
+ const value={...input,receipt:{...input.receipt,blockNumber:"0x64",logs:[{...log,blockNumber:"0x64",logIndex:"0x2"}]}};
+ assert.equal(inspectBscMainnetTransfer(value).blockNumber,"100");
+});
+test("rejects malformed or unsafe RPC block heights",()=>{
+ for(const bad of ["0x064","0xzz","0x20000000000000",-1,100.5]){
+  const value={...input,receipt:{...input.receipt,blockNumber:bad}};
+  assert.throws(()=>inspectBscMainnetTransfer(value));
+ }
+});
