@@ -142,3 +142,36 @@ test("PostgreSQL numeric(36,18) preserves exact eight-decimal USDT journal balan
   client.release();await pool.end();
  }
 });
+
+test("row lock serializes competing debits and prevents available-balance overdraft",{
+ skip:!url?"requires PROFINO_TEST_DATABASE_URL":false,
+ timeout:15000
+},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:3});
+ const schema="test_"+randomUUID().replaceAll("-","").slice(0,24);
+ const quoted='"'+schema+'"';
+ const admin=await pool.connect();
+ let first,second;
+ try{
+  await admin.query("CREATE SCHEMA "+quoted);
+  await admin.query("CREATE TABLE "+quoted+".balances (account_id bigint PRIMARY KEY, available numeric(36,18) NOT NULL CHECK(available>=0))");
+  await admin.query("INSERT INTO "+quoted+".balances VALUES (1,10)");
+  first=await pool.connect();
+  second=await pool.connect();
+  await first.query("BEGIN");
+  await second.query("BEGIN");
+  const firstDebit=await first.query("UPDATE "+quoted+".balances SET available=available-$1::numeric WHERE account_id=1 AND available >= $1::numeric RETURNING available::text",["7"]);
+  assert.equal(firstDebit.rowCount,1);
+  const pending=second.query("UPDATE "+quoted+".balances SET available=available-$1::numeric WHERE account_id=1 AND available >= $1::numeric RETURNING available::text",["7"]);
+  await first.query("COMMIT");
+  const secondDebit=await pending;
+  assert.equal(secondDebit.rowCount,0);
+  await second.query("COMMIT");
+  const result=await admin.query("SELECT available::text AS balance FROM "+quoted+".balances WHERE account_id=1");
+  assert.equal(result.rows[0].balance,"3.000000000000000000");
+ }finally{
+  if(first){try{await first.query("ROLLBACK")}catch{}first.release()}
+  if(second){try{await second.query("ROLLBACK")}catch{}second.release()}
+  try{await admin.query("DROP SCHEMA IF EXISTS "+quoted+" CASCADE")}finally{admin.release();await pool.end()}
+ }
+});
