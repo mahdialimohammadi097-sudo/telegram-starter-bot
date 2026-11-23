@@ -149,3 +149,14 @@ test("rejects transaction index changing across RPC reads even if block identity
  };
  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/transaction changed/);
 });
+
+test("rejects missing transaction index on either side of RPC provenance",async()=>{
+ const variants=[
+  {receipt:{...receipt,transactionIndex:"0x2"},transaction:{hash:tx,blockHash:hash,blockNumber:"0x64"}},
+  {receipt,transaction:{hash:tx,blockHash:hash,blockNumber:"0x64",transactionIndex:"0x2"}}
+ ];
+ for(const v of variants){
+  const rpc=makeRpc({eth_getTransactionReceipt:v.receipt,eth_getTransactionByHash:v.transaction});
+  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/provenance/);
+ }
+});
