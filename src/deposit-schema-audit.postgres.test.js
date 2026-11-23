@@ -242,3 +242,18 @@ test("schema audit rejects a misleading named CHECK with a weak expression",{ski
   await pool.end();
  }
 });
+
+test("schema audit rejects a named numeric CHECK bypassed by OR true",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_or_bypass_"+randomUUID().replaceAll("-","");
+ try {
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (block_number numeric(78,0), CONSTRAINT verified_deposit_evidence_block_number_nonnegative CHECK (block_number >= 0 OR true))');
+  const report=await auditDepositSchema(pool,{schema});
+  assert.equal(report.ready,false);
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_block_number_nonnegative:check_constraint"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
