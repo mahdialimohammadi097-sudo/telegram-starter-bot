@@ -26,7 +26,7 @@ export function toUsdtUnitsExact(value) {
   const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(raw);
   if (!match) throw new TypeError("Invalid USDT amount");
   // Reject oversized inputs before BigInt parsing to bound CPU and memory use.
-  if (match[2].length > 18) {
+  if (raw.length > 128 || match[2].replace(/^0+/, "").length > 18) {
     throw new RangeError("USDT amount exceeds ledger numeric capacity");
   }
   const fraction = match[3] || "";
