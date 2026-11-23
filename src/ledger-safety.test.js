@@ -130,3 +130,14 @@ test("financial parsing rejects oversized decimal payloads before BigInt allocat
  assert.throws(()=>toUsdtUnitsExact("1."+"0".repeat(100000)),/ledger numeric capacity/);
  assert.equal(toUsdtUnitsExact("00010.00000001"),1000000001n);
 });
+
+test("exact financial parser rejects object coercion and side-effectful toString",()=>{
+ let invoked=0;
+ const hostile={toString(){invoked++;return "10";}};
+ for(const value of [hostile,new String("10"),["10"],{valueOf(){return 10}},true]){
+  assert.throws(()=>toUsdtUnitsExact(value),/primitive decimal value/);
+ }
+ assert.equal(invoked,0);
+ assert.equal(toUsdtUnitsExact(10n),1000000000n);
+ assert.equal(toUsdtUnitsExact("10"),1000000000n);
+});
