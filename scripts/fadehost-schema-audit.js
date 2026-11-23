@@ -8,7 +8,8 @@ const required = {
  ledger_accounts:["id","user_id","account_type","currency"],
  ledger_transactions:["id","idempotency_key","status","transaction_type","reference_id"],
  ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
- verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"]
+ verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
+ deposit_address_ownership_history:["wallet_id","user_id","chain_id","wallet_address","start_block","end_block"]
 };
 const output = value => process.stdout.write(JSON.stringify(value)+"\n");
 if (!process.env.DATABASE_URL) {
