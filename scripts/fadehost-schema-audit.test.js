@@ -72,3 +72,12 @@ test("audit includes posted journal leg integrity checks",async()=>{
  assert.match(source,/COUNT\(DISTINCT e\.account_id\)<2/);
  assert.match(source,/t\.status='posted'/);
 });
+
+test("schema audit checks posted available-balance overdrafts",async()=>{
+ const {readFileSync}=await import("node:fs");
+ const source=readFileSync(script,"utf8");
+ assert.match(source,/data:ledger_accounts\.negative_available_balance/);
+ assert.match(source,/a\.account_type='AVAILABLE'/);
+ assert.match(source,/t\.status='posted'/);
+ assert.match(source,/WHEN e\.entry_type='debit' THEN -e\.amount/);
+});
