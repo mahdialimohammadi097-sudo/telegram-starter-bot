@@ -14,13 +14,14 @@ const rpcBlockNumber=value=>{
 const normalizeAddress=value=>typeof value==="string"&&ADDRESS.test(value)?value.toLowerCase():null;
 export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,finalizedBlockNumber,expected}) {
  const receiptBlockNumber=rpcBlockNumber(receipt?.blockNumber);
+ const finalityHeight=rpcBlockNumber(finalizedBlockNumber);
  if(chainId!==56 || receipt?.status!=="0x1" || !HASH.test(receipt?.transactionHash) ||
     !HASH.test(receipt?.blockHash) || !HASH.test(canonicalBlockHash) ||
     receipt.blockHash.toLowerCase()!==canonicalBlockHash.toLowerCase() ||
     receiptBlockNumber===null ||
-    !Number.isSafeInteger(finalizedBlockNumber) || finalizedBlockNumber<receiptBlockNumber ||
+    finalityHeight===null || finalityHeight<receiptBlockNumber ||
     !Number.isSafeInteger(expected?.minConfirmations) || expected.minConfirmations<1 ||
-    finalizedBlockNumber-receiptBlockNumber+1<expected.minConfirmations)
+    finalityHeight-receiptBlockNumber+1<expected.minConfirmations)
    throw new Error("Unverified mainnet receipt or block finality");
  const token=normalizeAddress(expected?.tokenContract);
  const recipient=normalizeAddress(expected?.depositAddress);
