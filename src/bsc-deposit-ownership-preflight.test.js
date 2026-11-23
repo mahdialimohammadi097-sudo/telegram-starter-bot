@@ -52,3 +52,15 @@ test("rejects a historical ownership interval that excludes the transfer block",
   await assert.rejects(inspect({rpc,client,transactionHash:tx,expected,expectedUserId:"12"}),/interval mismatch/);
  }
 });
+
+test("rejects DB ownership records for a different requested deposit address",async()=>{
+ for(const field of ["wallet_address","wallet_address_current"]){
+  const client={query:async()=>({
+   rows:[{...row,[field]:"0x"+"f".repeat(40)}],rowCount:1
+  })};
+  await assert.rejects(
+   inspect({rpc,client,transactionHash:tx,expected,expectedUserId:"12"}),
+   /does not match requested deposit address/
+  );
+ }
+});
