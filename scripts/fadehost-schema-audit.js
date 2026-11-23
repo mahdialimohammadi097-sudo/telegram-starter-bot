@@ -145,8 +145,9 @@ if (!process.env.DATABASE_URL) {
       HAVING COUNT(*) FILTER (WHERE entry_type='debit')=0
         OR COUNT(*) FILTER (WHERE entry_type='credit')=0
         OR COUNT(*) FILTER (WHERE entry_type IS NULL OR entry_type NOT IN ('debit','credit'))>0
+        OR COUNT(*) FILTER (WHERE amount IS NULL OR amount<=0 OR currency IS NULL)>0
         OR SUM(CASE WHEN entry_type='debit' THEN amount ELSE 0 END)
-          <> SUM(CASE WHEN entry_type='credit' THEN amount ELSE 0 END)
+          IS DISTINCT FROM SUM(CASE WHEN entry_type='credit' THEN amount ELSE 0 END)
     ) AS found`);
     if(typeof unbalanced?.rows?.[0]?.found!=="boolean")
      throw new Error("Malformed journal balance result");
