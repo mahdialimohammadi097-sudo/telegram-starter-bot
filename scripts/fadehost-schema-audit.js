@@ -39,6 +39,22 @@ if (!process.env.DATABASE_URL) {
    const keys=new Set(indexes.rows.map(x=>x.table_name+"."+x.column_name));
    for(const key of ["verified_deposit_evidence.event_key","ledger_transactions.idempotency_key"])
     if(!keys.has(key))missing.push("unique:"+key);
+   // Read-only snapshot check: overlapping historical ownership can credit the
+   // wrong user even when event identity uniqueness is enforced elsewhere.
+   const historyColumns=required.deposit_address_ownership_history.every(c=>
+    columns.has("deposit_address_ownership_history."+c));
+   if(historyColumns){
+    const overlap=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.deposit_address_ownership_history a
+      JOIN public.deposit_address_ownership_history b
+        ON a.chain_id=b.chain_id AND a.wallet_address=b.wallet_address
+       AND a.ctid<b.ctid
+       AND (a.end_block IS NULL OR b.start_block<a.end_block)
+       AND (b.end_block IS NULL OR a.start_block<b.end_block)
+    ) AS found`);
+    if(overlap.rows?.[0]?.found!==false)
+     missing.push("overlap:deposit_address_ownership_history");
+   }
    await client.query("COMMIT");
    output({audit:"fadehost-schema",ready:missing.length===0,missing});
    if(missing.length)process.exitCode=2;
