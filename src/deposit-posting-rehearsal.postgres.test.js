@@ -44,3 +44,33 @@ test("replayed evidence fails before any journal construction",{skip:!safe()},as
   assert.equal(result.rows[0].count,1);
  }finally{await pool.end();}
 });
+
+test("concurrent duplicate evidence inserts permit exactly one committed event",{skip:!safe()},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:3});
+ const schema="replay_"+(await import("node:crypto")).randomUUID().replaceAll("-","");
+ const eventKey="bsc:56:0x"+"f".repeat(64)+":7";
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE "'+schema+'".verified_deposit_evidence (event_key text PRIMARY KEY, amount_base_units numeric(78,0) NOT NULL)');
+  const attempt=async()=>{
+   const client=await pool.connect();
+   try{
+    await client.query("BEGIN");
+    await client.query('INSERT INTO "'+schema+'".verified_deposit_evidence (event_key,amount_base_units) VALUES ($1,$2)',[eventKey,"1000000000000000000"]);
+    await client.query("COMMIT");
+    return "committed";
+   }catch(error){
+    await client.query("ROLLBACK");
+    if(error.code==="23505")return "duplicate";
+    throw error;
+   }finally{client.release();}
+  };
+  const outcomes=await Promise.all([attempt(),attempt()]);
+  assert.deepEqual(outcomes.sort(),["committed","duplicate"]);
+  const result=await pool.query('SELECT count(*)::int AS count FROM "'+schema+'".verified_deposit_evidence WHERE event_key=$1',[eventKey]);
+  assert.equal(result.rows[0].count,1);
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
