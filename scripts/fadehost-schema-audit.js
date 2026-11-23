@@ -154,6 +154,20 @@ if (!process.env.DATABASE_URL) {
      throw new Error("Malformed ledger idempotency duplicate result");
     if(duplicates.rows[0].found)missing.push("data:ledger_transactions.duplicate_idempotency_key");
    }
+   // A ledger transaction must never exist with a duplicated event identity
+   // or an incomplete journal. Inspect existing rows without any mutations.
+   if(["ledger_transactions.id","ledger_entries.transaction_id"].every(k=>columns.has(k))){
+    const emptyJournals=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_transactions t
+      WHERE NOT EXISTS (
+       SELECT 1 FROM public.ledger_entries e WHERE e.transaction_id=t.id
+      )
+    ) AS found`);
+    if(typeof emptyJournals?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed empty journal inspection result");
+    if(emptyJournals.rows[0].found)
+     missing.push("data:ledger_transactions.without_entries");
+   }
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
