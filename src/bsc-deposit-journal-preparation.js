@@ -4,15 +4,17 @@
 // does not authorize a financial transaction.
 import {inspectBscDepositWithHistoricalOwner} from "./bsc-deposit-ownership-preflight.js";
 import {draftBscDepositJournal} from "./deposit-ledger-journal-draft.js";
-import {verifyDepositJournalAccounts} from "./deposit-journal-account-verification.js";
+import {inspectDepositJournalAccounts} from "./deposit-journal-account-db-inspection.js";
 export async function prepareBscDepositJournal({
  rpc,client,transactionHash,expected,expectedUserId,
- userAccount,clearingAccount,schema="public"
+ userAvailableAccountId,platformClearingAccountId,schema="public"
 }){
  const evidence=await inspectBscDepositWithHistoricalOwner({
   rpc,client,transactionHash,expected,expectedUserId,schema
  });
- const accounts=verifyDepositJournalAccounts({evidence,userAccount,clearingAccount});
+ const accounts=await inspectDepositJournalAccounts(client,{
+  userId:evidence.userId,userAvailableAccountId,platformClearingAccountId,schema
+ });
  const journal=draftBscDepositJournal({evidence,...accounts});
  return Object.freeze({evidence,journal});
 }
