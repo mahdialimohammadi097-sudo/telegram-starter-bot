@@ -42,7 +42,7 @@ const webhookSecret = mode === "webhook"
 
 // Validate webhook destination before starting any runtime service.
 const webhookUrl = mode === "webhook"
-  ? (process.env.WEBHOOK_URL || "").trim().replace(/\\/$/, "")
+  ? (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "")
   : "";
 if (mode === "webhook") {
   let parsed;
