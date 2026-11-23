@@ -141,3 +141,10 @@ test("exact financial parser rejects object coercion and side-effectful toString
  assert.equal(toUsdtUnitsExact(10n),1000000000n);
  assert.equal(toUsdtUnitsExact("10"),1000000000n);
 });
+
+test("ledger journal rejects malformed entries without coercion",()=>{
+ const valid={currency:"USDT",entry_type:"credit",amount:"1"};
+ for(const bad of [null,undefined,[],true,"USDT"]){
+  assert.throws(()=>assertBalancedLedgerEntries([bad,valid]),/Invalid ledger entry/);
+ }
+});
