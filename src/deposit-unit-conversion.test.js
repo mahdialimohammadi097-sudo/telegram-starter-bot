@@ -16,5 +16,8 @@ test("rejects zero, signs, fractions, scientific notation, and invalid decimals"
   assert.throws(()=>convert("1",decimals));
 });
 test("supports large integer amounts without floating point loss",()=>{
- assert.equal(convert("123456789012345678901234567890",8),"123456789012345678901234567890");
+ assert.equal(convert("12345678901234567890123456",8),"12345678901234567890123456");
+ assert.throws(()=>convert("123456789012345678901234567",8),/capacity/);
+ assert.throws(()=>convert("9".repeat(79),18),/Invalid/);
+ assert.throws(()=>convert("9".repeat(78),8),/capacity/);
 });
