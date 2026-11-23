@@ -31,3 +31,18 @@ test("schema audit cannot certify positivity from SQL text matching alone",async
  assert.match(source,/BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY/);
  assert.match(source,/default_transaction_read_only=on/);
 });
+
+test("read-only audit includes duplicate identity and ledger integrity checks",async()=>{
+ const {readFileSync}=await import("node:fs");
+ const source=readFileSync(script,"utf8");
+ for(const marker of [
+  "data:verified_deposit_evidence.duplicate_event_key",
+  "data:ledger_transactions.duplicate_idempotency_key",
+  "data:ledger_entries.orphan_transactions",
+  "data:ledger_entries.orphan_accounts",
+  "data:ledger_entries.nonpositive_amounts"
+ ])assert.ok(source.includes(marker),marker);
+ assert.match(source,/GROUP BY event_key HAVING COUNT\(\*\)>1/);
+ assert.match(source,/GROUP BY idempotency_key HAVING COUNT\(\*\)>1/);
+ assert.match(source,/BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY/);
+});
