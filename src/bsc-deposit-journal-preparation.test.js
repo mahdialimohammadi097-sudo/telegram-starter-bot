@@ -22,6 +22,39 @@ const base={rpc,transactionHash:tx,expected,expectedUserId:"12",
  userAvailableAccountId:"4",platformClearingAccountId:"5"};
 const clientWith=(owner=row,accounts=accountRows)=>({query:async sql=>
  sql.includes("deposit_address_ownership_history")?{rows:[owner],rowCount:1}:{rows:accounts,rowCount:accounts.length}});
-ableAccountId:"4",platformClearingAccountId:"5"};
-const clientWith=(owner=row,accounts=accountRows)=>({query:async sql=>
- sql.includes("deposit_address_ownership_history")?{rows:[owner],rowCount:1}:{rows:accounts,rowCount:accounts.length}});
+test("prepares a balanced journal using two read-only locked DB lookups",async()=>{
+ let calls=0;const original=clientWith();
+ const client={query:async(...args)=>{calls++;return original.query(...args)}};
+ const result=await prepare({...base,client});
+ assert.equal(calls,2);
+ assert.equal(result.evidence.userId,"12");
+ assert.equal(result.journal.idempotencyKey,"deposit:"+result.evidence.eventKey);
+ assert.deepEqual(result.journal.entries.map(e=>e.amount),["1.25000000","1.25000000"]);
+});
+test("rejects wrong historical owner before account lookup",async()=>{
+ let calls=0;const original=clientWith({...row,user_id:"13"});
+ const client={query:async(...args)=>{calls++;return original.query(...args)}};
+ await assert.rejects(prepare({...base,client}),/identity mismatch/);
+ assert.equal(calls,1);
+});
+test("rejects identical ledger account identifiers",async()=>{
+ await assert.rejects(prepare({...base,client:clientWith(),userAvailableAccountId:"5"}),/inspection input/);
+});
+test("rejects wrong network before database queries",async()=>{
+ let calls=0;const original=clientWith();
+ const client={query:async(...args)=>{calls++;return original.query(...args)}};
+ await assert.rejects(prepare({...base,client,rpc:async method=>method==="eth_chainId"?"0x61":rpc(method)}));
+ assert.equal(calls,0);
+});
+test("rejects missing, cross-user or wrong-type ledger accounts",async()=>{
+ for(const accounts of [
+  [accountRows[0]],[],
+  [{...accountRows[0],user_id:"13"},accountRows[1]],
+  [{...accountRows[0],currency:"BTC"},accountRows[1]],
+  [{...accountRows[0],account_type:"INVESTED"},accountRows[1]],
+  [accountRows[0],{...accountRows[1],user_id:"12"}],
+  [accountRows[0],{...accountRows[1],account_type:"AVAILABLE"}]
+ ]){
+  await assert.rejects(prepare({...base,client:clientWith(row,accounts)}));
+ }
+});
