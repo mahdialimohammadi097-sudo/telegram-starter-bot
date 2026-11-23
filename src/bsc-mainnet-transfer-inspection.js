@@ -38,6 +38,7 @@ export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,fi
     !/^0x[0-9a-f]{64}$/i.test(log.data))
    throw new Error("Transfer log does not match configured token and recipient");
  const amountBaseUnits=BigInt(log.data).toString();
+ if(BigInt(amountBaseUnits)===0n) throw new Error("Zero-value Transfer is not a deposit");
  const units=convertDepositBaseUnitsToLedgerUnits(amountBaseUnits,expected.tokenDecimals);
  return Object.freeze({eventKey,amountBaseUnits,units,blockHash:receipt.blockHash.toLowerCase(),blockNumber:String(receipt.blockNumber),tokenContract:token,depositAddress:recipient});
 }
