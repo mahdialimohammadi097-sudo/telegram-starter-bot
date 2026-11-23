@@ -97,3 +97,28 @@ test("destination ownership mismatch rolls back evidence in the same transaction
   assert.equal(result.rows[0].count,0);
  }finally{await pool.end();}
 });
+
+test("wrong credit account rolls back evidence even when destination owner is valid",{skip:!safe()},async()=>{
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const evidence={chainId:56,transactionHash:"0x"+"9".repeat(64),logIndex:9,
+  blockHash:"0x"+"b".repeat(64),blockNumber:"100",tokenContract:"0x"+"c".repeat(40),
+  depositAddress:"0x"+"d".repeat(40),amountBaseUnits:"1000000000000000000"};
+ const key="bsc:56:"+evidence.transactionHash+":9";
+ try{
+  await pool.query(`CREATE TEMP TABLE verified_deposit_evidence (
+   event_key text PRIMARY KEY,block_hash text NOT NULL,block_number numeric(78,0) NOT NULL,
+   token_contract text NOT NULL,deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL)`);
+  await pool.query(`CREATE TEMP TABLE ledger_accounts (
+   id bigint PRIMARY KEY,user_id bigint,account_type text,currency text)`);
+  await pool.query("INSERT INTO pg_temp.ledger_accounts VALUES (44,12,'AVAILABLE','USDT')");
+  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+   destinationOwner:{accountId:"44",userId:"12"},
+   journalForUnits:({eventKey})=>({
+    idempotencyKey:`verified-deposit:${eventKey}`,
+    entries:[{account_id:"1",entry_type:"debit",amount:"1",currency:"USDT"},
+             {account_id:"45",entry_type:"credit",amount:"1",currency:"USDT"}]
+   })}),/credit must target locked customer account/);
+  const result=await pool.query("SELECT count(*)::int AS count FROM pg_temp.verified_deposit_evidence WHERE event_key=$1",[key]);
+  assert.equal(result.rows[0].count,0);
+ }finally{await pool.end();}
+});
