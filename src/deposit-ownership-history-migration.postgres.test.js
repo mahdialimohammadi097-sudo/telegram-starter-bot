@@ -16,7 +16,7 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
  const pool=new pg.Pool({connectionString:url,max:1});
  try{
   await pool.query('CREATE SCHEMA "'+schema+'"');
-  await pool.query('CREATE TABLE "'+schema+'".wallets (id bigint PRIMARY KEY, chain_id bigint NOT NULL DEFAULT 56, wallet_address text NOT NULL DEFAULT '+"'0x' || repeat('a',40)"+', is_platform_controlled boolean NOT NULL DEFAULT true)');
+  await pool.query(`CREATE TABLE "${schema}".wallets (id bigint PRIMARY KEY, chain_id bigint NOT NULL DEFAULT 56, wallet_address text NOT NULL DEFAULT ('0x' || repeat('a',40)), is_platform_controlled boolean NOT NULL DEFAULT true)`);
   await pool.query('CREATE TABLE "'+schema+'".users (id bigint PRIMARY KEY)');
   await pool.query('INSERT INTO "'+schema+'".wallets VALUES (1),(2)');
   await pool.query('INSERT INTO "'+schema+'".users VALUES (11),(12)');
