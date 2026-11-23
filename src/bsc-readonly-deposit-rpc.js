@@ -32,8 +32,17 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
     height(first.number)!==blockHeight || height(second.number)!==blockHeight ||
     receipt.blockHash?.toLowerCase()!==second.hash.toLowerCase())
   throw new Error("RPC canonical block mismatch");
+ const latestReceipt=await request("eth_getTransactionReceipt",[transactionHash]);
+ if(!latestReceipt ||
+    latestReceipt.transactionHash?.toLowerCase()!==receipt.transactionHash.toLowerCase() ||
+    latestReceipt.blockHash?.toLowerCase()!==receipt.blockHash.toLowerCase() ||
+    latestReceipt.blockNumber!==receipt.blockNumber ||
+    latestReceipt.status!==receipt.status ||
+    !Array.isArray(latestReceipt.logs) ||
+    JSON.stringify(latestReceipt.logs)!==JSON.stringify(receipt.logs))
+  throw new Error("RPC receipt changed during evidence inspection");
  const finalizedBlockNumber=height(head);
  // This head is confirmation-depth evidence, not independently verified finality.
- return inspectBscMainnetTransfer({receipt,chainId:56,
+ return inspectBscMainnetTransfer({receipt:latestReceipt,chainId:56,
   canonicalBlockHash:second.hash,finalizedBlockNumber,expected});
 }
