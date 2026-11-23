@@ -25,7 +25,9 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
  const transaction=await request("eth_getTransactionByHash",[transactionHash]);
  if(!transaction || transaction.hash?.toLowerCase()!==transactionHash.toLowerCase() ||
     transaction.blockHash?.toLowerCase()!==receipt.blockHash?.toLowerCase() ||
-    transaction.blockNumber!==receipt.blockNumber)
+    transaction.blockNumber!==receipt.blockNumber ||
+    (receipt.transactionIndex!==undefined && transaction.transactionIndex!==undefined &&
+     receipt.transactionIndex!==transaction.transactionIndex))
   throw new Error("RPC transaction provenance mismatch");
  const blockHeight=height(receipt.blockNumber);
  const blockTag="0x"+blockHeight.toString(16);
@@ -43,6 +45,7 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
     latestReceipt.blockHash?.toLowerCase()!==receipt.blockHash.toLowerCase() ||
     latestReceipt.blockNumber!==receipt.blockNumber ||
     latestReceipt.status!==receipt.status ||
+    latestReceipt.transactionIndex!==receipt.transactionIndex ||
     !Array.isArray(latestReceipt.logs) ||
     JSON.stringify(latestReceipt.logs)!==JSON.stringify(receipt.logs))
   throw new Error("RPC receipt changed during evidence inspection");
