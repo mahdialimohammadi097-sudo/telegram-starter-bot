@@ -1,6 +1,6 @@
 // Safe one-shot read-only rehearsal. No ledger posting and no financial writes.
 // Uses a dedicated pg client supplied by the caller, never a shared pool.query.
-// All account/ownership row locks are held in the same explicit transaction.
+// Read-only PostgreSQL transactions must not acquire FOR SHARE row locks.
 import {prepareBscDepositJournal} from "./bsc-deposit-journal-preparation.js";
 import {inspectDepositIdempotency} from "./deposit-idempotency-db-inspection.js";
 export async function rehearseBscDepositJournal({client,...input}){
@@ -12,7 +12,7 @@ export async function rehearseBscDepositJournal({client,...input}){
   begun=true;
   await client.query("SET LOCAL lock_timeout = '2000ms'");
   await client.query("SET LOCAL statement_timeout = '8000ms'");
-  const result=await prepareBscDepositJournal({client,...input});
+  const result=await prepareBscDepositJournal({client,...input,lockRows:false});
   await inspectDepositIdempotency(client,{eventKey:result.evidence.eventKey,schema:input.schema});
   // Always roll back: never commit any transaction in a rehearsal.
   await client.query("ROLLBACK");
