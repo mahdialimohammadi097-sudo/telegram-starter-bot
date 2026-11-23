@@ -73,3 +73,8 @@ test("rejects forged confirmation count and malformed receipt provenance",()=>{
  ];
  for(const value of variants)assert.throws(()=>inspectBscMainnetTransfer(value));
 });
+
+test("rejects zero-value Transfer logs as non-deposits",()=>{
+ const value={...input,receipt:{...input.receipt,logs:[{...log,data:"0x"+"0".repeat(64)}]}};
+ assert.throws(()=>inspectBscMainnetTransfer(value),/Zero-value/);
+});
