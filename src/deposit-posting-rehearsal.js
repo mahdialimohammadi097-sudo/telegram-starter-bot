@@ -47,6 +47,13 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
   if(String(credit.account_id)!==String(destinationOwner.accountId) ||
      String(debit.account_id)===String(destinationOwner.accountId))
    throw new Error("Deposit journal credit must target locked customer account");
+  // A deposit must originate from a platform clearing account, never another
+  // customer's AVAILABLE balance. Lock the source inside this transaction.
+  const source=await client.query(`SELECT id FROM ledger_accounts
+   WHERE id=$1::bigint AND account_type='CLEARING' AND currency='USDT'
+     AND user_id IS NULL FOR UPDATE`,[String(debit.account_id)]);
+  if(source.rowCount!==1 || String(source.rows?.[0]?.id)!==String(BigInt(String(debit.account_id))))
+   throw new Error("Deposit source must be a platform clearing account");
   return postJournalInTransaction(client,journal);
  });
 }
