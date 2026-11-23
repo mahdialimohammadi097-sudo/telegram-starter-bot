@@ -15,7 +15,7 @@ test("rejects same clearing and user account, malformed identities and zero",()=
  for(const input of [
   {...accounts,userAvailableAccountId:"5"},
   {...accounts,userAvailableAccountId:"0"},
-  accounts
+  {...accounts,platformClearingAccountId:"9223372036854775808"}
  ]){
   assert.throws(()=>draft({evidence,...input}));
  }
