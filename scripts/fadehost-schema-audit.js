@@ -11,7 +11,8 @@ const required = {
  verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
  deposit_address_ownership_history:["wallet_id","user_id","chain_id","wallet_address","start_block","end_block"]
 };
-const output = value => process.stdout.write(JSON.stringify(value)+"\n");
+const output = value => process.stdout.write(JSON.stringify(value)+"
+");
 if (!process.env.DATABASE_URL) {
  output({audit:"fadehost-schema",ready:false,error:"DATABASE_URL_NOT_CONFIGURED"});
  process.exitCode=3;
@@ -30,7 +31,12 @@ if (!process.env.DATABASE_URL) {
    const columns=new Set(rows.map(x=>x.table_name+"."+x.column_name));
    const missing=Object.entries(required).flatMap(([t,cols])=>
     cols.filter(c=>!columns.has(t+"."+c)).map(c=>t+"."+c));
-   // Fail closed if ledger amounts cannot represent the exact 8-decimal USDT units.\n   const amountColumn=rows.find(x=>x.table_name==="ledger_entries" && x.column_name==="amount");\n   if(amountColumn && (amountColumn.data_type!=="numeric" ||\n      Number(amountColumn.numeric_precision)!==36 || Number(amountColumn.numeric_scale)!==18))\n    missing.push("type:ledger_entries.amount:numeric(36,18)");\n   const indexes=await client.query(`SELECT t.relname AS table_name,a.attname AS column_name
+   // Fail closed if ledger amounts cannot represent the exact 8-decimal USDT units.
+   const amountColumn=rows.find(x=>x.table_name==="ledger_entries" && x.column_name==="amount");
+   if(amountColumn && (amountColumn.data_type!=="numeric" ||
+      Number(amountColumn.numeric_precision)!==36 || Number(amountColumn.numeric_scale)!==18))
+    missing.push("type:ledger_entries.amount:numeric(36,18)");
+   const indexes=await client.query(`SELECT t.relname AS table_name,a.attname AS column_name
      FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid
      JOIN pg_namespace n ON n.oid=t.relnamespace
      JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=i.indkey[0]
