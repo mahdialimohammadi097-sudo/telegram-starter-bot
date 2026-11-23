@@ -41,9 +41,10 @@ export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,fi
  const topicRecipient="0x"+recipient.slice(2).padStart(64,"0");
  if(matches.length!==1 || (log.removed!==undefined && log.removed!==false) || log.address?.toLowerCase()!==token ||
     log.transactionHash?.toLowerCase()!==receipt.transactionHash.toLowerCase() ||
-    (receipt.transactionIndex!==undefined &&
-     log.transactionIndex!==undefined &&
-     rpcBlockNumber(log.transactionIndex)!==rpcBlockNumber(receipt.transactionIndex)) ||
+    ((receipt.transactionIndex!==undefined || log.transactionIndex!==undefined) &&
+     (rpcBlockNumber(log.transactionIndex)===null ||
+      rpcBlockNumber(receipt.transactionIndex)===null ||
+      rpcBlockNumber(log.transactionIndex)!==rpcBlockNumber(receipt.transactionIndex))) ||
     log.blockHash?.toLowerCase()!==receipt.blockHash.toLowerCase() ||
     rpcBlockNumber(log.blockNumber)!==receiptBlockNumber ||
     !Array.isArray(log.topics) || log.topics.length!==3 ||
