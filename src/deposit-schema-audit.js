@@ -120,21 +120,27 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  // CHECK constraints required to reject malformed chain events and addresses.
  // CREATE TABLE IF NOT EXISTS does not repair such a table.
  const checks=await client.query(`
- SELECT c.conname,c.convalidated AS validated
+ SELECT c.conname,c.convalidated AS validated, pg_get_constraintdef(c.oid) AS definition
  FROM pg_constraint c
  JOIN pg_class t ON t.oid=c.conrelid
  JOIN pg_namespace n ON n.oid=t.relnamespace
  WHERE n.nspname=$1 AND t.relname='verified_deposit_evidence' AND c.contype='c'
  `,[schema]);
- const validChecks=new Set(checks.rows.filter(r=>r.validated===true).map(r=>r.conname));
- for(const name of [
-  "verified_deposit_evidence_event_key_format",
-  "verified_deposit_evidence_block_hash_format",
-  "verified_deposit_evidence_token_format",
-  "verified_deposit_evidence_address_format",
-  "verified_deposit_evidence_block_number_nonnegative",
-  "verified_deposit_evidence_amount_positive"
- ]) if(!validChecks.has(name)) incompatible.push("verified_deposit_evidence."+name+":check_constraint");
+ // Validate definitions as well as names: a weak CHECK with the expected name
+ // must never satisfy the production deposit contract.
+ const expectedChecks=new Map([
+  ["verified_deposit_evidence_event_key_format",/^CHECK.*event_key.*~.*bsc:56:0x\\[0-9a-f\\]\\{64\\}/i],
+  ["verified_deposit_evidence_block_hash_format",/^CHECK.*block_hash.*~.*0x\\[0-9a-f\\]\\{64\\}/i],
+  ["verified_deposit_evidence_token_format",/^CHECK.*token_contract.*~.*0x\\[0-9a-f\\]\\{40\\}/i],
+  ["verified_deposit_evidence_address_format",/^CHECK.*deposit_address.*~.*0x\\[0-9a-f\\]\\{40\\}/i],
+  ["verified_deposit_evidence_block_number_nonnegative",/^CHECK.*block_number\\s*>=\\s*\\(?0\\)?/i],
+  ["verified_deposit_evidence_amount_positive",/^CHECK.*amount_base_units\\s*>\\s*\\(?0\\)?/i]
+ ]);
+ for(const [name,expression] of expectedChecks) {
+  const matching=checks.rows.some(r=>r.conname===name && r.validated===true &&
+   expression.test(String(r.definition??"")));
+  if(!matching) incompatible.push("verified_deposit_evidence."+name+":check_constraint");
+ }
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
    missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
 }
