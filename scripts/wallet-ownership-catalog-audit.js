@@ -16,7 +16,7 @@ try{
   ORDER BY table_name,ordinal_position`);
  const constraints=await client.query(`
   SELECT c.relname AS table_name, con.conname AS constraint_name, con.contype AS type,
-         con.convalidated AS validated
+         con.convalidated AS validated, pg_get_constraintdef(con.oid) AS definition
   FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid
   JOIN pg_namespace n ON n.oid=c.relnamespace
   WHERE n.nspname='public'
@@ -89,6 +89,19 @@ try{
   .map(([name])=>name);
  // PostgreSQL tgtype bits: ROW=1, BEFORE=2, INSERT=4, DELETE=8, UPDATE=16.
  // A matching name/function alone is not enough if the trigger fires on the wrong event.
+ // Names alone do not establish that exclusion constraints cover wallet/address
+ // and overlapping block ranges. Inspect their actual PostgreSQL definitions.
+ const requiredConstraintFragments=[
+  ["ownership_wallet_interval_no_overlap",["EXCLUDE USING gist","wallet_id WITH =","&&"]],
+  ["ownership_interval_no_overlap",["EXCLUDE USING gist","chain_id WITH =","wallet_address WITH =","&&"]],
+  ["ownership_wallet_unique_start",["UNIQUE","wallet_id","start_block"]],
+  ["ownership_wallet_chain_unique_start",["UNIQUE","chain_id","wallet_address","start_block"]]
+ ];
+ const mismatchedConstraintDefinitions=requiredConstraintFragments
+  .filter(([name,fragments])=>{
+   const found=identityConstraints.find(r=>r.constraint_name===name);
+   return found && !fragments.every(fragment=>found.definition.includes(fragment));
+  }).map(([name])=>name);
  const requiredTriggers=[
   ["deposit_ownership_wallet_identity","validate_deposit_ownership_wallet_identity",7],
   ["deposit_ownership_history_immutable","reject_deposit_ownership_history_mutation",27]
@@ -99,10 +112,12 @@ try{
   .map(([name])=>name);
  const structuralReady=missing.length===0 && missingTables.length===0 &&
   missingConstraintTypes.length===0 && missingNamedConstraints.length===0 &&
-  typeMismatches.length===0 && nullabilityMismatches.length===0 && missingTriggers.length===0;
+  typeMismatches.length===0 && nullabilityMismatches.length===0 && missingTriggers.length===0 &&
+  mismatchedConstraintDefinitions.length===0;
  console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:structuralReady,
   missing,missingTables,missingConstraintTypes,missingNamedConstraints,typeMismatches,nullabilityMismatches,
-  missingTriggers,columns:columns.rows,constraints:constraints.rows,triggers:triggers.rows,
+  missingTriggers,mismatchedConstraintDefinitions,columns:columns.rows,
+  constraints:constraints.rows,triggers:triggers.rows,
   financialActivationReady:false,realDepositsEnabled:false}));
  if(!structuralReady) process.exitCode=2;
  await client.query("ROLLBACK");
