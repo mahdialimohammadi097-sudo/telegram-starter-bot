@@ -102,6 +102,19 @@ try{
    const found=identityConstraints.find(r=>r.constraint_name===name);
    return found && !fragments.every(fragment=>found.definition.includes(fragment));
   }).map(([name])=>name);
+ // A same-named CHECK constraint may be weakened without changing its name.
+ // Require the essential chain, address, interval and source checks by definition.
+ const requiredCheckFragments=[
+  ["deposit_address_ownership_history_chain_id_check",["chain_id","56"]],
+  ["deposit_address_ownership_history_wallet_address_check",["wallet_address","0x"]],
+  ["deposit_address_ownership_history_start_block_check",["start_block",">= 0"]],
+  ["deposit_address_ownership_history_end_block_check",["end_block","start_block"]],
+  ["deposit_address_ownership_history_verified_source_check",["verified_source","length","8"]]
+ ];
+ const missingOrWeakChecks=requiredCheckFragments.filter(([name,fragments])=>{
+  const found=identityConstraints.find(r=>r.constraint_name===name && r.type==="c" && r.validated===true);
+  return !found || !fragments.every(fragment=>found.definition.includes(fragment));
+ }).map(([name])=>name);
  const requiredTriggers=[
   ["deposit_ownership_wallet_identity","validate_deposit_ownership_wallet_identity",7],
   ["deposit_ownership_history_immutable","reject_deposit_ownership_history_mutation",27]
@@ -113,10 +126,10 @@ try{
  const structuralReady=missing.length===0 && missingTables.length===0 &&
   missingConstraintTypes.length===0 && missingNamedConstraints.length===0 &&
   typeMismatches.length===0 && nullabilityMismatches.length===0 && missingTriggers.length===0 &&
-  mismatchedConstraintDefinitions.length===0;
+  mismatchedConstraintDefinitions.length===0 && missingOrWeakChecks.length===0;
  console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:structuralReady,
   missing,missingTables,missingConstraintTypes,missingNamedConstraints,typeMismatches,nullabilityMismatches,
-  missingTriggers,mismatchedConstraintDefinitions,columns:columns.rows,
+  missingTriggers,mismatchedConstraintDefinitions,missingOrWeakChecks,columns:columns.rows,
   constraints:constraints.rows,triggers:triggers.rows,
   financialActivationReady:false,realDepositsEnabled:false}));
  if(!structuralReady) process.exitCode=2;
