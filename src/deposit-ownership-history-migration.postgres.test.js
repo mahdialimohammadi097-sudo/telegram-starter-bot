@@ -28,6 +28,29 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
    .replaceAll("public.wallets",'"'+schema+'".wallets')
    .replaceAll("public.users",'"'+schema+'".users');
   await pool.query(rehearsal);
+  // Verify both reviewed triggers exist, are enabled, and fire on the intended events.
+  const triggerCatalog=await pool.query(`
+   SELECT t.tgname AS name,t.tgenabled AS enabled,t.tgtype AS type,
+          p.proname AS function_name,nf.nspname AS function_schema
+   FROM pg_trigger t
+   JOIN pg_class rel ON rel.oid=t.tgrelid
+   JOIN pg_namespace ns ON ns.oid=rel.relnamespace
+   JOIN pg_proc p ON p.oid=t.tgfoid
+   JOIN pg_namespace nf ON nf.oid=p.pronamespace
+   WHERE ns.nspname=$1 AND rel.relname='deposit_address_ownership_history'
+     AND NOT t.tgisinternal`,[schema]);
+  const identity=triggerCatalog.rows.find(r=>r.name==="deposit_ownership_wallet_identity");
+  assert.ok(identity,"missing wallet identity trigger");
+  assert.equal(identity.enabled,"O");
+  assert.equal(Number(identity.type),7);
+  assert.equal(identity.function_name,"validate_deposit_ownership_wallet_identity");
+  assert.equal(identity.function_schema,schema);
+  const immutable=triggerCatalog.rows.find(r=>r.name==="deposit_ownership_history_immutable");
+  assert.ok(immutable,"missing immutable ownership trigger");
+  assert.equal(immutable.enabled,"O");
+  assert.equal(Number(immutable.type),27);
+  assert.equal(immutable.function_name,"reject_deposit_ownership_history_mutation");
+  assert.equal(immutable.function_schema,schema);
   const table='"'+schema+'".deposit_address_ownership_history';
   const address="0x"+"a".repeat(40);
   const insert=`INSERT INTO ${table} (wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
