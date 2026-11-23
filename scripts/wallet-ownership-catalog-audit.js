@@ -22,6 +22,17 @@ try{
   WHERE n.nspname='public'
     AND c.relname IN ('wallets','user_wallet_assignments','deposit_address_ownership_history')
   ORDER BY c.relname,con.conname`);
+ const triggers=await client.query(`
+  SELECT tg.tgname AS trigger_name, tg.tgenabled AS enabled,
+         p.proname AS function_name
+  FROM pg_trigger tg
+  JOIN pg_class rel ON rel.oid=tg.tgrelid
+  JOIN pg_namespace ns ON ns.oid=rel.relnamespace
+  JOIN pg_proc p ON p.oid=tg.tgfoid
+  WHERE ns.nspname='public'
+    AND rel.relname='deposit_address_ownership_history'
+    AND NOT tg.tgisinternal
+  ORDER BY tg.tgname`);
  const names=new Set(columns.rows.map(r=>r.table_name+"."+r.column_name));
  const required=['wallets.id','wallets.chain_id','wallets.wallet_address',
   'wallets.is_platform_controlled','wallets.status',
@@ -74,12 +85,19 @@ try{
  const missingNamedConstraints=requiredNamedConstraints
   .filter(([name,type])=>!identityConstraints.some(r=>r.constraint_name===name && r.type===type && r.validated===true))
   .map(([name])=>name);
+ const requiredTriggers=[
+  ["deposit_ownership_wallet_identity","validate_deposit_ownership_wallet_identity"],
+  ["deposit_ownership_history_immutable","reject_deposit_ownership_history_mutation"]
+ ];
+ const missingTriggers=requiredTriggers.filter(([name,fn])=>
+  !triggers.rows.some(r=>r.trigger_name===name && r.function_name===fn && r.enabled==="O"))
+  .map(([name])=>name);
  const structuralReady=missing.length===0 && missingTables.length===0 &&
   missingConstraintTypes.length===0 && missingNamedConstraints.length===0 &&
-  typeMismatches.length===0 && nullabilityMismatches.length===0;
+  typeMismatches.length===0 && nullabilityMismatches.length===0 && missingTriggers.length===0;
  console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:structuralReady,
   missing,missingTables,missingConstraintTypes,missingNamedConstraints,typeMismatches,nullabilityMismatches,
-  columns:columns.rows,constraints:constraints.rows,
+  missingTriggers,columns:columns.rows,constraints:constraints.rows,triggers:triggers.rows,
   financialActivationReady:false,realDepositsEnabled:false}));
  if(!structuralReady) process.exitCode=2;
  await client.query("ROLLBACK");
