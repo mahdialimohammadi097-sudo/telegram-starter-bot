@@ -119,3 +119,25 @@ test("successful audit sends metadata only to configured admin ID",async()=>{
  assert.match(sent[0].message,/financialActivationReady/);
  assert.doesNotMatch(sent[0].message,/DATABASE_URL|password=|SECRET_TOKEN/);
 });
+
+test("migration type preflight rejects incompatible existing wallet IDs without reading user rows",async()=>{
+ const queries=[];
+ const client={query:async(sql)=>{
+  queries.push(sql);
+  if(sql.includes("information_schema.columns"))return {rows:[
+   {table_name:"users",column_name:"id",data_type:"bigint"},
+   {table_name:"wallets",column_name:"id",data_type:"integer"},
+   {table_name:"wallets",column_name:"chain_id",data_type:"bigint"},
+   {table_name:"user_wallet_assignments",column_name:"user_id",data_type:"bigint"},
+   {table_name:"user_wallet_assignments",column_name:"wallet_id",data_type:"bigint"}
+  ]};
+  return {rows:[]};
+ },release:()=>{}};
+ const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
+ assert.equal(result.migrationTypeCompatible,false);
+ assert.deepEqual(result.incompatibleTypes,[{
+  column:"wallets.id",expected:"bigint",observed:"integer"
+ }]);
+ assert.equal(result.financialActivationReady,false);
+ assert.ok(queries.every(sql=>!/FROM\\s+users\\b|FROM\\s+wallets\\b|SELECT\\s+\\*/i.test(sql)));
+});
