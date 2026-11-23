@@ -8,7 +8,7 @@ const log={logIndex:2,removed:false,address:token,transactionHash:tx,blockHash:b
  topics:[topic,sender,"0x"+"0".repeat(24)+recipient.slice(2)],data:"0x"+(10n**18n).toString(16).padStart(64,"0")};
 const input={chainId:56,canonicalBlockHash:block,finalizedBlockNumber:120,
  receipt:{status:"0x1",transactionHash:tx,blockHash:block,blockNumber:100,logs:[log]},
- expected:{tokenContract:token,depositAddress:recipient,transactionHash:tx,logIndex:2,tokenDecimals:18}};
+ expected:{tokenContract:token,depositAddress:recipient,transactionHash:tx,logIndex:2,tokenDecimals:18,minConfirmations:12}};
 test("accepts exact mainnet transfer log without crediting balances",()=>{
  const result=inspectBscMainnetTransfer(input);
  assert.equal(result.eventKey,"bsc:56:"+tx+":2");
@@ -35,5 +35,12 @@ test("rejects zero sender, self-transfer and malformed sender topic",()=>{
  for(const senderTopic of ["0x"+"0".repeat(64),recipientTopic,"0x1234"]){
   const value={...input,receipt:{...input.receipt,logs:[{...log,topics:[topic,senderTopic,recipientTopic]}]}};
   assert.throws(()=>inspectBscMainnetTransfer(value),/Transfer log/);
+ }
+});
+
+test("rejects missing or insufficient configured confirmations",()=>{
+ for(const confirmations of [undefined,0,22]){
+  const value={...input,expected:{...input.expected,minConfirmations:confirmations}};
+  assert.throws(()=>inspectBscMainnetTransfer(value),/finality/);
  }
 });
