@@ -160,6 +160,20 @@ if (!process.env.DATABASE_URL) {
     if(invalidCurrency.rows[0].found)
      missing.push("data:ledger_entries.invalid_currency");
    }
+   // Prevent cross-currency credits: every journal entry must use the
+   // currency of its referenced account, not merely balance numerically.
+   if(["ledger_entries.account_id","ledger_entries.currency",
+       "ledger_accounts.id","ledger_accounts.currency"].every(k=>columns.has(k))){
+    const mismatches=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_entries e
+      JOIN public.ledger_accounts a ON a.id=e.account_id
+      WHERE e.currency IS DISTINCT FROM a.currency
+    ) AS found`);
+    if(typeof mismatches?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed ledger account currency result");
+    if(mismatches.rows[0].found)
+     missing.push("data:ledger_entries.account_currency_mismatch");
+   }
    // Event identity and ledger idempotency must be unique in existing data,
    // independently of catalog constraints (which may have been added later).
    if(columns.has("verified_deposit_evidence.event_key")){
