@@ -78,3 +78,27 @@ test("rejects chain identity changing during read",async()=>{
  };
  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/chain changed/);
 });
+
+test("rejects transaction changing between first and final RPC reads",async()=>{
+ let reads=0;
+ const rpc=async(method)=>{
+  if(method==="eth_getTransactionByHash"){
+   reads++;
+   return reads===1?{hash:tx,blockHash:hash,blockNumber:"0x64"}:
+    {hash:tx,blockHash:"0x"+"f".repeat(64),blockNumber:"0x64"};
+  }
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/transaction changed/);
+});
+test("rejects transaction disappearing during final RPC read",async()=>{
+ let reads=0;
+ const rpc=async(method)=>{
+  if(method==="eth_getTransactionByHash"){
+   reads++;
+   return reads===1?{hash:tx,blockHash:hash,blockNumber:"0x64"}:null;
+  }
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/Missing RPC evidence/);
+});
