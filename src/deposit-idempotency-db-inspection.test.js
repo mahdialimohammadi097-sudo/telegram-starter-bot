@@ -35,3 +35,20 @@ test("rejects unsafe identity and schema before SQL",async()=>{
  }
  assert.equal(calls,0);
 });
+
+test("concurrent read-only preflights cannot claim the same event",async()=>{
+ // Both callers see the same empty snapshot. A passing preflight is NOT
+ // permission to post: the eventual writer needs atomic unique-key claims.
+ const observed=[];
+ const client={query:async(_sql,params)=>{
+  observed.push(params[0]);
+  await Promise.resolve();
+  return {rows:[{evidence_exists:false,ledger_exists:false}],rowCount:1};
+ }};
+ const results=await Promise.all([
+  inspect(client,{eventKey}),inspect(client,{eventKey})
+ ]);
+ assert.equal(observed.length,2);
+ assert.ok(results.every(r=>r.unrecordedAtInspection===true));
+ assert.equal(results[0].eventKey,results[1].eventKey);
+});
