@@ -47,7 +47,8 @@ export async function inspectDepositSchemaReadOnly(pool) {
   for(const key of ["verified_deposit_evidence.event_key","ledger_transactions.idempotency_key"])
    if(!uniqueKeys.has(key))missing.push("unique:"+key);
   await client.query("ROLLBACK");
-  return {audit:"deposit-schema",structuralReady:missing.length===0,missing,\n   migrationTypeCompatible:incompatibleTypes.length===0,incompatibleTypes,
+  return {audit:"deposit-schema",structuralReady:missing.length===0,missing,
+   migrationTypeCompatible:incompatibleTypes.length===0,incompatibleTypes,
    financialActivationReady:false,realDepositsEnabled:false,
    outstandingSecurityGates:["independent-historical-ownership-proof","independent-chain-finality-verification","production-backup-restore","owner-financial-authorization"]};
  } catch(error) {
