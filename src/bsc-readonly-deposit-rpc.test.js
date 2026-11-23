@@ -111,3 +111,13 @@ test("rejects RPC head regression during evidence inspection",async()=>{
  };
  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/head regressed/);
 });
+
+test("rejects a canonical block reorganization after final receipt inspection",async()=>{
+ let reads=0;
+ const rpc=async(method)=>{
+  if(method==="eth_getBlockByNumber")
+   return {number:"0x64",hash:++reads===3?"0x"+"f".repeat(64):hash};
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/canonical block changed/);
+});
