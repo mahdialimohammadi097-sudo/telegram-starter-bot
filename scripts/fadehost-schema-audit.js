@@ -108,7 +108,7 @@ if (!process.env.DATABASE_URL) {
    const hasPositiveAmountCheck=amountChecks.rows.some(row=>
     typeof row.definition==="string" &&
     /\\bamount\\b/.test(row.definition) &&
-    /amount\\s*>\\s*(?:\\(?0(?:\\.0+)?\\)?)(?=\\D|$)/.test(row.definition));
+    /amount\s*>\s*\(?0(?:\.0+)?\)?(?:\s|\)|$)/.test(row.definition));
    if(!hasPositiveAmountCheck)missing.push("check:ledger_entries.amount_positive");
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
