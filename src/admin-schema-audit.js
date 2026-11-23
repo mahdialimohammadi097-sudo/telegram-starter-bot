@@ -25,7 +25,7 @@ export async function inspectDepositSchemaReadOnly(pool) {
   const expectedTypes={
    "users.id":"bigint",
    "wallets.id":"bigint",
-   "wallets.chain_id":"bigint",
+   "wallets.chain_id":"integer",
    "user_wallet_assignments.user_id":"bigint",
    "user_wallet_assignments.wallet_id":"bigint"
   };
