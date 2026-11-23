@@ -378,7 +378,7 @@ export function registerCommands(bot) {
     try {
       await showScheduledPosts(ctx);
     } catch (error) {
-      console.error("[scheduled-posts] Failed:", error);
+      console.error("[scheduled-posts] Failed:", safeDatabaseErrorCode(error));
 
       await ctx.reply(
         "Unable to retrieve scheduled posts. Please try again."
@@ -486,7 +486,7 @@ export function registerCommands(bot) {
             "Nothing will be published until you approve it."
           );
         } catch (error) {
-          console.error("[newpost] Database error:", error);
+          console.error("[newpost] Database error:", safeDatabaseErrorCode(error));
 
           return ctx.reply(
             "Unable to save the post.\n" +
@@ -532,7 +532,7 @@ export function registerCommands(bot) {
           { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
-        console.error("[account] Failed:", error.message);
+        console.error("[account] Failed:", safeDatabaseErrorCode(error));
 
         return ctx.reply(
           "Unable to load account information. Please try again later."
@@ -568,7 +568,7 @@ export function registerCommands(bot) {
           { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
-        console.error("[wallet] Failed:", error.message);
+        console.error("[wallet] Failed:", safeDatabaseErrorCode(error));
 
         return ctx.reply(
           "Unable to load wallet balances. Please try again later.",
