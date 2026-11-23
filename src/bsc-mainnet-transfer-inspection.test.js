@@ -68,7 +68,7 @@ test("rejects forged confirmation count and malformed receipt provenance",()=>{
   {...input,receipt:{...input.receipt,logs:[{...log,topics:[topic,sender]}]}},
   {...input,receipt:{...input.receipt,logs:[{...log,topics:[topic,sender,"0x"+"0".repeat(64)]}]}},
   {...input,receipt:{...input.receipt,logs:[{...log,data:"0x1234"}]}},
-  {...input,receipt:{...input.receipt,logs:[{...log,removed:undefined}]}},
+  {...input,receipt:{...input.receipt,logs:[{...log,removed:"false"}]}},
   {...input,receipt:{...input.receipt,logs:[{...log,address:"0x"+"f".repeat(40)}]}}
  ];
  for(const value of variants)assert.throws(()=>inspectBscMainnetTransfer(value));
@@ -77,4 +77,10 @@ test("rejects forged confirmation count and malformed receipt provenance",()=>{
 test("rejects zero-value Transfer logs as non-deposits",()=>{
  const value={...input,receipt:{...input.receipt,logs:[{...log,data:"0x"+"0".repeat(64)}]}};
  assert.throws(()=>inspectBscMainnetTransfer(value),/Zero-value/);
+});
+
+test("accepts mined receipt logs where removed is omitted",()=>{
+ const {removed,...minedLog}=log;
+ const value={...input,receipt:{...input.receipt,logs:[minedLog]}};
+ assert.equal(inspectBscMainnetTransfer(value).eventKey,"bsc:56:"+tx+":2");
 });
