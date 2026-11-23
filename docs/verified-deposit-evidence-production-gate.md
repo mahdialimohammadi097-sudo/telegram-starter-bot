@@ -9,7 +9,7 @@ Scope: additive table creation only. This is **not** authorization to accept, cr
 3. Verify a recent restorable backup and successful isolated restore rehearsal. Stop if backup/restore cannot be confirmed.
 4. Confirm bot deployment/version and that no application code is already writing to `verified_deposit_evidence`.
 5. Re-run `node scripts/fadehost-schema-audit.js` read-only. Stop if the reported missing set has changed, the table already exists, or other unexpected differences are present.
-6. Review migration SQL in `migrations/20261123_verified_deposit_evidence.review.sql`, including PostgreSQL role, permissions and change window. Test it on a disposable PostgreSQL 17 clone. The automated test uses an isolated schema and does not replace a production catalog review.
+6. Review migration SQL in `migrations/20261123_verified_deposit_evidence.review.sql`, including PostgreSQL role, permissions and change window. Independently inspect the **actual definitions** of all evidence CHECK constraints: the read-only preflight currently validates their names and validated status, not their SQL expressions. A misleading constraint with the expected name is not sufficient. Test it on a disposable PostgreSQL 17 clone. The automated test uses an isolated schema and does not replace a production catalog review.
 
 ## Operator-controlled execution (only after prerequisites)
 
