@@ -41,3 +41,10 @@ test("history lookup rejects invalid addresses and block numbers before query",a
  await assert.rejects(inspect(client,{...input,eventBlockNumber:"1 OR 1=1"}),/Invalid/);
  await assert.rejects(inspect(client,{...input,walletAddress:"invalid"}),/Invalid/);
 });
+
+test("history lookup rejects malformed database responses",async()=>{
+ for(const result of [null,undefined,{}, {rows:null}, {rows:{}},
+   {rows:[row],rowCount:0}, {rows:[row],rowCount:2}]){
+  await assert.rejects(inspect({query:async()=>result},input),/Missing or ambiguous/);
+ }
+});
