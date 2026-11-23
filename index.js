@@ -35,6 +35,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(1);
 }
 
+// Reject insecure webhook configuration before opening HTTP or DB connections.
+const webhookSecret = mode === "webhook"
+  ? requireWebhookSecret(process.env.WEBHOOK_SECRET)
+  : null;
+
 const bot = new Bot(token);
 const runtimeHealth = createRuntimeHealthState();
 let healthServer = null;
@@ -258,8 +263,7 @@ async function main() {
       throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
     }
 
-    const secret = requireWebhookSecret(process.env.WEBHOOK_SECRET);
-    webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
+    webhookHandler = webhookCallback(bot, "http", { secretToken: webhookSecret });
 
     await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
       secret_token: secret,
