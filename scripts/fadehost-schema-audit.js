@@ -111,6 +111,29 @@ if (!process.env.DATABASE_URL) {
    if(!amountChecks.rows.some(row=>typeof row.definition==="string"))
     missing.push("check:ledger_entries.amount_positive");
    else missing.push("manual_review:ledger_entries.amount_positive_constraint");
+   // Existing financial rows must also be consistent; a foreign key added
+   // later does not excuse historical orphaned postings or nonpositive amounts.
+   const ledgerColumns=["ledger_entries.transaction_id","ledger_entries.account_id",
+    "ledger_entries.amount","ledger_transactions.id","ledger_accounts.id"];
+   if(ledgerColumns.every(key=>columns.has(key))){
+    const integrity=await client.query(`SELECT
+     EXISTS(SELECT 1 FROM public.ledger_entries e
+       LEFT JOIN public.ledger_transactions t ON t.id=e.transaction_id
+       WHERE t.id IS NULL) AS orphan_transactions,
+     EXISTS(SELECT 1 FROM public.ledger_entries e
+       LEFT JOIN public.ledger_accounts a ON a.id=e.account_id
+       WHERE a.id IS NULL) AS orphan_accounts,
+     EXISTS(SELECT 1 FROM public.ledger_entries WHERE amount<=0 OR amount IS NULL)
+       AS nonpositive_amounts`);
+    const row=integrity?.rows?.[0];
+    if(!row || typeof row.orphan_transactions!=="boolean" ||
+       typeof row.orphan_accounts!=="boolean" ||
+       typeof row.nonpositive_amounts!=="boolean")
+     throw new Error("Malformed ledger integrity result");
+    if(row.orphan_transactions)missing.push("data:ledger_entries.orphan_transactions");
+    if(row.orphan_accounts)missing.push("data:ledger_entries.orphan_accounts");
+    if(row.nonpositive_amounts)missing.push("data:ledger_entries.nonpositive_amounts");
+   }
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
