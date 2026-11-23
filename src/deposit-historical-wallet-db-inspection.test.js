@@ -39,6 +39,9 @@ test("history lookup rejects schema injection before any database query",async()
 test("history lookup rejects invalid addresses and block numbers before query",async()=>{
  const client={query:async()=>{throw Error("query should not run")}};
  await assert.rejects(inspect(client,{...input,eventBlockNumber:"1 OR 1=1"}),/Invalid/);
+ await assert.rejects(inspect(client,{...input,eventBlockNumber:"1".repeat(79)}),/Invalid/);
+ await assert.rejects(inspect(client,{...input,expectedUserId:"9223372036854775808"}),/Invalid/);
+ await assert.rejects(inspect(client,{...input,expectedUserId:"1".repeat(500)}),/Invalid/);
  await assert.rejects(inspect(client,{...input,walletAddress:"invalid"}),/Invalid/);
 });
 
