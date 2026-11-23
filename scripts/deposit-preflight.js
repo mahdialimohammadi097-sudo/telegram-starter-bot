@@ -57,8 +57,7 @@ export async function runReadOnlyPreflight(client) {
 if(process.argv[1] && import.meta.url===new URL("file://"+process.argv[1]).href) {
  const url=process.env.PROFINO_AUDIT_DATABASE_URL;
  if(!url) {
-  process.stderr.write('{"audit":"deposit-preflight","ready":false,"error":"Read-only audit connection required"}
-');
+  process.stderr.write('{"audit":"deposit-preflight","ready":false,"error":"Read-only audit connection required"}\n');
   process.exitCode=3;
  } else {
   const pool=new pg.Pool({connectionString:url,max:1,connectionTimeoutMillis:10000,
@@ -67,14 +66,12 @@ if(process.argv[1] && import.meta.url===new URL("file://"+process.argv[1]).href)
    const client=await pool.connect();
    try {
     const report=await runReadOnlyPreflight(client);
-    process.stdout.write(JSON.stringify(report)+"
-");
+    process.stdout.write(JSON.stringify(report)+"\n");
     if(!report.ready) process.exitCode=2;
    } finally {client.release();}
   } catch(error) {
    process.stderr.write(JSON.stringify({audit:"deposit-preflight",ready:false,
-    error:"Read-only preflight failed",code:/^[A-Z0-9]{2,8}$/.test(error?.code??"")?error.code:"AUDIT_ERROR"})+"
-");
+    error:"Read-only preflight failed",code:/^[A-Z0-9]{2,8}$/.test(error?.code??"")?error.code:"AUDIT_ERROR"})+"\n");
    process.exitCode=3;
   } finally {await pool.end();}
  }
