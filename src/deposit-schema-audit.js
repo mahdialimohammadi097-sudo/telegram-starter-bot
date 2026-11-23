@@ -54,6 +54,20 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   const col=types.get(name);
   if(col && col.is_nullable!=='NO') incompatible.push(name+':not_null');
  }
+ // Enforce identity/chain types before considering a production catalog compatible.
+ // A missing column is already reported above; only compare types for present columns.
+ const identityTypes={
+  "users.id":"bigint",
+  "wallets.id":"bigint",
+  "wallets.chain_id":"integer",
+  "user_wallet_assignments.id":"bigint",
+  "user_wallet_assignments.user_id":"bigint",
+  "user_wallet_assignments.wallet_id":"bigint"
+ };
+ for(const [name,expected] of Object.entries(identityTypes)) {
+  const col=types.get(name);
+  if(col && col.data_type!==expected) incompatible.push(name+":type");
+ }
  const numericContract={
   "ledger_entries.amount":{precision:36,scale:18},
   "verified_deposit_evidence.amount_base_units":{precision:78,scale:0},
