@@ -155,6 +155,17 @@ test("valid owner posts exactly one balanced deposit journal and evidence atomic
    (SELECT count(*)::int FROM ledger_entries WHERE transaction_id=$3) AS entry_count`,
    [eventKey,"verified-deposit:"+eventKey,result.transactionId]);
   assert.deepEqual(rows.rows[0],{evidence_count:1,journal_count:1,entry_count:2});
+  // A replay must not create a second journal or alter the first credit.
+  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+   destinationOwner:{accountId:"44",userId:"12"},
+   journalForUnits:()=>{throw new Error("replay must not build another journal");}
+  }),/duplicate key/);
+  const replay=await pool.query(`SELECT
+   (SELECT count(*)::int FROM verified_deposit_evidence WHERE event_key=$1) AS evidence_count,
+   (SELECT count(*)::int FROM ledger_transactions WHERE idempotency_key=$2) AS journal_count,
+   (SELECT count(*)::int FROM ledger_entries WHERE transaction_id=$3) AS entry_count`,
+   [eventKey,"verified-deposit:"+eventKey,result.transactionId]);
+  assert.deepEqual(replay.rows[0],{evidence_count:1,journal_count:1,entry_count:2});
  }finally{
   if(pool)await pool.end();
   await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
