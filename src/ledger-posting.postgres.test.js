@@ -2307,6 +2307,9 @@ test("two concurrent verified-deposit rehearsals post exactly one balanced journ
     deposit_address text NOT NULL, amount_base_units numeric(78,0) NOT NULL)`);
   const clearing = await createAccount("CLEARING");
   const customer = await createAccount("AVAILABLE");
+  const owner = await pool.query("INSERT INTO users DEFAULT VALUES RETURNING id");
+  const ownerId = String(owner.rows[0].id);
+  await pool.query("UPDATE ledger_accounts SET user_id=$1 WHERE id=$2",[ownerId,customer]);
   const tx = "0x" + randomUUID().replaceAll("-", "").padEnd(64, "a");
   const evidence = {chainId:56, transactionHash:tx, logIndex:0,
     blockHash:"0x"+"b".repeat(64), blockNumber:"123",
@@ -2325,7 +2328,7 @@ test("two concurrent verified-deposit rehearsals post exactly one balanced journ
   };
   const attempt = async () => {
     try {
-      await rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,journalForUnits:build});
+      await rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,destinationOwner:{accountId:customer,userId:ownerId},journalForUnits:build});
       return "committed";
     } catch(error) {
       if(error.code==="23505") return "duplicate";
@@ -2352,12 +2355,16 @@ test("deposit rehearsal rejects balanced but inflated journal and rolls back evi
  const {rehearseVerifiedDepositPosting}=await import("./deposit-posting-rehearsal.js");
  const clearing=await createAccount("CLEARING");
  const customer=await createAccount("AVAILABLE");
+ const owner = await pool.query("INSERT INTO users DEFAULT VALUES RETURNING id");
+ const ownerId = String(owner.rows[0].id);
+ await pool.query("UPDATE ledger_accounts SET user_id=$1 WHERE id=$2",[ownerId,customer]);
  const tx="0x"+randomUUID().replaceAll("-","").padEnd(64,"a");
  const eventKey="bsc:56:"+tx+":0";
  const evidence={chainId:56,transactionHash:tx,logIndex:0,blockHash:"0x"+"b".repeat(64),
   blockNumber:"123",tokenContract:"0x"+"c".repeat(40),depositAddress:"0x"+"d".repeat(40),
   amountBaseUnits:"1000000000000000000"};
  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+  destinationOwner:{accountId:customer,userId:ownerId},
   journalForUnits:({eventKey:key})=>({
    transactionType:"verified-deposit-test",idempotencyKey:"verified-deposit:"+key,
    entries:[
@@ -2374,12 +2381,16 @@ test("deposit rehearsal rejects balanced but understated journal and rolls back 
  const {rehearseVerifiedDepositPosting}=await import("./deposit-posting-rehearsal.js");
  const clearing=await createAccount("CLEARING");
  const customer=await createAccount("AVAILABLE");
+ const owner = await pool.query("INSERT INTO users DEFAULT VALUES RETURNING id");
+ const ownerId = String(owner.rows[0].id);
+ await pool.query("UPDATE ledger_accounts SET user_id=$1 WHERE id=$2",[ownerId,customer]);
  const tx="0x"+randomUUID().replaceAll("-","").padEnd(64,"a");
  const eventKey="bsc:56:"+tx+":0";
  const evidence={chainId:56,transactionHash:tx,logIndex:0,blockHash:"0x"+"b".repeat(64),
   blockNumber:"123",tokenContract:"0x"+"c".repeat(40),depositAddress:"0x"+"d".repeat(40),
   amountBaseUnits:"1000000000000000000"};
  await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+  destinationOwner:{accountId:customer,userId:ownerId},
   journalForUnits:({eventKey:key})=>({
    transactionType:"verified-deposit-test",idempotencyKey:"verified-deposit:"+key,
    entries:[
