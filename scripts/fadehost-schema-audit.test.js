@@ -53,3 +53,12 @@ test("read-only audit includes duplicate identity and ledger integrity checks",a
  assert.match(source,/GROUP BY idempotency_key HAVING COUNT\(\*\)>1/);
  assert.match(source,/BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY/);
 });
+
+test("journal balance audit fails closed on NULLs and rejects missing sides",async()=>{
+ const {readFileSync}=await import("node:fs");
+ const source=readFileSync(script,"utf8");
+ assert.ok(source.includes("amount IS NULL OR amount<=0 OR currency IS NULL"));
+ assert.ok(source.includes("IS DISTINCT FROM SUM(CASE WHEN entry_type='credit'"));
+ assert.ok(source.includes("COUNT(*) FILTER (WHERE entry_type='debit')=0"));
+ assert.ok(source.includes("COUNT(*) FILTER (WHERE entry_type='credit')=0"));
+});
