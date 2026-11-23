@@ -49,3 +49,7 @@ Before any live credit:
 5. Do not apply a migration to production or change assignment behavior without a separately reviewed backup, migration plan, rollback plan and owner approval.
 
 **Decision: historical wallet ownership is NOT VERIFIED; live deposit crediting remains BLOCKED.**
+
+## Destination account locking integration status
+
+The disposable-only `rehearseVerifiedDepositPosting` now optionally accepts `destinationOwner` and locks the user's USDT AVAILABLE account in the evidence+journal transaction, checking that the credit entry targets it. **This is deliberately not a production authorization gate:** the argument is optional to preserve existing rehearsal fixtures, and no trusted historical wallet ownership or RPC verification is connected. Any future live implementation must require and independently derive destination ownership, recheck it under lock, and fail closed when absent. Do not interpret successful rehearsal CI as authorization to accept deposits.
