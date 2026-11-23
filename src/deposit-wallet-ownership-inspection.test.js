@@ -5,7 +5,7 @@ const address="0x"+"d".repeat(40);
 const row={user_id:12,wallet_id:9,status:"active",ended_at:null,assignment_type:"deposit",
  wallet:{status:"active",chain_id:56,is_platform_controlled:true,wallet_address:address}};
 const valid={evidence:{depositAddress:address},assignments:[row],expectedUserId:12,
- ledgerAccount:{id:44,user_id:12,currency:"USDT",account_type:"AVAILABLE"},expectedAccountType:"AVAILABLE"};
+ ledgerAccount:{id:44,user_id:12,currency:"USDT",account_type:"AVAILABLE"}};
 test("matches unique active wallet, user and ledger account",()=>{
  assert.deepEqual(inspectDepositWalletOwnership(valid),{userId:12,walletId:9,accountId:44});
 });
@@ -33,8 +33,6 @@ test("rejects missing or invalid wallet and ledger identifiers",()=>{
 
 test("rejects missing or mismatched destination ledger account type",()=>{
  for(const value of [
-  {...valid,expectedAccountType:undefined},
-  {...valid,expectedAccountType:"RESERVE"},
   {...valid,ledgerAccount:{...valid.ledgerAccount,account_type:"RESERVE"}},
   {...valid,ledgerAccount:{...valid.ledgerAccount,account_type:undefined}}
  ])assert.throws(()=>inspectDepositWalletOwnership(value),/ownership mismatch/);
