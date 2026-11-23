@@ -15,6 +15,11 @@ CREATE TABLE public.deposit_address_ownership_history (
  end_block numeric(78,0) CHECK (end_block IS NULL OR end_block > start_block),
  recorded_at timestamptz NOT NULL DEFAULT now(),
  verified_source text NOT NULL CHECK (length(trim(verified_source)) >= 8),
+ CONSTRAINT ownership_wallet_unique_start UNIQUE (wallet_id,start_block),
+ CONSTRAINT ownership_wallet_interval_no_overlap EXCLUDE USING gist (
+  wallet_id WITH =,
+  (numrange(start_block,COALESCE(end_block,1e78::numeric),'[)')) WITH &&
+ ),
  CONSTRAINT ownership_wallet_chain_unique_start UNIQUE (chain_id,wallet_address,start_block),
  CONSTRAINT ownership_interval_no_overlap EXCLUDE USING gist (
   chain_id WITH =,
