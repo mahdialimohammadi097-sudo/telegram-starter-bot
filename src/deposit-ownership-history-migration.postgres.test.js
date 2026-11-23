@@ -23,6 +23,7 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
   const sql=await readFile(new URL("../migrations/20261123_deposit_ownership_history.review.sql",import.meta.url),"utf8");
   // Isolated schema replacement; never run reviewed SQL against public in tests.
   const rehearsal=sql.replaceAll("public.deposit_address_ownership_history",'"'+schema+'".deposit_address_ownership_history')
+   .replaceAll("public.validate_deposit_ownership_wallet_identity",'"'+schema+'".validate_deposit_ownership_wallet_identity')
    .replaceAll("public.reject_deposit_ownership_history_mutation",'"'+schema+'".reject_deposit_ownership_history_mutation')
    .replaceAll("public.wallets",'"'+schema+'".wallets')
    .replaceAll("public.users",'"'+schema+'".users');
@@ -31,6 +32,10 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
   const address="0x"+"a".repeat(40);
   const insert=`INSERT INTO ${table} (wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
    VALUES ($1,$2,56,$3,$4,$5,'disposable-review')`;
+  await assert.rejects(pool.query(insert,[1,11,"0x"+"b".repeat(40),"50","60"]),/identity mismatch/);
+  await pool.query(`UPDATE "${schema}".wallets SET is_platform_controlled=false WHERE id=2`);
+  await assert.rejects(pool.query(insert,[2,12,address,"50","60"]),/identity mismatch/);
+  await pool.query(`UPDATE "${schema}".wallets SET is_platform_controlled=true WHERE id=2`);
   await pool.query(insert,[1,11,address,"100","200"]);
   await assert.rejects(pool.query(`INSERT INTO ${table}
    (wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
