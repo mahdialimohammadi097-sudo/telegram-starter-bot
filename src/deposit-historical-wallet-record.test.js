@@ -16,3 +16,28 @@ test("historical wallet identity and interval must match",()=>{
   p=>p.expectedUserId="13"
  ]){const p=valid();mutation(p);assert.throws(()=>check(p));}
 });
+
+test("historical ownership rejects malformed identifiers and interval ambiguity",()=>{
+ const cases=[
+  p=>p.history.wallet_id="0",
+  p=>p.history.wallet_id="9223372036854775808",
+  p=>p.wallet.id="1.0",
+  p=>p.expectedUserId="01",
+  p=>p.history.user_id="12 OR 1=1",
+  p=>p.history.start_block="-1",
+  p=>p.history.start_block="0100",
+  p=>p.history.end_block="100",
+  p=>p.history.end_block="150",
+  p=>p.eventBlockNumber="150.0",
+  p=>p.eventBlockNumber="-150",
+  p=>p.history.wallet_address="0x"+"A".repeat(40),
+  p=>p.wallet.is_platform_controlled=null,
+  p=>p.history.chain_id="97"
+ ];
+ for(const mutation of cases){
+  const p=valid();mutation(p);
+  assert.throws(()=>check(p));
+ }
+ const openEnded=valid();openEnded.history.end_block=null;
+ assert.deepEqual(check(openEnded),{walletId:"1",userId:"12"});
+});
