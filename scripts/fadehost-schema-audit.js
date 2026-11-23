@@ -107,7 +107,7 @@ if (!process.env.DATABASE_URL) {
     throw new Error("Malformed ledger check-constraint catalog result");
    const hasPositiveAmountCheck=amountChecks.rows.some(row=>
     typeof row.definition==="string" &&
-    /\\bamount\\b/.test(row.definition) &&
+    /\bamount\b/.test(row.definition) &&
     /amount\s*>\s*\(?0(?:\.0+)?\)?(?:\s|\)|$)/.test(row.definition));
    if(!hasPositiveAmountCheck)missing.push("check:ledger_entries.amount_positive");
    // Read-only snapshot check: overlapping historical ownership can credit the
