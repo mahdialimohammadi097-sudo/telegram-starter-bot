@@ -7,7 +7,7 @@ const token="0x"+"c".repeat(40),address="0x"+"d".repeat(40);
 const topic="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const log={logIndex:"0x2",address:token,transactionHash:tx,blockHash:block,blockNumber:"0x64",
  topics:[topic,"0x"+"0".repeat(24)+"e".repeat(40),"0x"+"0".repeat(24)+address.slice(2)],
- data:"0x"+(10n**18n).toString(16).padStart(64,"0")};
+ data:"0x"+(10n*10n**18n).toString(16).padStart(64,"0")};
 const receipt={transactionHash:tx,blockHash:block,blockNumber:"0x64",status:"0x1",logs:[log]};
 const rpc=async method=>({
  eth_chainId:"0x38",eth_getTransactionReceipt:receipt,
