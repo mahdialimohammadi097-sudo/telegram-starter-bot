@@ -34,3 +34,18 @@ The existing `test-support/bsc-testnet-receipt.js` explicitly accepts testnet ch
 - Reconcile independently observed finalized transfers with stored evidence, assigned users and ledger credits; alert on missing, orphaned, reversed or unmatched entries. Define an incident freeze procedure before any activation.
 
 **Security boundary:** `rehearseVerifiedDepositPosting` is disposable-database-only and accepts caller-supplied evidence and journal accounts; it is **not** a production verifier, authorization layer or crediting endpoint. Its green tests do not discharge the above requirements.
+
+## Historical wallet assignment gap — blocking finding
+
+The currently reviewed catalog contract requires `user_wallet_assignments(id,user_id,wallet_id,assignment_type,status,ended_at)` and `wallets(wallet_address,chain_id,...)`. It does **not** require an immutable chain-block-based assignment history, a start block, an end block, or evidence that an address was never reassigned to another customer.
+
+Consequently, `src/deposit-wallet-ownership-inspection.js` can only check a supplied **current** assignment snapshot, while `src/deposit-historical-assignment.js` checks caller-supplied intervals and boolean attestations. **Neither establishes historical ownership from trusted storage.** These modules must not be wired to production balance crediting.
+
+Before any live credit:
+1. Independently inspect the actual FadeHost PostgreSQL catalog and existing wallet-assignment history (read-only) to determine whether trustworthy immutable ownership intervals already exist.
+2. If not, design and review an additive, auditable assignment-history schema with explicit start/end block boundaries, no overlapping assignment of one deposit address to different users, immutable historical rows, and a safe handling policy for previously used or reassigned addresses.
+3. In a disposable PostgreSQL 17 environment, prove concurrent reassignment exclusion, unique address-to-user resolution at the transfer block, rollback, and fail-closed behavior on missing/ambiguous historical records.
+4. Tie the verified event block, wallet ownership, intended user, and user ledger account to the **same atomic** posting transaction with suitable locks. Independent RPC evidence and account authorization remain mandatory.
+5. Do not apply a migration to production or change assignment behavior without a separately reviewed backup, migration plan, rollback plan and owner approval.
+
+**Decision: historical wallet ownership is NOT VERIFIED; live deposit crediting remains BLOCKED.**
