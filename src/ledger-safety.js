@@ -59,7 +59,7 @@ export function assertBalancedLedgerEntries(entries) {
     const currency = String(entry.currency || "").trim().toUpperCase();
     const type = String(entry.entry_type || "").toLowerCase();
     const amount = toUsdtUnitsExact(entry.amount);
-    if (!currency || !["credit", "debit"].includes(type) || amount <= 0n) {
+    if (currency !== "USDT" || !["credit", "debit"].includes(type) || amount <= 0n) {
       throw new Error("Invalid ledger entry");
     }
     if (!totals.has(currency)) totals.set(currency, { credit: 0n, debit: 0n });
