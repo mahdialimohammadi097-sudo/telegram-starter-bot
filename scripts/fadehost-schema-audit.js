@@ -237,6 +237,23 @@ if (!process.env.DATABASE_URL) {
     if(duplicates.rows[0].found)
      missing.push("data:user_wallet_assignments.duplicate_active_wallet");
    }
+   // Wallet assignments must point to existing users and wallets.
+   // Catalog foreign keys alone cannot prove legacy data was clean.
+   if(["user_wallet_assignments.user_id","user_wallet_assignments.wallet_id",
+       "users.id","wallets.id"].every(k=>columns.has(k))){
+    const orphanAssignments=await client.query(`SELECT
+      EXISTS(SELECT 1 FROM public.user_wallet_assignments a
+       LEFT JOIN public.users u ON u.id=a.user_id
+       WHERE u.id IS NULL) AS missing_user,
+      EXISTS(SELECT 1 FROM public.user_wallet_assignments a
+       LEFT JOIN public.wallets w ON w.id=a.wallet_id
+       WHERE w.id IS NULL) AS missing_wallet`);
+    const row=orphanAssignments?.rows?.[0];
+    if(typeof row?.missing_user!=="boolean" || typeof row?.missing_wallet!=="boolean")
+     throw new Error("Malformed wallet assignment reference result");
+    if(row.missing_user)missing.push("data:user_wallet_assignments.orphan_user");
+    if(row.missing_wallet)missing.push("data:user_wallet_assignments.orphan_wallet");
+   }
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
