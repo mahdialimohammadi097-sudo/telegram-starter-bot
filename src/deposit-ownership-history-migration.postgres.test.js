@@ -31,6 +31,9 @@ test("ownership history migration rejects overlap and mutation in isolated Postg
   const insert=`INSERT INTO ${table} (wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
    VALUES ($1,$2,56,$3,$4,$5,'disposable-review')`;
   await pool.query(insert,[1,11,address,"100","200"]);
+  await assert.rejects(pool.query(`INSERT INTO ${table}
+   (wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
+   VALUES (1,11,56,$1,300,400,'')`,[address]),error=>error.code==="23514");
   await assert.rejects(pool.query(insert,[2,12,address,"150","250"]),error=>error.code==="23P01");
   await pool.query(insert,[2,12,address,"200",null]);
   await assert.rejects(pool.query(`UPDATE ${table} SET user_id=12 WHERE wallet_id=1`),/immutable/);
