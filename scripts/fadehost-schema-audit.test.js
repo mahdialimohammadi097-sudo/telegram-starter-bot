@@ -45,7 +45,9 @@ test("read-only audit includes duplicate identity and ledger integrity checks",a
   "data:ledger_entries.invalid_currency",
   "data:ledger_entries.account_currency_mismatch",
   "data:user_wallet_assignments.multiple_active_owners",
-  "data:user_wallet_assignments.duplicate_active_wallet"
+  "data:user_wallet_assignments.duplicate_active_wallet",
+  "data:user_wallet_assignments.orphan_user",
+  "data:user_wallet_assignments.orphan_wallet"
  ])assert.ok(source.includes(marker),marker);
  assert.match(source,/GROUP BY event_key HAVING COUNT\(\*\)>1/);
  assert.match(source,/GROUP BY idempotency_key HAVING COUNT\(\*\)>1/);
