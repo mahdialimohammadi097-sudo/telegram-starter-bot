@@ -58,3 +58,36 @@ test("rejects missing, cross-user or wrong-type ledger accounts",async()=>{
   await assert.rejects(prepare({...base,client:clientWith(row,accounts)}));
  }
 });
+
+test("RPC failure fails closed before any wallet or ledger database lookup",async()=>{
+ for(const failure of [new Error("RPC timeout"),new Error("RPC unavailable")]){
+  let calls=0;
+  const client={query:async()=>{calls++;throw new Error("DB must not be queried")}};
+  await assert.rejects(prepare({
+   ...base,client,rpc:async()=>{throw failure}
+  }),err=>err===failure);
+  assert.equal(calls,0);
+ }
+});
+test("ledger account query failure does not return a journal proposal",async()=>{
+ let calls=0;
+ const client={query:async sql=>{
+  calls++;
+  if(sql.includes("deposit_address_ownership_history"))
+   return {rows:[row],rowCount:1};
+  throw new Error("ledger account query failed");
+ }};
+ await assert.rejects(prepare({...base,client}),/ledger account query failed/);
+ assert.equal(calls,2);
+});
+test("no read-only preparation step issues a database write",async()=>{
+ const sqls=[];
+ const original=clientWith();
+ const client={query:async(sql,...rest)=>{
+  sqls.push(sql.trim());
+  return original.query(sql,...rest);
+ }};
+ await prepare({...base,client});
+ assert.equal(sqls.length,2);
+ assert.ok(sqls.every(sql=>sql.startsWith("SELECT")));
+});
