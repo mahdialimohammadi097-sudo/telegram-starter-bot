@@ -33,6 +33,9 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
    throw new Error("Verified deposit destination owner required");
   await lockDepositDestinationAccount(client,destinationOwner);
   const journal=journalForUnits({eventKey,units});
+  // Deposit evidence must not be booked under a different accounting category.
+  if(journal?.transactionType!=="deposit")
+   throw new Error("Deposit journal must use deposit transaction type");
   if(journal?.idempotencyKey!==`verified-deposit:${eventKey}`)
    throw new Error("Deposit journal must use canonical event idempotency key");
   // A balanced but inflated journal must never credit more than chain evidence.
