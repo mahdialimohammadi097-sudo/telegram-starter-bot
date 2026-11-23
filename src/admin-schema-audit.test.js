@@ -36,6 +36,7 @@ test("read-only schema audit rolls back when catalog inspection fails",async()=>
 
 test("schema audit marks structure ready only with all required columns and unique event key",async()=>{
  const required={
+  users:["id"],
   verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
   wallets:["id","wallet_address","chain_id","is_platform_controlled"],
   ledger_accounts:["id","user_id","account_type","currency"],
@@ -60,6 +61,7 @@ test("schema audit marks structure ready only with all required columns and uniq
 });
 test("schema audit rejects nonunique event index despite all columns existing",async()=>{
  const required={
+  users:["id"],
   verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
   wallets:["id","wallet_address","chain_id","is_platform_controlled"],
   ledger_accounts:["id","user_id","account_type","currency"],
@@ -140,4 +142,24 @@ test("migration type preflight rejects incompatible existing wallet IDs without 
  }]);
  assert.equal(result.financialActivationReady,false);
  assert.ok(queries.every(sql=>!/FROM\\s+users\\b|FROM\\s+wallets\\b|SELECT\\s+\\*/i.test(sql)));
+});
+
+test("read-only type audit includes users table in catalog scope",async()=>{
+ const statements=[];
+ const client={query:async(sql,params)=>{
+  statements.push({sql,params});
+  if(sql.includes("information_schema.columns"))return {rows:[
+   {table_name:"users",column_name:"id",data_type:"bigint"},
+   {table_name:"wallets",column_name:"id",data_type:"bigint"},
+   {table_name:"wallets",column_name:"chain_id",data_type:"integer"},
+   {table_name:"user_wallet_assignments",column_name:"user_id",data_type:"bigint"},
+   {table_name:"user_wallet_assignments",column_name:"wallet_id",data_type:"bigint"}
+  ]};
+  return {rows:[]};
+ },release:()=>{}};
+ const report=await inspectDepositSchemaReadOnly({connect:async()=>client});
+ assert.ok(statements.find(x=>x.sql.includes("information_schema.columns")).params[0].includes("users"));
+ assert.ok(!report.incompatibleTypes.some(x=>x.column==="users.id"));
+ assert.ok(report.incompatibleTypes.some(x=>x.column==="wallets.chain_id"&&x.observed==="integer"));
+ assert.equal(report.financialActivationReady,false);
 });
