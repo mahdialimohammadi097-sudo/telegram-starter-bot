@@ -221,6 +221,23 @@ if (!process.env.DATABASE_URL) {
     if(emptyJournals.rows[0].found)
      missing.push("data:ledger_transactions.without_entries");
    }
+   // A posted financial transaction needs at least two distinct account legs.
+   // A one-sided or self-offsetting journal can have equal totals but cannot
+   // represent a valid transfer of value between ledger accounts.
+   if(["ledger_transactions.id","ledger_transactions.status",
+       "ledger_entries.transaction_id","ledger_entries.account_id"].every(k=>columns.has(k))){
+    const malformedPosted=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_transactions t
+      LEFT JOIN public.ledger_entries e ON e.transaction_id=t.id
+      WHERE t.status='posted'
+      GROUP BY t.id
+      HAVING COUNT(e.transaction_id)<2 OR COUNT(DISTINCT e.account_id)<2
+    ) AS found`);
+    if(typeof malformedPosted?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed posted journal leg inspection result");
+    if(malformedPosted.rows[0].found)
+     missing.push("data:ledger_transactions.posted_insufficient_distinct_accounts");
+   }
    // An active wallet must not be assigned to multiple users at once.
    // This is an additional read-only safeguard; historical block ownership
    // remains authoritative for attribution of older deposits.
