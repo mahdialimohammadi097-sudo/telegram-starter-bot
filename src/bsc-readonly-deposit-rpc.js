@@ -46,6 +46,12 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
     !Array.isArray(latestReceipt.logs) ||
     JSON.stringify(latestReceipt.logs)!==JSON.stringify(receipt.logs))
   throw new Error("RPC receipt changed during evidence inspection");
+ const latestTransaction=await request("eth_getTransactionByHash",[transactionHash]);
+ if(!latestTransaction ||
+    latestTransaction.hash?.toLowerCase()!==transaction.hash.toLowerCase() ||
+    latestTransaction.blockHash?.toLowerCase()!==transaction.blockHash.toLowerCase() ||
+    latestTransaction.blockNumber!==transaction.blockNumber)
+  throw new Error("RPC transaction changed during evidence inspection");
  if(await request("eth_chainId",[])!=="0x38")
   throw new Error("RPC chain changed during evidence inspection");
  const finalizedBlockNumber=height(head);
