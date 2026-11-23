@@ -187,6 +187,31 @@ if (!process.env.DATABASE_URL) {
     if(mismatches.rows[0].found)
      missing.push("data:ledger_entries.account_currency_mismatch");
    }
+   // User AVAILABLE balances are credits minus debits from posted entries.
+   // A negative balance is a financial integrity violation even if every
+   // individual journal is balanced. Include empty accounts as zero.
+   if(["ledger_accounts.id","ledger_accounts.account_type","ledger_accounts.user_id",
+       "ledger_entries.account_id","ledger_entries.transaction_id",
+       "ledger_entries.entry_type","ledger_entries.amount",
+       "ledger_transactions.id","ledger_transactions.status"].every(k=>columns.has(k))){
+    const overdrafts=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_accounts a
+      LEFT JOIN public.ledger_entries e ON e.account_id=a.id
+      LEFT JOIN public.ledger_transactions t
+        ON t.id=e.transaction_id AND t.status='posted'
+      WHERE a.account_type='AVAILABLE' AND a.user_id IS NOT NULL
+      GROUP BY a.id
+      HAVING COALESCE(SUM(CASE
+        WHEN t.id IS NULL THEN 0
+        WHEN e.entry_type='credit' THEN e.amount
+        WHEN e.entry_type='debit' THEN -e.amount
+        ELSE 0 END),0)<0
+    ) AS found`);
+    if(typeof overdrafts?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed available-balance inspection result");
+    if(overdrafts.rows[0].found)
+     missing.push("data:ledger_accounts.negative_available_balance");
+   }
    // Event identity and ledger idempotency must be unique in existing data,
    // independently of catalog constraints (which may have been added later).
    if(columns.has("verified_deposit_evidence.event_key")){
