@@ -2352,7 +2352,7 @@ test("deposit rehearsal rejects balanced but inflated journal and rolls back evi
  const {rehearseVerifiedDepositPosting}=await import("./deposit-posting-rehearsal.js");
  const clearing=await createAccount("CLEARING");
  const customer=await createAccount("AVAILABLE");
- const tx="0x"+randomUUID().replaceAll("-").padEnd(64,"a");
+ const tx="0x"+randomUUID().replaceAll("-","").padEnd(64,"a");
  const eventKey="bsc:56:"+tx+":0";
  const evidence={chainId:56,transactionHash:tx,logIndex:0,blockHash:"0x"+"b".repeat(64),
   blockNumber:"123",tokenContract:"0x"+"c".repeat(40),depositAddress:"0x"+"d".repeat(40),
