@@ -25,11 +25,12 @@ try{
  const triggers=await client.query(`
   SELECT tg.tgname AS trigger_name, tg.tgenabled AS enabled,
          tg.tgtype AS trigger_type,
-         p.proname AS function_name
+         p.proname AS function_name, pn.nspname AS function_schema
   FROM pg_trigger tg
   JOIN pg_class rel ON rel.oid=tg.tgrelid
   JOIN pg_namespace ns ON ns.oid=rel.relnamespace
   JOIN pg_proc p ON p.oid=tg.tgfoid
+  JOIN pg_namespace pn ON pn.oid=p.pronamespace
   WHERE ns.nspname='public'
     AND rel.relname='deposit_address_ownership_history'
     AND NOT tg.tgisinternal
@@ -94,7 +95,7 @@ try{
  ];
  const missingTriggers=requiredTriggers.filter(([name,fn,type])=>
   !triggers.rows.some(r=>r.trigger_name===name && r.function_name===fn &&
-   r.enabled==="O" && Number(r.trigger_type)===type))
+   r.enabled==="O" && r.function_schema==="public" && Number(r.trigger_type)===type))
   .map(([name])=>name);
  const structuralReady=missing.length===0 && missingTables.length===0 &&
   missingConstraintTypes.length===0 && missingNamedConstraints.length===0 &&
