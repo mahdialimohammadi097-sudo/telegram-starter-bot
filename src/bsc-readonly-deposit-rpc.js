@@ -22,6 +22,11 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
  const receipt=await request("eth_getTransactionReceipt",[transactionHash]);
  if(!receipt || receipt.transactionHash?.toLowerCase()!==transactionHash.toLowerCase())
   throw new Error("RPC receipt identity mismatch");
+ const transaction=await request("eth_getTransactionByHash",[transactionHash]);
+ if(!transaction || transaction.hash?.toLowerCase()!==transactionHash.toLowerCase() ||
+    transaction.blockHash?.toLowerCase()!==receipt.blockHash?.toLowerCase() ||
+    transaction.blockNumber!==receipt.blockNumber)
+  throw new Error("RPC transaction provenance mismatch");
  const blockHeight=height(receipt.blockNumber);
  const blockTag="0x"+blockHeight.toString(16);
  const first=await request("eth_getBlockByNumber",[blockTag,false]);
