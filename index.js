@@ -40,6 +40,19 @@ const webhookSecret = mode === "webhook"
   ? requireWebhookSecret(process.env.WEBHOOK_SECRET)
   : null;
 
+// Validate webhook destination before starting any runtime service.
+const webhookUrl = mode === "webhook"
+  ? (process.env.WEBHOOK_URL || "").trim().replace(/\\/$/, "")
+  : "";
+if (mode === "webhook") {
+  let parsed;
+  try { parsed = new URL(webhookUrl); } catch { /* fail closed below */ }
+  if (!parsed || parsed.protocol !== "https:" || !parsed.hostname ||
+      parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error("WEBHOOK_URL must be a valid HTTPS URL without credentials, query or fragment.");
+  }
+}
+
 const bot = new Bot(token);
 const runtimeHealth = createRuntimeHealthState();
 let healthServer = null;
@@ -240,7 +253,6 @@ async function main() {
     logCode:(code)=>console.error("[deposit-audit] read-only inspection unavailable:",code)
   });
 
-  const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
   healthMonitor = startHealthMonitor({
     bot,
     pool,
