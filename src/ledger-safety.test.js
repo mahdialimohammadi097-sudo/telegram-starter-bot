@@ -52,3 +52,12 @@ test("available balance cannot be overdrawn or rounded", () => {
   assert.throws(() => assertNonNegativeAvailableBalance("0", "0"), /Insufficient/);
   assert.throws(() => assertNonNegativeAvailableBalance("1.000000001", "1"), /exceeds eight decimal places/);
 });
+
+test("financial parser rejects imprecise JavaScript numeric amounts", () => {
+  assert.throws(() => toUsdtUnitsExact(0.1), /exact decimal string/);
+  assert.throws(() => toUsdtUnitsExact(9007199254740992), /exact decimal string/);
+  assert.throws(() => toUsdtUnitsExact(Number.POSITIVE_INFINITY), /exact decimal string/);
+  assert.equal(toUsdtUnitsExact("0.1"), 10000000n);
+  assert.equal(toUsdtUnitsExact("9007199254740992"), 900719925474099200000000n);
+  assert.equal(toUsdtUnitsExact(10), 1000000000n);
+});
