@@ -3,6 +3,7 @@
 import {withLedgerTransaction,postJournalInTransaction} from "./ledger-posting.js";
 import {normalizeDepositEventIdentity} from "./deposit-event-identity.js";
 import {convertDepositBaseUnitsToLedgerUnits} from "./deposit-unit-conversion.js";
+import {toUsdtUnitsExact} from "./ledger-safety.js";
 export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals,journalForUnits}) {
  if(typeof journalForUnits!=="function") throw new TypeError("Journal builder required");
  const eventKey=normalizeDepositEventIdentity(evidence);
@@ -28,6 +29,15 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
   const journal=journalForUnits({eventKey,units});
   if(journal?.idempotencyKey!==`verified-deposit:${eventKey}`)
    throw new Error("Deposit journal must use canonical event idempotency key");
+  // A balanced but inflated journal must never credit more than chain evidence.
+  if(!Array.isArray(journal.entries) || journal.entries.length!==2)
+   throw new Error("Deposit rehearsal requires exactly two ledger entries");
+  const debit=journal.entries.find(x=>x.entry_type==="debit");
+  const credit=journal.entries.find(x=>x.entry_type==="credit");
+  if(!debit || !credit || journal.entries.some(x=>x.currency!=="USDT") ||
+     toUsdtUnitsExact(debit.amount)!==BigInt(units) ||
+     toUsdtUnitsExact(credit.amount)!==BigInt(units))
+   throw new Error("Deposit journal amount must exactly match verified token units");
   return postJournalInTransaction(client,journal);
  });
 }
