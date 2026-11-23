@@ -15,7 +15,11 @@ test("rehearsal rolls back inserted evidence if journal construction fails",{ski
   await pool.query(`CREATE TEMP TABLE verified_deposit_evidence (
    event_key text PRIMARY KEY,block_hash text NOT NULL,block_number numeric(78,0) NOT NULL,
    token_contract text NOT NULL,deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL)`);
+  await pool.query(`CREATE TEMP TABLE ledger_accounts (
+   id bigint PRIMARY KEY,user_id bigint,account_type text,currency text)`);
+  await pool.query("INSERT INTO pg_temp.ledger_accounts VALUES (44,12,'AVAILABLE','USDT')");
   await assert.rejects(rehearseVerifiedDepositPosting({pool,evidence,tokenDecimals:18,
+   destinationOwner:{accountId:"44",userId:"12"},
    journalForUnits:()=>{throw new Error("forced journal failure");}}),/forced journal failure/);
   const result=await pool.query("SELECT count(*)::int AS count FROM pg_temp.verified_deposit_evidence WHERE event_key=$1",[key]);
   assert.equal(result.rows[0].count,0);
