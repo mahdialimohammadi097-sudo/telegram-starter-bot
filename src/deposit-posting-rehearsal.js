@@ -18,7 +18,9 @@ export async function rehearseVerifiedDepositPosting({pool,evidence,tokenDecimal
     !process.env.DATABASE_URL) throw new Error("Disposable PostgreSQL test mode required");
  const target=new URL(process.env.DATABASE_URL);
  if(!["localhost","127.0.0.1","::1"].includes(target.hostname) ||
-    target.pathname!=="/profino_test") throw new Error("Unsafe rehearsal database");
+    target.pathname!=="/profino_test" ||
+    !pool || pool.options?.connectionString!==process.env.DATABASE_URL)
+  throw new Error("Unsafe rehearsal database or mismatched pool");
  return withLedgerTransaction(pool,async client=>{
   await client.query(`INSERT INTO verified_deposit_evidence
    (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
