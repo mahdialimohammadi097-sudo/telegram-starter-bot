@@ -134,6 +134,32 @@ if (!process.env.DATABASE_URL) {
     if(row.orphan_accounts)missing.push("data:ledger_entries.orphan_accounts");
     if(row.nonpositive_amounts)missing.push("data:ledger_entries.nonpositive_amounts");
    }
+   // Financial invariant: every posted journal must balance exactly in each
+   // currency, with only recognized debit/credit directions. Numeric sums are
+   // computed by PostgreSQL without JavaScript floating-point conversion.
+   if(["ledger_entries.transaction_id","ledger_entries.entry_type",
+       "ledger_entries.amount","ledger_entries.currency"].every(k=>columns.has(k))){
+    const unbalanced=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_entries
+      GROUP BY transaction_id,currency
+      HAVING COUNT(*) FILTER (WHERE entry_type='debit')=0
+        OR COUNT(*) FILTER (WHERE entry_type='credit')=0
+        OR COUNT(*) FILTER (WHERE entry_type IS NULL OR entry_type NOT IN ('debit','credit'))>0
+        OR SUM(CASE WHEN entry_type='debit' THEN amount ELSE 0 END)
+          <> SUM(CASE WHEN entry_type='credit' THEN amount ELSE 0 END)
+    ) AS found`);
+    if(typeof unbalanced?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed journal balance result");
+    if(unbalanced.rows[0].found)
+     missing.push("data:ledger_entries.unbalanced_journals");
+    const invalidCurrency=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.ledger_entries WHERE currency IS NULL OR currency <> 'USDT'
+    ) AS found`);
+    if(typeof invalidCurrency?.rows?.[0]?.found!=="boolean")
+     throw new Error("Malformed ledger currency result");
+    if(invalidCurrency.rows[0].found)
+     missing.push("data:ledger_entries.invalid_currency");
+   }
    // Event identity and ledger idempotency must be unique in existing data,
    // independently of catalog constraints (which may have been added later).
    if(columns.has("verified_deposit_evidence.event_key")){
