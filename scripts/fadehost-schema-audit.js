@@ -21,7 +21,9 @@ if (!process.env.DATABASE_URL) {
  try {
   const client=await pool.connect();
   try {
-   await client.query("BEGIN READ ONLY");
+   // Consistent catalog/data snapshot; bounded lock wait for production safety.
+   await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+   await client.query("SET LOCAL lock_timeout = '2000ms'");
    const {rows}=await client.query(`SELECT table_name,column_name,is_nullable
      FROM information_schema.columns
      WHERE table_schema='public' AND table_name=ANY($1::text[])`,[Object.keys(required)]);
