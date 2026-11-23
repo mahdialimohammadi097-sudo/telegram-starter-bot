@@ -58,6 +58,11 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
  const latestHead=height(await request("eth_blockNumber",[]));
  if(latestHead<finalizedBlockNumber)
   throw new Error("RPC head regressed during evidence inspection");
+ const finalBlock=await request("eth_getBlockByNumber",[blockTag,false]);
+ if(!finalBlock || !HASH.test(finalBlock.hash) ||
+    finalBlock.hash.toLowerCase()!==second.hash.toLowerCase() ||
+    height(finalBlock.number)!==blockHeight)
+  throw new Error("RPC canonical block changed after final receipt inspection");
  // This head is confirmation-depth evidence, not independently verified finality.
  return inspectBscMainnetTransfer({receipt:latestReceipt,chainId:56,
   canonicalBlockHash:second.hash,finalizedBlockNumber,expected});
