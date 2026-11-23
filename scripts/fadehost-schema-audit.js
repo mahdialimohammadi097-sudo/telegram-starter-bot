@@ -44,6 +44,16 @@ if (!process.env.DATABASE_URL) {
     const column=rows.find(x=>x.table_name+"."+x.column_name===key);
     if(column && column.is_nullable!=="NO")missing.push("not_null:"+key);
    }
+   for(const key of [
+    "deposit_address_ownership_history.wallet_id",
+    "deposit_address_ownership_history.user_id",
+    "deposit_address_ownership_history.chain_id",
+    "deposit_address_ownership_history.wallet_address",
+    "deposit_address_ownership_history.start_block"
+   ]){
+    const column=rows.find(x=>x.table_name+"."+x.column_name===key);
+    if(column && column.is_nullable!=="NO")missing.push("not_null:"+key);
+   }
    // Read-only snapshot check: overlapping historical ownership can credit the
    // wrong user even when event identity uniqueness is enforced elsewhere.
    const historyColumns=required.deposit_address_ownership_history.every(c=>
@@ -59,6 +69,12 @@ if (!process.env.DATABASE_URL) {
     ) AS found`);
     if(overlap.rows?.[0]?.found!==false)
      missing.push("overlap:deposit_address_ownership_history");
+    const invalid=await client.query(`SELECT EXISTS (
+      SELECT 1 FROM public.deposit_address_ownership_history
+      WHERE start_block < 0 OR (end_block IS NOT NULL AND end_block<=start_block)
+    ) AS found`);
+    if(invalid.rows?.[0]?.found!==false)
+     missing.push("invalid_interval:deposit_address_ownership_history");
    }
    await client.query("COMMIT");
    output({audit:"fadehost-schema",ready:missing.length===0,missing});
