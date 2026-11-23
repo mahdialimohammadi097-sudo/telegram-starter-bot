@@ -33,6 +33,26 @@ try{
   'deposit_address_ownership_history.wallet_address','deposit_address_ownership_history.start_block',
   'deposit_address_ownership_history.end_block'];
  const missing=required.filter(x=>!names.has(x));
+ // Historical ownership requires exact integer block boundaries and typed identities.
+ const byName=new Map(columns.rows.map(r=>[r.table_name+"."+r.column_name,r]));
+ const requiredTypes=[
+  ["deposit_address_ownership_history.wallet_id","bigint"],
+  ["deposit_address_ownership_history.user_id","bigint"],
+  ["deposit_address_ownership_history.chain_id","bigint"],
+  ["deposit_address_ownership_history.start_block","numeric"],
+  ["deposit_address_ownership_history.end_block","numeric"],
+  ["wallets.id","bigint"],["wallets.chain_id","bigint"],
+  ["wallets.is_platform_controlled","boolean"]
+ ];
+ const typeMismatches=requiredTypes.filter(([name,type])=>
+  byName.has(name) && byName.get(name).data_type!==type).map(([name])=>name);
+ const nullabilityMismatches=[
+  "deposit_address_ownership_history.wallet_id",
+  "deposit_address_ownership_history.user_id",
+  "deposit_address_ownership_history.chain_id",
+  "deposit_address_ownership_history.wallet_address",
+  "deposit_address_ownership_history.start_block"
+ ].filter(name=>byName.has(name) && byName.get(name).is_nullable!=="NO");
  const tables=['wallets','user_wallet_assignments','deposit_address_ownership_history'];
  const presentTables=[...new Set(columns.rows.map(r=>r.table_name))];
  const missingTables=tables.filter(t=>!presentTables.includes(t));
@@ -51,9 +71,11 @@ try{
   .filter(([name,type])=>!identityConstraints.some(r=>r.constraint_name===name && r.type===type && r.validated===true))
   .map(([name])=>name);
  const structuralReady=missing.length===0 && missingTables.length===0 &&
-  missingConstraintTypes.length===0 && missingNamedConstraints.length===0;
+  missingConstraintTypes.length===0 && missingNamedConstraints.length===0 &&
+  typeMismatches.length===0 && nullabilityMismatches.length===0;
  console.log(JSON.stringify({audit:"wallet-ownership-catalog",readyForHistoricalInspection:structuralReady,
-  missing,missingTables,missingConstraintTypes,missingNamedConstraints,columns:columns.rows,constraints:constraints.rows,
+  missing,missingTables,missingConstraintTypes,missingNamedConstraints,typeMismatches,nullabilityMismatches,
+  columns:columns.rows,constraints:constraints.rows,
   financialActivationReady:false,realDepositsEnabled:false}));
  if(!structuralReady) process.exitCode=2;
  await client.query("ROLLBACK");
