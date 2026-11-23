@@ -121,3 +121,19 @@ test("rejects a canonical block reorganization after final receipt inspection",a
  };
  await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/canonical block changed/);
 });
+
+test("rejects conflicting transaction positions in receipt and transaction",async()=>{
+ const inconsistent={...receipt,transactionIndex:"0x2"};
+ const rpc=makeRpc({eth_getTransactionReceipt:inconsistent,
+  eth_getTransactionByHash:{hash:tx,blockHash:hash,blockNumber:"0x64",transactionIndex:"0x3"}});
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/provenance/);
+});
+test("rejects receipt transaction position changing during inspection",async()=>{
+ let reads=0;
+ const rpc=async(method)=>{
+  if(method==="eth_getTransactionReceipt")
+   return {...receipt,transactionIndex:++reads===1?"0x2":"0x3"};
+  return makeRpc()(method);
+ };
+ await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/receipt changed/);
+});
