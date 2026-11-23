@@ -24,13 +24,13 @@ if (!process.env.DATABASE_URL) {
    // Consistent catalog/data snapshot; bounded lock wait for production safety.
    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
    await client.query("SET LOCAL lock_timeout = '2000ms'");
-   const {rows}=await client.query(`SELECT table_name,column_name,is_nullable
+   const {rows}=await client.query(`SELECT table_name,column_name,is_nullable,data_type,numeric_precision,numeric_scale
      FROM information_schema.columns
      WHERE table_schema='public' AND table_name=ANY($1::text[])`,[Object.keys(required)]);
    const columns=new Set(rows.map(x=>x.table_name+"."+x.column_name));
    const missing=Object.entries(required).flatMap(([t,cols])=>
     cols.filter(c=>!columns.has(t+"."+c)).map(c=>t+"."+c));
-   const indexes=await client.query(`SELECT t.relname AS table_name,a.attname AS column_name
+   // Fail closed if ledger amounts cannot represent the exact 8-decimal USDT units.\n   const amountColumn=rows.find(x=>x.table_name==="ledger_entries" && x.column_name==="amount");\n   if(amountColumn && (amountColumn.data_type!=="numeric" ||\n      Number(amountColumn.numeric_precision)!==36 || Number(amountColumn.numeric_scale)!==18))\n    missing.push("type:ledger_entries.amount:numeric(36,18)");\n   const indexes=await client.query(`SELECT t.relname AS table_name,a.attname AS column_name
      FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid
      JOIN pg_namespace n ON n.oid=t.relnamespace
      JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=i.indkey[0]
