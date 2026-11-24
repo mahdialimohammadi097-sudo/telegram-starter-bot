@@ -237,15 +237,15 @@ test("validated deposit draft posts two balanced fixture legs atomically and rej
  try{
   await c.query("CREATE TEMP TABLE fixture_claims(event_key text PRIMARY KEY)");
   await c.query("CREATE TEMP TABLE fixture_legs(event_key text REFERENCES fixture_claims(event_key),account_id bigint NOT NULL,entry_type text NOT NULL CHECK(entry_type IN ('debit','credit')),amount numeric(36,18) NOT NULL CHECK(amount>0))");
-  const post=async()=>{
-   validateDepositPostingDraft(draft);
-   await c.query("BEGIN");
-   try{
-    await c.query("INSERT INTO fixture_claims VALUES ($1)",[draft.eventKey]);
-    for(const leg of draft.entries)await c.query("INSERT INTO fixture_legs VALUES ($1,$2,$3,$4)",[draft.eventKey,leg.account_id,leg.entry_type,leg.amount]);
-    await c.query("COMMIT");
-   }catch(e){await c.query("ROLLBACK");throw e}
+  const {exerciseAtomicDepositPosting}=await import("./deposit-atomic-posting-contract.js");
+  const adapter={
+   begin:()=>c.query("BEGIN"),
+   claim:async(eventKey)=>(await c.query("INSERT INTO fixture_claims VALUES ($1)",[eventKey])).rowCount===1,
+   insertLeg:async(_key,leg)=>(await c.query("INSERT INTO fixture_legs VALUES ($1,$2,$3,$4)",[draft.eventKey,leg.account_id,leg.entry_type,leg.amount])).rowCount===1,
+   commit:()=>c.query("COMMIT"),
+   rollback:()=>c.query("ROLLBACK")
   };
+  const post=()=>exerciseAtomicDepositPosting(adapter,draft);
   await post();
   await assert.rejects(post(),e=>e.code==="23505");
   const r=await c.query("SELECT count(*)::int AS n,SUM(CASE WHEN entry_type='credit' THEN amount ELSE -amount END)::text AS net FROM fixture_legs");
