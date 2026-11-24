@@ -1,12 +1,11 @@
 // Read-only idempotency preflight. This is NOT a substitute for unique
 // database constraints or atomic claim-and-post in the eventual writer.
 // Caller must use a transaction-scoped PostgreSQL client.
-const KEY=/^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$/;
+import {isCanonicalDepositEventKey} from "./deposit-event-identity.js";
 export async function inspectDepositIdempotency(client,{eventKey,schema="public"}){
  if(!client || typeof client.query!=="function" ||
     typeof schema!=="string" || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema) ||
-    typeof eventKey!=="string" || !KEY.test(eventKey) ||
-    eventKey.length>160)
+    !isCanonicalDepositEventKey(eventKey))
   throw new TypeError("Invalid deposit idempotency inspection input");
  const result=await client.query(`
   SELECT
