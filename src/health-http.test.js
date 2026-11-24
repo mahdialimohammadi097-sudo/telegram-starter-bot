@@ -189,3 +189,22 @@ test("webhook handler lookup failures return a sanitized response and preserve l
   fail = false;
   assert.equal(await (await fetch(base + "/telegram", { method: "POST" })).text(), "accepted");
 });
+
+test("direct webhook handler creation fails closed with invalid authentication configuration", () => {
+  const bot = new Bot("offline", { botInfo: { id: 7, is_bot: true, first_name: "Fixture", username: "fixture_bot" } });
+  for (const configuration of [undefined, null, {}, {secret: ""}, {secret: "bad secret"},
+    {secret: "x".repeat(257)}, {secret: {toString: () => "fixture"}}]) {
+    assert.throws(() => telegramWebhookHandler(bot, configuration), /Invalid WEBHOOK_SECRET/);
+  }
+  assert.equal(typeof telegramWebhookHandler(bot, {secret: "fixture"}), "function");
+});
+
+test("webhook configuration rejects ambiguous URL inputs and is immutable", () => {
+  for (const base of ["https://example.invalid?", "https://example.invalid#", new URL("https://example.invalid")]) {
+    assert.throws(() => webhookConfiguration(base, "fixture"), /Invalid WEBHOOK_URL/);
+  }
+  const config = webhookConfiguration("https://example.invalid", "fixture");
+  assert.equal(Object.isFrozen(config), true);
+  assert.throws(() => { config.secret = ""; }, TypeError);
+  assert.equal(config.secret, "fixture");
+});
