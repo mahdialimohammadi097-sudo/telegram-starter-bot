@@ -46,3 +46,11 @@ test("rejects nonprimitive receipt and log fields without implicit coercion",()=
  assert.throws(()=>check({...receipt,logs:[{...log,topics:[null,...log.topics.slice(1)]}]}),/Invalid transfer log/);
  assert.throws(()=>check({...receipt,logs:[null,log]}),/Invalid receipt log/);
 });
+
+test("rejects duplicate unrelated log identities and mismatched transaction indexes",()=>{
+ const duplicate={...log,logIndex:"0x1"};
+ assert.throws(()=>check({...receipt,logs:[log,duplicate,duplicate]}),/identity mismatch/);
+ const indexed={...receipt,transactionIndex:"0x2",logs:[{...log,transactionIndex:"0x2"}]};
+ assert.equal(check(indexed).eventKey,"bsc:56:"+h+":0");
+ for(const i of [null,undefined,"0x1","0x02"]) assert.throws(()=>check({...indexed,logs:[{...indexed.logs[0],transactionIndex:i}]}));
+});
