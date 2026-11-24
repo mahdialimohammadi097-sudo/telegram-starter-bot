@@ -54,7 +54,7 @@ function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1, en
         throw rollbackError;
       }
       if (normalized === "BEGIN" || normalized === "COMMIT" || normalized === "ROLLBACK") {
-        return { rowCount: 0, rows: [] };
+        return { command: normalized, rowCount: 0, rows: [] };
       }
       if (normalized.includes("pg_advisory_xact_lock")) {
         return { rowCount: 1, rows: [] };
@@ -153,7 +153,7 @@ function makeExistingPostingPool({ transaction = {}, priorEntries = [] } = {}) {
       const normalized = sql.replace(/\s+/g, " ").trim();
       calls.push({ sql: normalized, params });
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(normalized)) {
-        return { rowCount: 0, rows: [] };
+        return { command: normalized, rowCount: 0, rows: [] };
       }
       if (normalized.includes("pg_advisory_xact_lock")) {
         return { rowCount: 1, rows: [] };
@@ -321,7 +321,7 @@ test("failed rollback preserves a frozen original error and discards the connect
   const rollbackFailure = new Error("rollback failed");
   const calls = [];
   const pool = { async connect() { return {
-    async query(sql) { calls.push(sql); if (sql === "ROLLBACK") throw rollbackFailure; },
+    async query(sql) { calls.push(sql); if (sql === "ROLLBACK") throw rollbackFailure; return { command: sql }; },
     release(error) { calls.push(error); }
   }; } };
   await assert.rejects(withLedgerTransaction(pool, async () => { throw original; }), error => error === original);
@@ -351,3 +351,22 @@ test("a skipped ledger entry insert rolls back rather than marking a journal pos
   assert.ok(!calls.some(call => call.sql.startsWith("UPDATE ledger_transactions")));
   assert.equal(calls.at(-2).sql, "ROLLBACK");
 });
+
+for (const response of [undefined, null, {}, {command:"SELECT"}, [{command:"COMMIT"}]]) {
+ test("rejects ambiguous BEGIN response: "+JSON.stringify(response),async()=>{
+  let invoked=false,discard;
+  const calls=[];
+  const pool={connect:async()=>({query:async sql=>{calls.push(sql);return response;},release(error){discard=error;}})};
+  await assert.rejects(withLedgerTransaction(pool,async()=>{invoked=true;}),/start unconfirmed/);
+  assert.equal(invoked,false);
+  assert.deepEqual(calls,["BEGIN"]);
+  assert.ok(discard instanceof Error);
+ });
+ test("rejects ambiguous COMMIT response: "+JSON.stringify(response),async()=>{
+  const calls=[];let discard;
+  const pool={connect:async()=>({query:async sql=>{calls.push(sql);return sql==="BEGIN"?{command:"BEGIN"}:response;},release(error){discard=error;}})};
+  await assert.rejects(withLedgerTransaction(pool,async()=>({posted:true})),/commit unconfirmed/);
+  assert.deepEqual(calls,["BEGIN","COMMIT"]);
+  assert.ok(discard instanceof Error);
+ });
+}

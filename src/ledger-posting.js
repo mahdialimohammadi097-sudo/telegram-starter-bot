@@ -80,7 +80,8 @@ export async function withLedgerTransaction(pool, operation) {
   let releaseError = null;
 
   try {
-    await client.query("BEGIN");
+    const started = await client.query("BEGIN");
+    if (started?.command !== "BEGIN") throw new Error("Ledger transaction start unconfirmed");
     transactionOpen = true;
 
     const result = await operation(client);
@@ -90,6 +91,9 @@ export async function withLedgerTransaction(pool, operation) {
     // inside an aborted transaction, for example after a caught SQL error.
     if (completion?.command === "ROLLBACK") {
       throw new Error("Ledger transaction was rolled back instead of committed");
+    }
+    if (completion?.command !== "COMMIT") {
+      throw new Error("Ledger transaction commit unconfirmed");
     }
     return result;
   } catch (error) {
