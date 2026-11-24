@@ -2,7 +2,7 @@ import { validateBep20Receipt } from "./bep20-receipt-validation.js";
 import { bep20BaseUnitsToLedgerAmount } from "./bep20-ledger-precision.js";
 
 const HASH = /^0x[0-9a-f]{64}$/i;
-const Q = /^0x(?:0|[1-9a-f][0-9a-f]*)$/i;
+const Q = /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/i;
 const DEFAULT_TIMEOUT_MS = 8000;
 
 export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
@@ -15,15 +15,21 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
   let nextId = 0;
   async function rpc(method, params) {
     const requestId = ++nextId;
-    const response = await fetchImpl(endpoint.toString(), {
+    let response, data;
+    try {
+      response = await fetchImpl(endpoint.toString(), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: requestId, method, params }),
       signal: AbortSignal.timeout(timeoutMs),
       redirect: "error"
     });
-    if (!response.ok) throw new Error("BSC RPC HTTP failure");
-    const data = await response.json();
+      if (!response.ok) throw new Error("BSC RPC HTTP failure");
+      data = await response.json();
+    } catch {
+      // Transport/parser errors can contain the private RPC URL or response.
+      throw new Error("BSC RPC request failed");
+    }
     if (data?.jsonrpc !== "2.0" || data.id !== requestId || data.error || data.result === undefined || data.result === null) {
       throw new Error("Invalid BSC RPC response");
     }
@@ -32,7 +38,8 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
   return async function inspectDeposit(txHash, logIndex, policy) {
     if (typeof txHash !== "string" || !HASH.test(txHash)) throw new Error("Invalid transaction hash");
     if (typeof logIndex !== "string" || !Q.test(logIndex)) throw new Error("Invalid log index");
-    if (!policy || policy.chainId !== 56 && policy.chainId !== "56") throw new Error("Unsupported chain configuration");
+    const configured = Object.freeze({ ...policy });
+    if (configured.chainId !== 56 && configured.chainId !== "56") throw new Error("Unsupported chain configuration");
     const chainId = await rpc("eth_chainId", []);
     if (chainId !== "0x38") throw new Error("RPC is not BSC mainnet");
     const receipt = await rpc("eth_getTransactionReceipt", [txHash]);
@@ -46,7 +53,9 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
         secondReceipt.blockHash?.toLowerCase() !== receipt.blockHash.toLowerCase() ||
         secondReceipt.blockNumber !== receipt.blockNumber ||
         secondReceipt.status !== receipt.status) throw new Error("Transaction receipt changed during inspection");
-    const evidence = validateBep20Receipt(secondReceipt, logIndex, block, {...policy, confirmedHeadBlock: BigInt(head).toString()});
+    const canonical = await rpc("eth_getBlockByNumber", [secondReceipt.blockNumber, false]);
+    if (canonical.hash !== block.hash || canonical.number !== block.number) throw new Error("Canonical block changed during inspection");
+    const evidence = validateBep20Receipt(secondReceipt, logIndex, canonical, {...configured, confirmedHeadBlock: BigInt(head).toString()});
     const ledgerAmount = bep20BaseUnitsToLedgerAmount(evidence.amountBaseUnits);
     return Object.freeze({ ...evidence, ledgerAmount });
   };
