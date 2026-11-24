@@ -1,4 +1,5 @@
 import { assertBalancedLedgerEntries, toUsdtUnitsExact } from "./ledger-safety.js";
+import { rollbackTransaction } from "./transaction-safety.js";
 
 function normalizeAccountId(value) {
   if (typeof value === "number" && !Number.isSafeInteger(value)) {
@@ -88,13 +89,10 @@ export async function withLedgerTransaction(pool, operation) {
     return result;
   } catch (error) {
     if (transactionOpen) {
-      try {
-        await client.query("ROLLBACK");
-      } catch (rollbackError) {
-        error.rollbackError = rollbackError;
-        // A client with an uncertain transaction state must not return to the pool.
-        releaseError = rollbackError;
-      }
+      releaseError = await rollbackTransaction(client, error);
+    } else {
+      // A failed BEGIN may leave the connection in an unknown state.
+      releaseError = error instanceof Error ? error : new Error("PostgreSQL BEGIN failed");
     }
     throw error;
   } finally {
