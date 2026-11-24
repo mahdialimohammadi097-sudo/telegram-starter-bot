@@ -63,6 +63,16 @@ test("approval and rejection cannot run before startup recovery completes", { ti
       async answerCallbackQuery(answer) { alerts.push(answer); }
     });
   }
+  await callback({
+    from: { id: owner + 1 },
+    callbackQuery: { data: "post_approve:42", message: { chat: { id: owner, type: "private" } } },
+    async answerCallbackQuery(answer) { assert.equal(answer.text, "Unauthorized."); }
+  });
+  await callback({
+    from: { id: owner },
+    callbackQuery: { data: "post_approve:42", message: { chat: { id: owner, type: "private" } } },
+    async answerCallbackQuery() { throw new Error("expired callback"); }
+  });
   assert.equal(query.mock.callCount(), 0);
   assert.equal(connectCalls, 1);
   assert.equal(alerts.length, 2);
