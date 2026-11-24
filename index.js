@@ -9,6 +9,7 @@ import { startScheduler } from "./src/scheduler.js";
 import { ensurePostHistorySchema } from "./src/post-history.js";
 import { ensureAdminOpsSchema } from "./src/admin-ops.js";
 import { inspectCoreSchema } from "./src/database-diagnostics.js";
+import { deliverAdminSchemaAudit } from "./src/admin-schema-audit.js";
 import { formatStartupHealthReport } from "./src/health-report.js";
 import { startHealthMonitor } from "./src/health-monitor.js";
 import { createRuntimeHealthState } from "./src/runtime-health.js";
@@ -266,6 +267,14 @@ async function main() {
   registerCommands(bot, simulationHandlers);
 
   await sendStartupReport(me.username);
+
+  if (shuttingDown) return;
+  // Preserve the existing production metadata report; never send financial data.
+  await deliverAdminSchemaAudit({
+    pool, adminId: ADMIN_ID,
+    sendMessage: (id, message) => shuttingDown ? undefined : bot.api.sendMessage(id, message),
+    logCode: code => console.error("[deposit-audit] read-only inspection unavailable:", code)
+  });
 
   if (shuttingDown) return;
   healthMonitor = startHealthMonitor({
