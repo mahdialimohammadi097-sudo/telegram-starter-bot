@@ -4,6 +4,7 @@ export function startHealthHttpServer({
   port,
   runtimeHealth,
   getBotUsername = () => "PROFINO",
+  webhookPath = "/telegram",
   getWebhookHandler = () => null
 }) {
   const server = http.createServer(async (req, res) => {
@@ -32,7 +33,7 @@ export function startHealthHttpServer({
       return res.end("alive");
     }
 
-    if (req.method === "POST" && pathname === "/telegram") {
+    if (req.method === "POST" && (pathname === webhookPath || pathname === "/telegram")) {
       try {
         const handler = getWebhookHandler();
         if (handler) return await handler(req, res);
