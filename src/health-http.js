@@ -6,7 +6,7 @@ export function startHealthHttpServer({
   getBotUsername = () => "PROFINO",
   getWebhookHandler = () => null
 }) {
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     let pathname = "/";
     try {
       pathname = new URL(req.url || "/", "http://localhost").pathname;
@@ -33,10 +33,22 @@ export function startHealthHttpServer({
     }
 
     if (req.method === "POST" && pathname === "/telegram") {
-      const handler = getWebhookHandler();
-      if (handler) return handler(req, res);
-      res.writeHead(503, { "cache-control": "no-store" });
-      return res.end("webhook not configured");
+      try {
+        const handler = getWebhookHandler();
+        if (handler) return await handler(req, res);
+        res.writeHead(503, { "cache-control": "no-store" });
+        return res.end("webhook not configured");
+      } catch {
+        // Never expose a Telegram or database error to the HTTP client.
+        console.error("[health] webhook handler failed");
+        if (res.writableEnded || res.destroyed) return;
+        if (res.headersSent) {
+          res.destroy();
+          return;
+        }
+        res.writeHead(500, { "cache-control": "no-store", "content-type": "text/plain; charset=utf-8" });
+        return res.end("internal server error");
+      }
     }
 
     if (req.method === "GET" && pathname === "/") {
