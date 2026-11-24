@@ -106,10 +106,46 @@ test("stopping during a health probe suppresses stale status and alerts", async 
     onStatus: () => { events.push("status"); },
     logger: { warn() {}, error() {} }
   });
+  // Probes are now dispatched in a microtask to contain synchronous failures.
+  // Wait until the probe has actually started before testing in-flight shutdown.
+  await Promise.resolve();
+  assert.equal(typeof failProbe, "function");
   monitor.stop();
   failProbe(new Error("offline"));
   await monitor.ready;
   assert.deepEqual(events, []);
   await monitor.check();
   assert.equal(checks, 1);
+});
+
+test("synchronous probe failure marks only the affected service unavailable", async (t) => {
+  const statuses = [];
+  const monitor = startHealthMonitor({
+    bot: { api: { sendMessage: async () => {} } },
+    pool: { query() { throw new Error("synthetic database failure"); } },
+    telegramCheck: () => true,
+    onStatus: status => statuses.push(status),
+    logger: { warn() {}, error() {} }
+  });
+  t.after(() => monitor.stop());
+  await monitor.ready;
+  assert.deepEqual(statuses, [{ telegram: true, database: false }]);
+});
+
+
+test("a synchronous Telegram probe failure does not prevent the database health check", async () => {
+  const states = [];
+  let databaseChecks = 0;
+  const monitor = startHealthMonitor({
+    bot: { api: { sendMessage() { throw new Error("must not send"); } } },
+    pool: { query() { databaseChecks++; return Promise.resolve({}); } },
+    telegramCheck() { throw new Error("synthetic probe failure"); },
+    onStatus: state => states.push(state),
+    logger: { warn() {}, error() {} }
+  });
+  try {
+    await monitor.ready;
+    assert.equal(databaseChecks, 1);
+    assert.deepEqual(states, [{ telegram: false, database: true }]);
+  } finally { monitor.stop(); }
 });

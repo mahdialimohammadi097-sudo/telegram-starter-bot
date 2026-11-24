@@ -170,3 +170,22 @@ test("HTTP shutdown waits for accepted webhook work after the sender disconnects
   await stopping;
   assert.equal(calls, 1);
 });
+
+test("webhook handler lookup failures return a sanitized response and preserve liveness", async t => {
+  let fail = true;
+  const server = await startHealthHttpServer({ port: 0, runtimeHealth: createRuntimeHealthState(),
+    getWebhookHandler() {
+      if (fail) throw new Error("synthetic confidential detail");
+      return (_req, res) => res.end("accepted");
+    }
+  });
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = "http://127.0.0.1:" + server.address().port;
+  const rejected = await fetch(base + "/telegram", { method: "POST" });
+  assert.equal(rejected.status, 500);
+  assert.equal(rejected.headers.get("cache-control"), "no-store");
+  assert.equal(await rejected.text(), "webhook processing failed");
+  assert.equal((await fetch(base + "/livez")).status, 200);
+  fail = false;
+  assert.equal(await (await fetch(base + "/telegram", { method: "POST" })).text(), "accepted");
+});

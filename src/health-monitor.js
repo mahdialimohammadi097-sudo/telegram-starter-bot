@@ -43,8 +43,8 @@ export function startHealthMonitor({
     running = true;
     try {
       const [telegramResult, databaseResult] = await Promise.allSettled([
-        telegramCheck(),
-        pool.query("SELECT 1 AS health_check")
+        Promise.resolve().then(() => telegramCheck()),
+        Promise.resolve().then(() => pool.query("SELECT 1 AS health_check"))
       ]);
       if (stopped) return;
       const current = {
@@ -52,6 +52,7 @@ export function startHealthMonitor({
         database: databaseResult.status === "fulfilled"
       };
       onStatus(current);
+      if (stopped) return;
       const changes = getHealthChanges(previous, current);
 
       for (const change of changes) {
