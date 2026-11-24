@@ -16,10 +16,14 @@ export function toUsdtUnits(value) {
 // Financial validation must never round an input into a different amount.
 // Keep toUsdtUnits() for display formatting, where rounding to eight places is intentional.
 export function toUsdtUnitsExact(value) {
-  // Numeric inputs outside JavaScript's safe integer range may already be rounded.
-  if (typeof value === "number" && (!Number.isFinite(value) ||
-      (Number.isInteger(value) && !Number.isSafeInteger(value)))) {
+  // Floating-point fractions may have lost precision before reaching this boundary.
+  // Only exact integer numbers or explicit decimal strings / whole-unit bigints
+  // are accepted for financial validation; display formatting remains separate.
+  if (typeof value === "number" && !Number.isSafeInteger(value)) {
     throw new TypeError("Unsafe numeric USDT amount; provide a decimal string");
+  }
+  if (!["string", "number", "bigint"].includes(typeof value)) {
+    throw new TypeError("Invalid USDT amount");
   }
   const raw = String(value ?? "").trim();
   const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(raw);
