@@ -1,10 +1,11 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
 
 // Disposable, transaction-scoped rehearsal only. Never point at production.
 test("legacy two-state synthetic withdrawal schema upgrades without losing rows and rolls back", {
-  skip: !process.env.DATABASE_URL
+  skip: !isDisposablePostgresTarget(process.env.DATABASE_URL, "profino_test")
 }, async () => {
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   const client = await pool.connect();

@@ -1,9 +1,10 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Bot } from "grammy";
 
 test("private admin language survives new updates and handles unavailable preferences or Telegram edits", {
-  skip: !process.env.DATABASE_URL
+  skip: !isDisposablePostgresTarget(process.env.DATABASE_URL, "profino_test")
 }, async t => {
   const { pool } = await import("./database.js");
   const { registerCommands } = await import("./commands.js");
