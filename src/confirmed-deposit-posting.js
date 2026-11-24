@@ -1,4 +1,4 @@
-import { requireUniqueDepositOwner } from "./deposit-owner-guard.js";
+import { requireUniqueDepositOwner, isValidDepositDatabaseId } from "./deposit-owner-guard.js";
 import { bep20BaseUnitsToLedgerAmount } from "./bep20-ledger-precision.js";
 import { withLedgerTransaction, postJournalInTransaction } from "./ledger-posting.js";
 
@@ -24,8 +24,8 @@ export async function postConfirmedDeposit({ pool, evidence, clearingAccountId,
       !/^bsc:56:0x[0-9a-f]{64}:(?:0|[1-9][0-9]*)$/.test(verified.eventKey)) {
     throw new Error("Deposit event key must be canonical");
   }
-  const clearing = String(clearingAccountId ?? "");
-  if (!/^[1-9][0-9]*$/.test(clearing)) throw new Error("Invalid clearing account");
+  if (!isValidDepositDatabaseId(clearingAccountId)) throw new Error("Invalid clearing account");
+  const clearing = String(clearingAccountId);
   Object.freeze(verified);
   return withLedgerTransaction(pool, async client => {
     // Lock event before accounts, matching the ledger's global lock order.
