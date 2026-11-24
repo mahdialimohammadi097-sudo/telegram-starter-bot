@@ -34,6 +34,7 @@ jobs:
           else
             PREVIOUS="unknown"
           fi
+          case "$PREVIOUS" in up|down|unknown) ;; *) PREVIOUS="unknown" ;; esac
           echo "status=$PREVIOUS" >> "$GITHUB_OUTPUT"
           echo "Previous monitor state: $PREVIOUS"
 
@@ -99,10 +100,13 @@ jobs:
 
       - name: Prepare monitor state
         if: steps.notify.outcome == 'success'
+        env:
+          CURRENT_STATUS: ${{ steps.check.outputs.status }}
         shell: bash
         run: |
+          case "$CURRENT_STATUS" in up|down) ;; *) exit 1 ;; esac
           mkdir -p .profinostate
-          printf "%s" "${{ steps.check.outputs.status }}" > .profinostate/status
+          printf "%s" "$CURRENT_STATUS" > .profinostate/status
 
       - name: Save monitor state
         if: steps.notify.outcome == 'success'
