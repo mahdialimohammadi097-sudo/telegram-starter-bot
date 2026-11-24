@@ -40,6 +40,31 @@ if (mode === "webhook" && !/^[A-Za-z0-9_-]{1,256}$/.test(webhookSecret)) {
   process.exit(1);
 }
 
+function validateWebhookUrl(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("Invalid WEBHOOK_URL");
+  }
+  if (url.protocol !== "https:" || url.username || url.password ||
+      url.search || url.hash || raw.includes("?") || raw.includes("#")) {
+    throw new Error("Invalid WEBHOOK_URL");
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "") + "/telegram";
+  return url.href;
+}
+
+let webhookUrl = null;
+if (mode === "webhook") {
+  try {
+    webhookUrl = validateWebhookUrl((process.env.WEBHOOK_URL || "").trim());
+  } catch {
+    console.error("[startup] WEBHOOK_URL must be an HTTPS base URL without credentials, query or fragment.");
+    process.exit(1);
+  }
+}
+
 function safeErrorCode(error) {
   const code = error?.error_code ?? error?.response?.error_code ?? error?.code;
   return typeof code === "number" && Number.isInteger(code) ? code : "operation_failed";
@@ -245,14 +270,13 @@ async function main() {
     logCode:(code)=>console.error("[deposit-audit] read-only inspection unavailable:",code)
   });
 
-  const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
   healthMonitor = startHealthMonitor({
     bot,
     pool,
     telegramCheck: mode === "webhook"
       ? async () => {
           const info = await bot.api.getWebhookInfo();
-          return info.url === `${webhookUrl}/telegram`;
+          return info.url === webhookUrl;
         }
       : async () => { await bot.api.getMe(); return true; },
     onStatus: (status) => {
@@ -264,20 +288,16 @@ async function main() {
   scheduler = startScheduler(bot);
 
   if (mode === "webhook") {
-    if (!webhookUrl.startsWith("https://")) {
-      throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
-    }
-
     const secret = webhookSecret;
     webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
 
-    await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
+    await retryUntilAvailable(() => bot.api.setWebhook(webhookUrl, {
       secret_token: secret,
       drop_pending_updates: false
     }), "Telegram webhook registration");
 
     runtimeHealth.setTelegramReceiverActive(true);
-    console.log(`[bot] webhook registered at ${webhookUrl}/telegram`);
+    console.log("[bot] webhook registered");
     return;
   }
 
