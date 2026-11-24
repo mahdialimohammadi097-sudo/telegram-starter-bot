@@ -6,13 +6,14 @@ const {registerAdminOps}=await import("./admin-ops.js");
 
 test("status changes fail closed when audit insertion or transaction completion is uncertain",async t=>{
  const owner=8810232463;
- for(const mode of ["begin-failure","audit-skipped","rollback-failure","rolled-back-commit"]){
+ for(const mode of ["begin-failure","ambiguous-begin","audit-skipped","rollback-failure","rolled-back-commit","ambiguous-commit"]){
   const queries=[],releases=[],answers=[];
   const query=t.mock.method(pool,"query",async()=>({rows:[{language:"en"}]}));
   const connect=t.mock.method(pool,"connect",async()=>({
    async query(sql){
     queries.push(sql);
     if(sql==="BEGIN"&&mode==="begin-failure")throw new Error("fixture begin");
+    if(sql==="BEGIN"&&mode==="ambiguous-begin")return {};
     if(sql.includes("SELECT id, status, xmin"))return {rowCount:1,rows:[{id:"2",status:"active",version:"7"}]};
     if(sql.includes("FROM admin_users"))return {rowCount:1,rows:[{user_id:"1"}]};
     if(sql.includes("UPDATE users SET status"))return {rowCount:1,rows:[{id:"2"}]};
@@ -21,7 +22,7 @@ test("status changes fail closed when audit insertion or transaction completion 
      return {rowCount:mode==="audit-skipped"?0:1};
     }
     if(sql==="ROLLBACK"&&mode==="rollback-failure")throw new Error("fixture rollback");
-    if(sql==="COMMIT")return {command:"ROLLBACK"};
+    if(sql==="COMMIT")return {command:mode==="ambiguous-commit"?undefined:"ROLLBACK"};
     return {command:sql};
    },release(error){releases.push(error);}
   }));
@@ -38,7 +39,8 @@ test("status changes fail closed when audit insertion or transaction completion 
    assert.equal(answers[0].text,"Unable to update user status.");
    assert.equal(releases.length,1);
    assert.equal(Boolean(releases[0]),mode!=="audit-skipped");
-   assert.equal(queries.includes("COMMIT"),mode==="rolled-back-commit");
+   assert.equal(queries.includes("COMMIT"),["rolled-back-commit","ambiguous-commit"].includes(mode));
+   assert.equal(queries.some(sql=>sql.includes("SELECT id, status, xmin")),!["begin-failure","ambiguous-begin"].includes(mode));
    assert.equal(queries.includes("ROLLBACK"),["audit-skipped","rollback-failure"].includes(mode));
   }finally{query.mock.restore();connect.mock.restore();}
  }

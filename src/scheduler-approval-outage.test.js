@@ -19,7 +19,7 @@ for (const failure of ["connect", "lock"]) {
             calls.push(sql);
             if (sql.includes("pg_advisory_lock_shared")) throw new Error("lock unavailable");
           }
-          return { rows: sql.includes("AS unlocked") ? [{ unlocked: !unavailable }] : [] };
+          return { command: sql.split(" ")[0], rows: sql.includes("AS unlocked") ? [{ unlocked: !unavailable }] : [] };
         },
         release() {}
       });

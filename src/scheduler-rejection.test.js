@@ -8,7 +8,7 @@ const { startScheduler } = await import("./scheduler.js");
 
 test("an expired rejection acknowledgement still clears the preview buttons", async t => {
   t.mock.method(pool, "connect", async () => Object.assign(new EventEmitter(), {
-    async query(sql) { return { rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] }; },
+    async query(sql) { return { command: sql.split(" ")[0], rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] }; },
     release() {}
   }));
   let updates = 0;
