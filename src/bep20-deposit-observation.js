@@ -30,7 +30,8 @@ export function validateBep20DepositObservation(event, policy) {
   if (unsigned(event.chainId, "event chain ID") !== 56n) throw new Error("Wrong event network");
   if (address(event.tokenContract, "event token contract") !== contract) throw new Error("Wrong token contract");
   if (address(event.to, "event recipient") !== recipient) throw new Error("Wrong deposit recipient");
-  address(event.from, "event sender");
+  const sender = address(event.from, "event sender");
+  if (sender === recipient || sender === "0x" + "0".repeat(40)) throw new Error("Invalid transfer sender");
   if (typeof event.txHash !== "string" || !HASH.test(event.txHash)) throw new TypeError("Invalid transaction hash");
   const logIndex = unsigned(event.logIndex, "log index");
   const amount = unsigned(event.amountBaseUnits, "token amount");
