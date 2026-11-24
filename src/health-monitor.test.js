@@ -132,3 +132,20 @@ test("synchronous probe failure marks only the affected service unavailable", as
   assert.deepEqual(statuses, [{ telegram: true, database: false }]);
 });
 
+
+test("a synchronous Telegram probe failure does not prevent the database health check", async () => {
+  const states = [];
+  let databaseChecks = 0;
+  const monitor = startHealthMonitor({
+    bot: { api: { sendMessage() { throw new Error("must not send"); } } },
+    pool: { query() { databaseChecks++; return Promise.resolve({}); } },
+    telegramCheck() { throw new Error("synthetic probe failure"); },
+    onStatus: state => states.push(state),
+    logger: { warn() {}, error() {} }
+  });
+  try {
+    await monitor.ready;
+    assert.equal(databaseChecks, 1);
+    assert.deepEqual(states, [{ telegram: false, database: true }]);
+  } finally { monitor.stop(); }
+});
