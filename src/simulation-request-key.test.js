@@ -24,3 +24,12 @@ test("invalid request key identifiers are rejected", () => {
   }
   assert.throws(() => simulationRequestKey("other", 123, 77), TypeError);
 });
+
+test("rejects ambiguous and out-of-range identities in both key positions", () => {
+  for (const id of [Number.MAX_SAFE_INTEGER + 1, "9223372036854775808", "9".repeat(10000), ["12"], {toString: () => "12"}, "012", 1.5, true]) {
+    assert.throws(() => simulationRequestKey("telegram-preview", id, 34), TypeError);
+    assert.throws(() => simulationRequestKey("telegram-preview", 12, id), TypeError);
+  }
+  assert.equal(simulationRequestKey("telegram-preview", "9223372036854775807", 34n),
+    simulationRequestKey("telegram-preview", 9223372036854775807n, "34"));
+});
