@@ -3,12 +3,12 @@ import {verifyHistoricalWalletRecord} from "./deposit-historical-wallet-record.j
 // Read-only historical consistency inspection. Never credits balances.
 // Caller must independently verify chain evidence and historical provenance.
 export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumber,walletAddress,expectedUserId,schema="public",lockRows=true}){
- if(typeof lockRows!=="boolean" || typeof schema!=="string" || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
+ if(typeof lockRows!=="boolean" || typeof schema!=="string" || /\s/.test(schema) || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
   throw new TypeError("Invalid schema");
- if(!client || typeof client.query!=="function" || typeof walletAddress!=="string" ||
+ if(!client || typeof client.query!=="function" || typeof walletAddress!=="string" || walletAddress.length!==42 ||
     !/^0x[0-9a-f]{40}$/.test(walletAddress) ||
-    typeof expectedUserId!=="string" || !/^[1-9][0-9]{0,18}$/.test(expectedUserId) || BigInt(expectedUserId)>9223372036854775807n ||
-    typeof eventBlockNumber!=="string" || !/^(0|[1-9][0-9]{0,77})$/.test(eventBlockNumber))
+    typeof expectedUserId!=="string" || /\s/.test(expectedUserId) || !/^[1-9][0-9]{0,18}$/.test(expectedUserId) || BigInt(expectedUserId)>9223372036854775807n ||
+    typeof eventBlockNumber!=="string" || /\s/.test(eventBlockNumber) || !/^(0|[1-9][0-9]{0,77})$/.test(eventBlockNumber))
   throw new TypeError("Invalid historical inspection input");
  // Lock wallet identity against concurrent changes until the caller transaction ends.
  // Callers must hold an explicit transaction when using this for financial checks.
