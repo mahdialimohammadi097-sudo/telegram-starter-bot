@@ -8,7 +8,7 @@ export function validateDepositPostingDraft(draft){
  throw new Error("Invalid deposit posting identity");
  assertBalancedLedgerEntries(draft.entries);
  const [debit,credit]=draft.entries;
- const validId=v=>typeof v==="string"&&/^[1-9][0-9]{0,18}$/.test(v)&&BigInt(v)<=9223372036854775807n;
+ const validId=v=>typeof v==="string"&&!/\s/.test(v)&&/^[1-9][0-9]{0,18}$/.test(v)&&BigInt(v)<=9223372036854775807n;
  if(!validId(draft.userId)||!validId(draft.walletId)||!validId(debit.account_id)||!validId(credit.account_id)||
  debit.account_id===credit.account_id||debit.entry_type!=="debit"||credit.entry_type!=="credit"||
  debit.currency!=="USDT"||credit.currency!=="USDT"||
