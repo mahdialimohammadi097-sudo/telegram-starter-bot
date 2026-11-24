@@ -81,3 +81,12 @@ test("schema audit checks posted available-balance overdrafts",async()=>{
  assert.match(source,/t\.status='posted'/);
  assert.match(source,/WHEN e\.entry_type='debit' THEN -e\.amount/);
 });
+
+test("ledger foreign key audit requires exact target ID columns",async()=>{
+ const {readFileSync}=await import("node:fs");
+ const source=readFileSync(script,"utf8");
+ assert.ok(source.includes("ta.attname AS target_column"));
+ assert.ok(source.includes("ta.attnum=c.confkey[1]"));
+ assert.ok(source.includes('references.has(column+":public."+target+".id")'));
+ assert.ok(source.includes("c.convalidated"));
+});
