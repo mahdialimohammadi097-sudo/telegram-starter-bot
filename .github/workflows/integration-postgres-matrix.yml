@@ -47,7 +47,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Syntax validation
         run: |
           find . -path ./node_modules -prune -o -name '*.js' -print0 | xargs -0 -n1 node --check

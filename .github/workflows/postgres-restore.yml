@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Run synthetic dump and restore on PostgreSQL 17
         run: |
           docker run --rm --network none --user postgres \
