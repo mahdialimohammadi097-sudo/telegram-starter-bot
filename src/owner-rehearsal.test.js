@@ -2,21 +2,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { registerOwnerRehearsal } from "./owner-rehearsal.js";
 
-function setup({ name = "profino_test", marker = "isolated-staging", configured = true, snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "5" }] } = {}) {
+function setup({ name = "profino_test", marker = "isolated-staging", databaseMarker = true, configured = true, testUrl = "postgresql://localhost/profino_test", snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "5" }] } = {}) {
   let reads = 0;
   const calls = [];
   let handler;
   const sandbox = {
     async query(sql) {
       calls.push("sandbox-read");
-      return { rows: sql.includes("current_database") ? [{ name, marker }] : [{ id: "9" }] };
+      return { rows: sql.includes("current_database") ? [{ database_name: name, environment: marker, database_marker: databaseMarker }] : [{ id: "9" }] };
     },
     async end() { calls.push("closed"); }
   };
   registerOwnerRehearsal({ command(name, fn) { assert.equal(name, "admintest"); handler = fn; } }, {
     productionPool: { async query() { calls.push("production-read"); return { rows: [{ name: "profino-db" }] }; } },
     ownerId: 10, getLanguage: async () => "fa",
-    env: configured ? { PROFINO_TEST_DATABASE_URL: "unused", PROFINO_TEST_DATABASE_NAME: "profino_test" } : {},
+    env: configured ? { PROFINO_TEST_DATABASE_URL: testUrl, PROFINO_TEST_DATABASE_NAME: "profino_test" } : {},
     createPool: () => sandbox,
     balances: async pool => { assert.equal(pool, sandbox); return snapshots[reads++]; },
     reserve: async (pool, id, key, amount) => {
@@ -45,7 +45,7 @@ test("ordinary users and group chats cannot access the owner rehearsal", async (
   assert.deepEqual(s.messages, []);
 });
 test("production database, missing isolation marker and absent configuration fail before writes", async () => {
-  for (const config of [{ name: "profino-db" }, { marker: null }, { configured: false }]) {
+  for (const config of [{ name: "profino-db" }, { marker: null }, { databaseMarker: false }, { databaseMarker: "true" }, { testUrl: "postgresql://localhost/profino_test?sslmode=require" }, { configured: false }]) {
     const s = setup(config);
     await s.handler(s.ctx);
     assert.ok(!s.calls.includes("reserve"));

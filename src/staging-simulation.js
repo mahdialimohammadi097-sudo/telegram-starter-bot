@@ -1,3 +1,4 @@
+import { isolatedDatabaseIdentitySql, isIsolatedDatabaseIdentity } from "./isolated-database-identity.js";
 import { openSimulatedInvestment } from "../test-support/simulated-investment.js";
 import {
   reserveWithdrawal, cancelWithdrawal, listReservedWithdrawals,
@@ -34,10 +35,8 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
   if (!/(?:^|_)(?:staging|test|sandbox)(?:_|$)/i.test(expectedDatabase)) {
     throw new Error("Simulation database name must visibly identify an isolated test environment");
   }
-  const { rows: [marker] } = await pool.query(
-    "SELECT current_setting('profino.environment', true) AS environment, current_database() AS database_name"
-  );
-  if (marker?.environment !== "isolated-staging" || marker.database_name !== expectedDatabase) {
+  const { rows: [marker] } = await pool.query(isolatedDatabaseIdentitySql);
+  if (!isIsolatedDatabaseIdentity(marker, expectedDatabase)) {
     throw new Error("Simulation requires an independently marked isolated staging database");
   }
   const { rows } = await pool.query(
