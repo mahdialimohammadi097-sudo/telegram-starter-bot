@@ -13,7 +13,8 @@ const required = {
  ledger_entries:["transaction_id","account_id","entry_type","amount","currency"],
  verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"]
 };
-const output = value => process.stdout.write(JSON.stringify(value)+"\n");
+let report;
+const output = value => { report = value; };
 if (!process.env.DATABASE_URL) {
  output({audit:"fadehost-schema",ready:false,error:"DATABASE_URL_NOT_CONFIGURED"});
  process.exitCode=3;
@@ -60,3 +61,6 @@ if (!process.env.DATABASE_URL) {
   }
  }
 }
+
+// Emit exactly one report, including any cleanup failure.
+process.stdout.write(JSON.stringify(report)+"\n");
