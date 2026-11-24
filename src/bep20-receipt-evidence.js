@@ -21,7 +21,8 @@ function logQuantity(value) {
   return index;
 }
 export function verifyBep20DepositReceipt({receipt, transaction, block, head, tokenContract, depositAddress, minConfirmations = 20}) {
-  if (!ADDRESS.test(tokenContract ?? "") || !ADDRESS.test(depositAddress ?? "") ||
+  if (typeof tokenContract !== "string" || typeof depositAddress !== "string" ||
+      !ADDRESS.test(tokenContract) || !ADDRESS.test(depositAddress) ||
       !Number.isSafeInteger(minConfirmations) || minConfirmations < 1) throw new Error("Invalid trusted receipt configuration");
   if (!receipt || !transaction || !block || !HEX64.test(receipt.transactionHash ?? "") ||
       !HEX64.test(receipt.blockHash ?? "") || !HEX64.test(block.hash ?? "") ||
@@ -37,10 +38,15 @@ export function verifyBep20DepositReceipt({receipt, transaction, block, head, to
   for (const log of receipt.logs) {
     if (!log || typeof log !== "object") throw new Error("Malformed receipt log");
     if (typeof log.address !== "string" || log.address.toLowerCase() !== tokenContract.toLowerCase()) continue;
-    if (!Array.isArray(log.topics) || log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC) continue;
+    if (!Array.isArray(log.topics) || typeof log.topics[0] !== "string" || log.topics[0].toLowerCase() !== TRANSFER_TOPIC) continue;
     if (log.topics.length !== 3 || !/^0x[0-9a-fA-F]{64}$/.test(log.topics[1]) ||
         typeof log.topics[2] !== "string" || log.topics[2].toLowerCase() !== expectedTo ||
         typeof log.data !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(log.data)) continue;
+    const senderTopic = log.topics[1];
+    if (typeof senderTopic !== "string" || !/^0x0{24}[0-9a-fA-F]{40}$/.test(senderTopic) ||
+        senderTopic.toLowerCase() === expectedTo || senderTopic.toLowerCase() === "0x" + "0".repeat(64)) {
+      throw new Error("Invalid transfer sender");
+    }
     const index = logQuantity(log.logIndex);
     const amount = BigInt(log.data);
     const indexKey = index.toString();
