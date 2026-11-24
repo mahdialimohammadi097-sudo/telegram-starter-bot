@@ -450,7 +450,7 @@ async function applyUserStatus(ctx, telegramId, newStatus, expectedStatus) {
        FROM admin_users au
        JOIN users u ON u.id = au.user_id
        WHERE u.telegram_id = $1 AND au.status = 'active'
-       LIMIT 1`,
+       LIMIT 1 FOR SHARE OF au`,
       [SUPER_ADMIN_ID]
     );
     if (!admin.rowCount) {
