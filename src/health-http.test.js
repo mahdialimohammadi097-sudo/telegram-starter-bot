@@ -113,3 +113,29 @@ test("real grammY HTTP adapter rejects unauthenticated updates before dispatch",
   assert.equal(await send(3, "synthetic-test-secret"), 200);
   assert.deepEqual(dispatched, [3]);
 });
+
+test("configured webhook path and proxy-stripped path authenticate consistently", async (t) => {
+  const seen = [];
+  const bot = new Bot("123456:synthetic-test-token");
+  bot.init = async () => {};
+  bot.handleUpdate = async update => { seen.push(update.update_id); };
+  const handler = webhookCallback(bot, "http", { secretToken: "synthetic-test-secret" });
+  const server = await startHealthHttpServer({
+    port: 0, runtimeHealth: createRuntimeHealthState(),
+    webhookPath: "/bot/telegram", getWebhookHandler: () => handler
+  });
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function send(path, id, secret = "synthetic-test-secret") {
+    const response = await fetch(base + path, { method: "POST",
+      headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": secret },
+      body: JSON.stringify({ update_id: id }) });
+    await response.text();
+    return response.status;
+  }
+  assert.equal(await send("/bot/telegram", 1), 200);
+  assert.equal(await send("/telegram", 2), 200);
+  assert.equal(await send("/bot/telegram", 3, "incorrect"), 401);
+  assert.equal(await send("/other/telegram", 4), 404);
+  assert.deepEqual(seen, [1, 2]);
+});
