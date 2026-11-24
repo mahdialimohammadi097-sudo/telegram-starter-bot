@@ -29,6 +29,8 @@ jobs:
           node-version: 26
       - name: Check tracked credential and backup filenames
         run: node scripts/check-sensitive-paths.js
+      - name: Scan tracked text for credential patterns
+        run: node scripts/check-secret-patterns.js
       - name: Check JavaScript syntax
         run: |
           find . -path ./node_modules -prune -o -name "*.js" -print0 | xargs -0 -n1 node --check
