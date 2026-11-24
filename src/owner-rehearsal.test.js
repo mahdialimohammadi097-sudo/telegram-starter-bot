@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { registerOwnerRehearsal } from "./owner-rehearsal.js";
 
-function setup({ name = "profino_test", marker = "isolated-staging", configured = true } = {}) {
+function setup({ name = "profino_test", marker = "isolated-staging", configured = true, snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "5" }] } = {}) {
+  let reads = 0;
   const calls = [];
   let handler;
   const sandbox = {
@@ -17,7 +18,7 @@ function setup({ name = "profino_test", marker = "isolated-staging", configured 
     ownerId: 10, getLanguage: async () => "fa",
     env: configured ? { PROFINO_TEST_DATABASE_URL: "unused", PROFINO_TEST_DATABASE_NAME: "profino_test" } : {},
     createPool: () => sandbox,
-    balances: async pool => { assert.equal(pool, sandbox); return { AVAILABLE: "5" }; },
+    balances: async pool => { assert.equal(pool, sandbox); return snapshots[reads++]; },
     reserve: async (pool, id, key, amount) => {
       assert.equal(pool, sandbox); assert.equal(id, "9"); assert.equal(key, "owner-rehearsal:32");
       assert.equal(amount, "1"); calls.push("reserve"); return { id: "12" };
@@ -50,5 +51,34 @@ test("production database, missing isolation marker and absent configuration fai
     assert.ok(!s.calls.includes("reserve"));
     assert.ok(!s.calls.includes("cancel"));
     assert.equal(s.messages.length, 1);
+  }
+});
+
+test("exact reconciliation accepts PostgreSQL decimal zero padding", async () => {
+  const s = setup({ snapshots: [
+    { AVAILABLE: "5.000000000000000000" },
+    { AVAILABLE: "5.0", WITHDRAWAL_HOLD: "0.000000000000000000" }
+  ] });
+  await s.handler(s.ctx);
+  assert.match(s.messages[0], /موفق/);
+  assert.ok(s.calls.includes("cancel"));
+});
+
+test("nonrepresentable starting balances fail before any synthetic writes", async () => {
+  for (const snapshot of [{ AVAILABLE: "5.000000001" }, { AVAILABLE: "5", WITHDRAWAL_HOLD: null }, { AVAILABLE: "-1" }]) {
+    const s = setup({ snapshots: [snapshot] });
+    await s.handler(s.ctx);
+    assert.ok(!s.calls.includes("reserve"));
+    assert.ok(!s.calls.includes("cancel"));
+    assert.match(s.messages[0], /کامل نشد/);
+  }
+});
+
+test("reconciliation cannot hide small changes behind display rounding", async () => {
+  for (const snapshot of [{ AVAILABLE: "5.000000001" }, { AVAILABLE: "5", WITHDRAWAL_HOLD: "0.000000001" }, { AVAILABLE: "5.00000001" }]) {
+    const s = setup({ snapshots: [{ AVAILABLE: "5" }, snapshot] });
+    await s.handler(s.ctx);
+    assert.ok(s.calls.includes("cancel"));
+    assert.match(s.messages[0], /کامل نشد/);
   }
 });
