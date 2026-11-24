@@ -2211,7 +2211,9 @@ test("staging Telegram adapters complete synthetic investment and withdrawal lif
   const isolated = {
     query(sql, params) {
       if (sql.includes("current_setting('profino.environment'")) {
-        return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] });
+        // Lifecycle fixture only; actual catalog marker is tested separately on PostgreSQL.
+        assert.match(sql, /pg_catalog\.pg_db_role_setting/);
+        return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it", database_marker: true }] });
       }
       return pool.query(sql, params);
     },
@@ -2247,7 +2249,9 @@ test("staging reviewer releases synthetic withdrawal once and revoked reviewer c
   const isolated = {
     query(sql, params) {
       if (sql.includes("current_setting('profino.environment'")) {
-        return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] });
+        // Lifecycle fixture only; actual catalog marker is tested separately on PostgreSQL.
+        assert.match(sql, /pg_catalog\.pg_db_role_setting/);
+        return Promise.resolve({ rows: [{ environment: "isolated-staging", database_name: "profino_staging_it", database_marker: true }] });
       }
       return pool.query(sql, params);
     },
