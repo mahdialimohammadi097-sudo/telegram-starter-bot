@@ -280,6 +280,12 @@ test("review-only deposit schema validates in isolated temporary namespace", {sk
   const args=["bsc:56:0x"+"b".repeat(64)+":0","0x"+"c".repeat(64),"0x"+"d".repeat(40),"0x"+"a".repeat(40)];
   const insert="INSERT INTO pg_temp.verified_deposit_evidence(event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES($1,$2,1,$3,$4,100)";
   await c.query(insert,args);
+  for(const mutation of ["UPDATE pg_temp.verified_deposit_evidence SET amount_base_units=200","DELETE FROM pg_temp.verified_deposit_evidence","TRUNCATE pg_temp.verified_deposit_evidence"]){
+   await c.query("SAVEPOINT immutable_check");
+   await assert.rejects(c.query(mutation),e=>e.code==="55000");
+   await c.query("ROLLBACK TO SAVEPOINT immutable_check");
+  }
+  assert.equal((await c.query("SELECT amount_base_units::text AS amount FROM pg_temp.verified_deposit_evidence")).rows[0].amount,"100");
   await assert.rejects(c.query(insert,args),e=>e.code==="23505");
   await c.query("ROLLBACK");
  }finally{try{await c.query("ROLLBACK")}catch{}c.release();await pool.end()}
