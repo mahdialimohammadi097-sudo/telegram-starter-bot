@@ -35,6 +35,16 @@ ALTER TABLE public.deposit_address_ownership_history
           ('x'||substring(wallet_address from 33 for 10))::bit(40)::bigint::numeric,'[]') WITH &&,
  numrange(start_block,end_block,'[)') WITH &&
  );
+-- Evidence rows are append-only; corrections require a separately reviewed reconciliation design.
+CREATE FUNCTION public.reject_deposit_evidence_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $guard$
+BEGIN
+ RAISE EXCEPTION 'Deposit evidence is immutable' USING ERRCODE='55000';
+END;
+$guard$;
+CREATE TRIGGER deposit_evidence_immutable
+ BEFORE UPDATE OR DELETE OR TRUNCATE ON public.verified_deposit_evidence
+ FOR EACH STATEMENT EXECUTE FUNCTION public.reject_deposit_evidence_mutation();
 -- Immutable provenance, role grants and reconciliation
 -- are unresolved. No historical assignments may be inferred or backfilled.
 -- Deliberate rollback: this proposal cannot persist changes as supplied.
