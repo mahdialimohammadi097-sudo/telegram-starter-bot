@@ -485,7 +485,7 @@ export async function commitUserStatus(telegramId, newStatus, expectedStatus, ve
     }
     const auditDetails = JSON.stringify({ old_status: oldStatus, new_status: newStatus });
 
-    await client.query(
+    const audit = await client.query(
       `INSERT INTO admin_audit_logs
         (admin_user_id, actor_telegram_id, action, target_user_id,
          currency, metadata, details)
@@ -498,13 +498,18 @@ export async function commitUserStatus(telegramId, newStatus, expectedStatus, ve
         auditDetails
       ]
     );
-    await client.query("COMMIT");
+    if (audit.rowCount !== 1) throw new Error("User status audit did not create exactly one row.");
+    const completion = await client.query("COMMIT");
     transactionOpen = false;
+    if (completion?.command !== "COMMIT") throw new Error("User status transaction did not commit.");
     return true;
   } catch (error) {
     if (transactionOpen) {
       releaseError = await rollbackTransaction(client, error);
       transactionOpen = false;
+    } else {
+      // Failed BEGIN or unconfirmed COMMIT leaves this client unsuitable for reuse.
+      releaseError = error instanceof Error ? error : new Error("User status transaction failed.");
     }
     throw error;
   } finally {

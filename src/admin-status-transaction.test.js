@@ -1,0 +1,45 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+process.env.DATABASE_URL ??= "postgresql://localhost/profino_test";
+const {pool}=await import("./database.js");
+const {registerAdminOps}=await import("./admin-ops.js");
+
+test("status changes fail closed when audit insertion or transaction completion is uncertain",async t=>{
+ const owner=8810232463;
+ for(const mode of ["begin-failure","audit-skipped","rollback-failure","rolled-back-commit"]){
+  const queries=[],releases=[],answers=[];
+  const query=t.mock.method(pool,"query",async()=>({rows:[{language:"en"}]}));
+  const connect=t.mock.method(pool,"connect",async()=>({
+   async query(sql){
+    queries.push(sql);
+    if(sql==="BEGIN"&&mode==="begin-failure")throw new Error("fixture begin");
+    if(sql.includes("SELECT id, status, xmin"))return {rowCount:1,rows:[{id:"2",status:"active",version:"7"}]};
+    if(sql.includes("FROM admin_users"))return {rowCount:1,rows:[{user_id:"1"}]};
+    if(sql.includes("UPDATE users SET status"))return {rowCount:1,rows:[{id:"2"}]};
+    if(sql.includes("INSERT INTO admin_audit_logs")){
+     if(mode==="rollback-failure")throw new Error("fixture audit");
+     return {rowCount:mode==="audit-skipped"?0:1};
+    }
+    if(sql==="ROLLBACK"&&mode==="rollback-failure")throw new Error("fixture rollback");
+    if(sql==="COMMIT")return {command:"ROLLBACK"};
+    return {command:sql};
+   },release(error){releases.push(error);}
+  }));
+  try{
+   let handler;
+   registerAdminOps({command(){},callbackQuery(pattern,fn){if(Array.isArray(pattern)&&pattern.some(p=>p.test("usc:456:blocked:active:7")))handler=fn;}});
+   assert.equal(typeof handler,"function");
+   await handler({
+    from:{id:owner},chat:{id:owner,type:"private"},
+    callbackQuery:{data:"usc:456:blocked:active:7"},
+    answerCallbackQuery:async value=>answers.push(value)
+   });
+   assert.equal(answers.length,1);
+   assert.equal(answers[0].text,"Unable to update user status.");
+   assert.equal(releases.length,1);
+   assert.equal(Boolean(releases[0]),mode!=="audit-skipped");
+   assert.equal(queries.includes("COMMIT"),mode==="rolled-back-commit");
+   assert.equal(queries.includes("ROLLBACK"),["audit-skipped","rollback-failure"].includes(mode));
+  }finally{query.mock.restore();connect.mock.restore();}
+ }
+});
