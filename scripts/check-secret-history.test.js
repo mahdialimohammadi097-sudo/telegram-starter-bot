@@ -24,6 +24,10 @@ test("history scan detects a removed synthetic credential without returning its 
   assert.equal(result.scanned, 2);
   assert.equal(result.findings.get("github-token"), 1);
   assert.equal(result.findings.size, 1);
+  assert.equal(result.findingObjects.length, 1);
+  assert.equal(result.findingObjects[0].kind, "github-token");
+  assert.match(result.findingObjects[0].oid, /^[a-f0-9]{40,64}$/);
+  assert.deepEqual(Object.keys(result.findingObjects[0]).sort(), ["kind", "oid"]);
   assert.equal(result.reviewed, 0);
 });
 
