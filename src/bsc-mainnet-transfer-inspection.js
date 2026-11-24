@@ -3,20 +3,21 @@
 import {normalizeDepositEventIdentity} from "./deposit-event-identity.js";
 import {convertDepositBaseUnitsToLedgerUnits} from "./deposit-unit-conversion.js";
 const HASH=/^0x[0-9a-f]{64}$/i;
+const validHash=value=>typeof value==="string" && value.length===66 && HASH.test(value);
 const ADDRESS=/^0x[0-9a-f]{40}$/i;
 const TOPIC="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const rpcBlockNumber=value=>{
  if(typeof value==="number") return Number.isSafeInteger(value) && value>=0 ? value : null;
- if(typeof value!=="string" || !/^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(value)) return null;
+ if(typeof value!=="string" || value.length>16 || /\s/.test(value) || !/^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(value)) return null;
  const number=BigInt(value);
  return number<=BigInt(Number.MAX_SAFE_INTEGER) ? Number(number) : null;
 };
-const normalizeAddress=value=>typeof value==="string"&&ADDRESS.test(value)?value.toLowerCase():null;
+const normalizeAddress=value=>typeof value==="string"&&value.length===42&&ADDRESS.test(value)?value.toLowerCase():null;
 export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,finalizedBlockNumber,expected}) {
  const receiptBlockNumber=rpcBlockNumber(receipt?.blockNumber);
  const finalityHeight=rpcBlockNumber(finalizedBlockNumber);
- if(chainId!==56 || receipt?.status!=="0x1" || !HASH.test(receipt?.transactionHash) ||
-    !HASH.test(receipt?.blockHash) || !HASH.test(canonicalBlockHash) ||
+ if(chainId!==56 || receipt?.status!=="0x1" || !validHash(receipt?.transactionHash) ||
+    !validHash(receipt?.blockHash) || !validHash(canonicalBlockHash) ||
     receipt.blockHash.toLowerCase()!==canonicalBlockHash.toLowerCase() ||
     receiptBlockNumber===null ||
     finalityHeight===null || finalityHeight<receiptBlockNumber ||
@@ -26,7 +27,7 @@ export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,fi
  const token=normalizeAddress(expected?.tokenContract);
  const recipient=normalizeAddress(expected?.depositAddress);
  if(!token || !recipient || token==="0x"+"0".repeat(40) || recipient==="0x"+"0".repeat(40) ||
-    !HASH.test(expected?.transactionHash) ||
+    !validHash(expected?.transactionHash) ||
     expected.transactionHash.toLowerCase()!==receipt.transactionHash.toLowerCase())
    throw new Error("Unapproved token, recipient or transaction identity");
  const eventKey=normalizeDepositEventIdentity({chainId,transactionHash:receipt.transactionHash,logIndex:expected.logIndex});
@@ -34,7 +35,7 @@ export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,fi
  const matches=(Array.isArray(receipt.logs)?receipt.logs:[]).filter(log=>{
   const index=log?.logIndex;
   if(typeof index==="number") return Number.isSafeInteger(index) && index>=0 && BigInt(index)===expectedLogIndex;
-  if(typeof index==="string" && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(index)) return BigInt(index)===expectedLogIndex;
+  if(typeof index==="string" && index.length<=10 && !/\s/.test(index) && /^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(index)) return BigInt(index)===expectedLogIndex;
   return false;
  });
  const log=matches[0];
@@ -49,11 +50,11 @@ export function inspectBscMainnetTransfer({receipt,chainId,canonicalBlockHash,fi
     rpcBlockNumber(log.blockNumber)!==receiptBlockNumber ||
     !Array.isArray(log.topics) || log.topics.length!==3 ||
     log.topics[0]?.toLowerCase()!==TOPIC ||
-    !/^0x0{24}[0-9a-f]{40}$/i.test(log.topics[1]) ||
+    !validHash(log.topics[1]) || !/^0x0{24}[0-9a-f]{40}$/i.test(log.topics[1]) ||
     /^0x0{64}$/i.test(log.topics[1]) ||
     log.topics[2]?.toLowerCase()!==topicRecipient ||
     log.topics[1]?.toLowerCase()===topicRecipient ||
-    !/^0x[0-9a-f]{64}$/i.test(log.data))
+    !validHash(log.data))
    throw new Error("Transfer log does not match configured token and recipient");
  const amountBaseUnits=BigInt(log.data).toString();
  if(BigInt(amountBaseUnits)===0n) throw new Error("Zero-value Transfer is not a deposit");
