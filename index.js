@@ -16,6 +16,7 @@ import { createRuntimeHealthState } from "./src/runtime-health.js";
 import { webhookConfiguration, telegramWebhookHandler } from "./src/telegram-webhook.js";
 import { startHealthHttpServer } from "./src/health-http.js";
 import { safeDiagnosticCode } from "./src/diagnostic-safety.js";
+import { prepareRuntimeSchema } from "./src/runtime-schema-policy.js";
 
 const ADMIN_ID = 8810232463;
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -255,12 +256,12 @@ async function main() {
   console.log("[database] PostgreSQL connected successfully.");
   console.log("[database] server time:", dbResult.server_time);
 
-  await ensurePostHistorySchema();
+  await prepareRuntimeSchema({
+    pool, ensurePostHistorySchema, ensureAdminOpsSchema,
+    isStopping: () => shuttingDown
+  });
   if (shuttingDown) return;
-  console.log("[post-history] schema and audit trigger ready.");
-  await ensureAdminOpsSchema();
-  if (shuttingDown) return;
-  console.log("[admin-ops] audit log schema ready.");
+  console.log("[startup] runtime schema preparation completed.");
 
   const me = await retryUntilAvailable(() => bot.api.getMe(), "Telegram API authentication");
   if (shuttingDown) return;

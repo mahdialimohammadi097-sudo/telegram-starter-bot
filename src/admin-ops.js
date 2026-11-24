@@ -8,6 +8,7 @@ import { adminText, getAdminLanguage } from "./admin-language.js";
 import { rollbackTransaction } from "./transaction-safety.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { editAdminMessageSafely } from "./admin-message-edit.js";
+import { runtimeSchemaMode } from "./runtime-schema-policy.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -57,6 +58,14 @@ async function recordAdminActivity(ctx, action, targetTelegramId = null, details
   if (!isSuperAdminPrivate(ctx)) return { ok: false };
   try {
     const result = await pool.query(
+      runtimeSchemaMode() === "verify-only" ? `
+       WITH active_owner AS MATERIALIZED (SELECT public.profino_lock_active_owner() AS user_id)
+       INSERT INTO admin_audit_logs
+         (admin_user_id, actor_telegram_id, action, target_user_id, currency, metadata, details)
+       SELECT au.user_id, $1::bigint, $2, target.id, 'USDT', $4::jsonb, $4::jsonb
+       FROM active_owner au LEFT JOIN users target ON target.telegram_id = $3
+       WHERE au.user_id IS NOT NULL
+       RETURNING id` :
       `INSERT INTO admin_audit_logs
          (admin_user_id, actor_telegram_id, action, target_user_id, currency, metadata, details)
        SELECT au.user_id, owner.telegram_id, $2, target.id, 'USDT', $4::jsonb, $4::jsonb
@@ -463,13 +472,16 @@ export async function commitUserStatus(telegramId, newStatus, expectedStatus, ve
       return false;
     }
 
+    const restricted = runtimeSchemaMode() === "verify-only";
     const admin = await client.query(
+      restricted ? `WITH active_owner AS MATERIALIZED (SELECT public.profino_lock_active_owner() AS user_id)
+        SELECT user_id FROM active_owner WHERE user_id IS NOT NULL` :
       `SELECT au.user_id
        FROM admin_users au
        JOIN users u ON u.id = au.user_id
        WHERE u.telegram_id = $1 AND au.role = 'owner' AND au.status = 'active'
        LIMIT 1 FOR SHARE OF au, u`,
-      [SUPER_ADMIN_ID]
+      restricted ? [] : [SUPER_ADMIN_ID]
     );
     if (!admin.rowCount) {
       throw new Error("No active admin_users record is linked to the Super Admin.");
