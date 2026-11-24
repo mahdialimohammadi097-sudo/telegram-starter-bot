@@ -216,7 +216,7 @@ export function registerCommands(bot) {
         return ctx.reply(message);
       }
     } catch (error) {
-      console.error("[access-control] status check failed:", error.message);
+      console.error("[access-control] status check failed:", "operation_failed");
       const message = "We cannot verify your account right now. Please try again later.";
       if (ctx.callbackQuery) {
         return ctx.answerCallbackQuery({ text: message, show_alert: true });
@@ -248,7 +248,7 @@ export function registerCommands(bot) {
         { reply_markup: mainKeyboard(language) }
       );
     } catch (error) {
-      console.error("[registration] Failed:", error.message);
+      console.error("[registration] Failed:", "operation_failed");
 
       await ctx.reply(
         "Unable to load your account. Please try again later."
@@ -315,7 +315,7 @@ export function registerCommands(bot) {
         "Connection test successful."
       );
     } catch (error) {
-      console.error("[channel] Check failed:", error.message);
+      console.error("[channel] Check failed:", "operation_failed");
 
       return ctx.reply(
         "Channel connection failed. Please check the bot permissions."
@@ -373,7 +373,7 @@ export function registerCommands(bot) {
     try {
       await showScheduledPosts(ctx);
     } catch (error) {
-      console.error("[scheduled-posts] Failed:", error);
+      console.error("[scheduled-posts] Failed:", "operation_failed");
 
       await ctx.reply(
         "Unable to retrieve scheduled posts. Please try again."
@@ -481,7 +481,7 @@ export function registerCommands(bot) {
             "Nothing will be published until you approve it."
           );
         } catch (error) {
-          console.error("[newpost] Database error:", error);
+          console.error("[newpost] Database error:", "operation_failed");
 
           return ctx.reply(
             "Unable to save the post.\n" +
@@ -527,7 +527,7 @@ export function registerCommands(bot) {
           { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
-        console.error("[account] Failed:", error.message);
+        console.error("[account] Failed:", "operation_failed");
 
         return ctx.reply(
           "Unable to load account information. Please try again later."
@@ -563,7 +563,7 @@ export function registerCommands(bot) {
           { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
-        console.error("[wallet] Failed:", error.message);
+        console.error("[wallet] Failed:", "operation_failed");
 
         return ctx.reply(
           "Unable to load wallet balances. Please try again later.",
