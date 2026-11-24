@@ -2,7 +2,7 @@
 -- Requires independent schema, permissions, provenance and accounting review.
 BEGIN;
 CREATE TABLE public.verified_deposit_evidence (
- event_key text PRIMARY KEY CHECK (CASE WHEN event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]{0,9})),
+ event_key text PRIMARY KEY CHECK (CASE WHEN event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]{0,9})$' THEN split_part(event_key, ':', 4)::numeric <= 4294967295 ELSE false END),
  block_hash text NOT NULL CHECK (block_hash ~ '^0x[0-9a-f]{64}$'),
  block_number numeric(78,0) NOT NULL CHECK (block_number>=0 AND block_number<power(2::numeric,256)),
  token_contract text NOT NULL CHECK (token_contract ~ '^0x[0-9a-f]{40}$'),
