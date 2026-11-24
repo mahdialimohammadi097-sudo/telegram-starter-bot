@@ -11,17 +11,21 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: profino-external-uptime
+  cancel-in-progress: false
+
 jobs:
   uptime:
     name: Check FadeHost application availability
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - name: Restore previous monitor state
         uses: actions/cache/restore@v4
         with:
           path: .profinostate
-          key: profino-uptime-${{ github.run_id }}
+          key: profino-uptime-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             profino-uptime-
 
@@ -34,6 +38,7 @@ jobs:
           else
             PREVIOUS="unknown"
           fi
+          case "$PREVIOUS" in up|down|unknown) ;; *) PREVIOUS="unknown" ;; esac
           echo "status=$PREVIOUS" >> "$GITHUB_OUTPUT"
           echo "Previous monitor state: $PREVIOUS"
 
@@ -41,12 +46,23 @@ jobs:
         id: check
         shell: bash
         run: |
-          HEALTH_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app/healthz" || true)"
-          ROOT_STATUS="$(curl --silent --show-error --max-time 15 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app" || true)"
+          # A main push can overlap FadeHost's restart. Retry briefly before
+          # declaring an outage; sustained failures still fail the workflow.
+          HEALTH_STATUS="000"
+          ROOT_STATUS="000"
+          for ATTEMPT in 1 2 3; do
+            HEALTH_STATUS="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app/healthz" || true)"
+            ROOT_STATUS="$(curl --silent --show-error --max-time 10 --output /dev/null --write-out "%{http_code}" "https://telegram-bot-d23e.fadehost.app" || true)"
+            echo "Attempt $ATTEMPT: health HTTP $HEALTH_STATUS; root HTTP $ROOT_STATUS"
+            if [ "$HEALTH_STATUS" = "200" ] && [ "$ROOT_STATUS" = "200" ]; then
+              break
+            fi
+            if [ "$ATTEMPT" -lt 3 ]; then sleep 5; fi
+          done
           echo "Health endpoint HTTP status: $HEALTH_STATUS"
           echo "Root endpoint HTTP status: $ROOT_STATUS"
 
-          if [ "$HEALTH_STATUS" = "200" ]; then
+          if [ "$HEALTH_STATUS" = "200" ] && [ "$ROOT_STATUS" = "200" ]; then
             echo "status=up" >> "$GITHUB_OUTPUT"
           else
             echo "status=down" >> "$GITHUB_OUTPUT"
@@ -78,7 +94,7 @@ jobs:
             MESSAGE="PROFINO MONITOR CONNECTED: External monitoring is active and the FadeHost application is responding."
           fi
 
-          RESPONSE="$(curl --fail --silent --show-error --max-time 15 \
+          RESPONSE="$(curl --fail --silent --max-time 15 \
             --request POST \
             --data-urlencode "chat_id=8810232463" \
             --data-urlencode "text=$MESSAGE" \
@@ -88,17 +104,20 @@ jobs:
 
       - name: Prepare monitor state
         if: steps.notify.outcome == 'success'
+        env:
+          CURRENT_STATUS: ${{ steps.check.outputs.status }}
         shell: bash
         run: |
+          case "$CURRENT_STATUS" in up|down) ;; *) exit 1 ;; esac
           mkdir -p .profinostate
-          printf "%s" "${{ steps.check.outputs.status }}" > .profinostate/status
+          printf "%s" "$CURRENT_STATUS" > .profinostate/status
 
       - name: Save monitor state
         if: steps.notify.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: .profinostate
-          key: profino-uptime-${{ github.run_id }}
+          key: profino-uptime-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Mark unavailable application check as failed
         if: steps.check.outputs.status == 'down'
