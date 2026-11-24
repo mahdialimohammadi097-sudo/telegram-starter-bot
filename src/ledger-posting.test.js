@@ -370,3 +370,18 @@ for (const response of [undefined, null, {}, {command:"SELECT"}, [{command:"COMM
   assert.ok(discard instanceof Error);
  });
 }
+
+test("an unconfirmed rollback preserves the original error and discards the ledger session", async () => {
+  const original = new Error("fixture operation failure");
+  const calls = [];
+  let discarded;
+  const pool = { async connect() { return {
+    async query(sql) { calls.push(sql); return sql === "BEGIN" ? { command: sql } : {}; },
+    release(error) { discarded = error; }
+  }; } };
+  await assert.rejects(withLedgerTransaction(pool, async () => { throw original; }), error => error === original);
+  assert.deepEqual(calls, ["BEGIN", "ROLLBACK"]);
+  assert.ok(discarded instanceof Error);
+  assert.match(discarded.message, /rollback unconfirmed/);
+  assert.equal(original.rollbackError, discarded);
+});
