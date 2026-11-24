@@ -32,3 +32,11 @@ test("retains eight decimal precision and rejects excessive units",()=>{
  assert.equal(result.entries[0].amount,"0.00000001");
  assert.throws(()=>draft({evidence:{...evidence,units:"1"+"0".repeat(26)},...accounts}));
 });
+
+test("journal proposals require canonical uint32 log indices",()=>{
+ const prefix="bsc:56:0x"+"a".repeat(64)+":";
+ for(const index of ["4294967296","01","1\n","9".repeat(1000)]){
+  assert.throws(()=>draft({evidence:{...evidence,eventKey:prefix+index},...accounts}));
+ }
+ assert.equal(draft({evidence:{...evidence,eventKey:prefix+"4294967295"},...accounts}).eventKey,prefix+"4294967295");
+});
