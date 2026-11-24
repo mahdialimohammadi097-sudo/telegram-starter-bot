@@ -31,11 +31,11 @@ test("ledger entries must balance per currency without rounding", () => {
   ]), /exceeds eight decimal places/);
 });
 
-test("ledger balancing is isolated by currency", () => {
+test("ledger rejects cross-currency entries before balance evaluation", () => {
   assert.throws(() => assertBalancedLedgerEntries([
     { currency: "USDT", entry_type: "debit", amount: "1" },
     { currency: "USDC", entry_type: "credit", amount: "1" }
-  ]), /Unbalanced/);
+  ]), /Invalid ledger entry/);
 });
 
 test("ledger entries reject invalid or non-positive amounts", () => {
@@ -51,4 +51,100 @@ test("available balance cannot be overdrawn or rounded", () => {
   assert.throws(() => assertNonNegativeAvailableBalance("10", "10.00000001"), /Insufficient/);
   assert.throws(() => assertNonNegativeAvailableBalance("0", "0"), /Insufficient/);
   assert.throws(() => assertNonNegativeAvailableBalance("1.000000001", "1"), /exceeds eight decimal places/);
+});
+
+test("financial parser rejects imprecise JavaScript numeric amounts", () => {
+  assert.throws(() => toUsdtUnitsExact(0.1), /exact decimal string/);
+  assert.throws(() => toUsdtUnitsExact(9007199254740992), /exact decimal string/);
+  assert.throws(() => toUsdtUnitsExact(Number.POSITIVE_INFINITY), /exact decimal string/);
+  assert.equal(toUsdtUnitsExact("0.1"), 10000000n);
+  assert.equal(toUsdtUnitsExact("9007199254740992"), 900719925474099200000000n);
+  assert.equal(toUsdtUnitsExact(10), 1000000000n);
+});
+
+test("financial amounts respect PostgreSQL numeric(36,18) capacity", () => {
+  assert.equal(toUsdtUnitsExact("999999999999999999.99999999"), 10n ** 26n - 1n);
+  assert.throws(() => toUsdtUnitsExact("1000000000000000000"), /ledger numeric capacity/);
+  assert.throws(() => toUsdtUnitsExact("-1000000000000000000"), /ledger numeric capacity/);
+  assert.throws(() => assertBalancedLedgerEntries([
+    { currency: "USDT", entry_type: "debit", amount: "1000000000000000000" },
+    { currency: "USDT", entry_type: "credit", amount: "1000000000000000000" }
+  ]), /ledger numeric capacity/);
+});
+
+test("exact parser rejects hostile or ambiguous financial input", () => {
+  for (const bad of [null, undefined, "", "NaN", "Infinity", "1e3",
+    "0x10", "1,000", "1_000", "1.2.3", "1.000000000",
+    Number.NaN, -Infinity, 1e-9]) {
+    assert.throws(() => toUsdtUnitsExact(bad), undefined, String(bad));
+  }
+  assert.equal(toUsdtUnitsExact("00010.00000001"), 1000000001n);
+});
+test("ledger balancing rejects missing or invalid sides", () => {
+  for (const entries of [
+    [{currency:"USDT",entry_type:"debit",amount:"1"}],
+    [{currency:"USDT",entry_type:"debit",amount:"1"},
+     {currency:"USDT",entry_type:"credit",amount:"0"}],
+    [{currency:"USDT",entry_type:"debit",amount:"1"},
+     {currency:"USDT",entry_type:"unknown",amount:"1"}],
+    [{currency:"USDT",entry_type:"debit",amount:"1"},
+     {currency:"USDT",entry_type:"credit",amount:"1.000000001"}]
+  ]) assert.throws(() => assertBalancedLedgerEntries(entries));
+});
+
+test("PROFINO ledger rejects non-USDT and mixed currency journals", () => {
+ for (const currency of ["BTC","ETH","USD","",null]) {
+  assert.throws(() => assertBalancedLedgerEntries([
+   {currency,entry_type:"debit",amount:"1"},
+   {currency,entry_type:"credit",amount:"1"}
+  ]), /Invalid ledger entry/);
+ }
+ assert.throws(() => assertBalancedLedgerEntries([
+  {currency:"USDT",entry_type:"debit",amount:"1"},
+  {currency:"BTC",entry_type:"credit",amount:"1"}
+ ]), /Invalid ledger entry/);
+ assert.equal(assertBalancedLedgerEntries([
+  {currency:"USDT",entry_type:"debit",amount:"1"},
+  {currency:"USDT",entry_type:"credit",amount:"1"}
+ ]),true);
+});
+
+test("ledger posting validation rejects noncanonical currency and entry direction",()=>{
+ for(const currency of ["usdt","Usdt"," USDT ","USDT ",42]){
+  assert.throws(()=>assertBalancedLedgerEntries([
+   {currency,entry_type:"debit",amount:"10"},
+   {currency:"USDT",entry_type:"credit",amount:"10"}
+  ]),/Invalid ledger entry/);
+ }
+ for(const entry_type of ["Debit","CREDIT"," credit ","DEBIT",null]){
+  assert.throws(()=>assertBalancedLedgerEntries([
+   {currency:"USDT",entry_type,amount:"10"},
+   {currency:"USDT",entry_type:"credit",amount:"10"}
+  ]),/Invalid ledger entry/);
+ }
+});
+
+test("financial parsing rejects oversized decimal payloads before BigInt allocation",()=>{
+ assert.throws(()=>toUsdtUnitsExact("9".repeat(100000)),/ledger numeric capacity/);
+ assert.throws(()=>toUsdtUnitsExact("0".repeat(100000)+"1"),/ledger numeric capacity/);
+ assert.throws(()=>toUsdtUnitsExact("1."+"0".repeat(100000)),/ledger numeric capacity/);
+ assert.equal(toUsdtUnitsExact("00010.00000001"),1000000001n);
+});
+
+test("exact financial parser rejects object coercion and side-effectful toString",()=>{
+ let invoked=0;
+ const hostile={toString(){invoked++;return "10";}};
+ for(const value of [hostile,new String("10"),["10"],{valueOf(){return 10}},true]){
+  assert.throws(()=>toUsdtUnitsExact(value),/primitive decimal value/);
+ }
+ assert.equal(invoked,0);
+ assert.equal(toUsdtUnitsExact(10n),1000000000n);
+ assert.equal(toUsdtUnitsExact("10"),1000000000n);
+});
+
+test("ledger journal rejects malformed entries without coercion",()=>{
+ const valid={currency:"USDT",entry_type:"credit",amount:"1"};
+ for(const bad of [null,undefined,[],true,"USDT"]){
+  assert.throws(()=>assertBalancedLedgerEntries([bad,valid]),/Invalid ledger entry/);
+ }
 });

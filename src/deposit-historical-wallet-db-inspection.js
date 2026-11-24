@@ -2,13 +2,13 @@ import {verifyHistoricalWalletRecord} from "./deposit-historical-wallet-record.j
 
 // Read-only historical consistency inspection. Never credits balances.
 // Caller must independently verify chain evidence and historical provenance.
-export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumber,walletAddress,expectedUserId,schema="public"}){
- if(typeof schema!=="string" || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
+export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumber,walletAddress,expectedUserId,schema="public",lockRows=true}){
+ if(typeof lockRows!=="boolean" || typeof schema!=="string" || /\s/.test(schema) || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema))
   throw new TypeError("Invalid schema");
- if(!client || typeof client.query!=="function" || typeof walletAddress!=="string" ||
+ if(!client || typeof client.query!=="function" || typeof walletAddress!=="string" || walletAddress.length!==42 ||
     !/^0x[0-9a-f]{40}$/.test(walletAddress) ||
-    typeof expectedUserId!=="string" || !/^[1-9][0-9]{0,18}$/.test(expectedUserId) || BigInt(expectedUserId)>9223372036854775807n ||
-    typeof eventBlockNumber!=="string" || !/^(0|[1-9][0-9]{0,77})$/.test(eventBlockNumber))
+    typeof expectedUserId!=="string" || /\s/.test(expectedUserId) || !/^[1-9][0-9]{0,18}$/.test(expectedUserId) || BigInt(expectedUserId)>9223372036854775807n ||
+    typeof eventBlockNumber!=="string" || /\s/.test(eventBlockNumber) || !/^(0|[1-9][0-9]{0,77})$/.test(eventBlockNumber))
   throw new TypeError("Invalid historical inspection input");
  // Lock wallet identity against concurrent changes until the caller transaction ends.
  // Callers must hold an explicit transaction when using this for financial checks.
@@ -25,12 +25,16 @@ export async function inspectHistoricalWalletFromDatabase(client,{eventBlockNumb
     AND (h.end_block IS NULL OR $2::numeric < h.end_block)
   ORDER BY h.start_block
   LIMIT 2
-  FOR SHARE OF h,w`,[walletAddress,eventBlockNumber]);
+  ${lockRows ? "FOR SHARE OF h,w" : ""}`,[walletAddress,eventBlockNumber]);
  // A malformed or incomplete database response is never ownership proof.
  if(!result || !Array.isArray(result.rows) || result.rows.length!==1 ||
     (result.rowCount!==undefined && result.rowCount!==1))
   throw new Error("Missing or ambiguous historical wallet owner");
  const row=result.rows[0];
+ // Do not trust a returned row merely because the SQL predicate was bound.
+ // Both historical and current wallet identities must match the requested address.
+ if(row.wallet_address!==walletAddress || row.wallet_address_current!==walletAddress)
+  throw new Error("Historical wallet address does not match requested deposit address");
  return verifyHistoricalWalletRecord({
   history:{wallet_id:row.wallet_id,user_id:row.user_id,chain_id:row.chain_id,
    wallet_address:row.wallet_address,start_block:row.start_block,end_block:row.end_block},

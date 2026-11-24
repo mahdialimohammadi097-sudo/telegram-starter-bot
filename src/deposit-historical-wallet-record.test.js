@@ -44,3 +44,9 @@ test("historical ownership rejects malformed identifiers and interval ambiguity"
  const openEnded=valid();openEnded.history.end_block=null;
  assert.deepEqual(check(openEnded),{walletId:"1",userId:"12"});
 });
+
+test("rejects oversized identifiers and noncanonical historical values",()=>{
+ for(const mutate of [p=>{p.history.wallet_id=p.wallet.id="9".repeat(1000)},p=>{p.history.user_id=p.expectedUserId="12\n"},p=>{p.history.wallet_address=p.wallet.wallet_address=address+"\n"},p=>{p.history.start_block="100\n"},p=>{p.history.end_block="200\n"},p=>{p.eventBlockNumber="150\n"}]){
+  const p=valid();mutate(p);assert.throws(()=>check(p));
+ }
+});

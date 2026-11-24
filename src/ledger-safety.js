@@ -16,9 +16,24 @@ export function toUsdtUnits(value) {
 // Financial validation must never round an input into a different amount.
 // Keep toUsdtUnits() for display formatting, where rounding to eight places is intentional.
 export function toUsdtUnitsExact(value) {
+  if (typeof value !== "string" && typeof value !== "bigint" && typeof value !== "number") {
+    throw new TypeError("Financial USDT amount must be a primitive decimal value");
+  }
+  // Floating-point numbers cannot safely express fractional USDT units.
+  // Require an exact decimal string (or an integer BigInt) for financial use.
+  if (typeof value === "number" &&
+      (!Number.isSafeInteger(value) || !Number.isFinite(value))) {
+    throw new TypeError("Financial USDT amount must be an exact decimal string");
+  }
   const raw = String(value ?? "").trim();
+  // Bound input before regex matching, not just before BigInt conversion.
+  if (raw.length > 128) throw new RangeError("USDT amount exceeds ledger numeric capacity");
   const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(raw);
   if (!match) throw new TypeError("Invalid USDT amount");
+  // Reject oversized inputs before BigInt parsing to bound CPU and memory use.
+  if (match[2].replace(/^0+/, "").length > 18) {
+    throw new RangeError("USDT amount exceeds ledger numeric capacity");
+  }
   const fraction = match[3] || "";
   if (fraction.length > 8) {
     throw new RangeError("USDT amount exceeds eight decimal places");
@@ -26,7 +41,13 @@ export function toUsdtUnitsExact(value) {
   const sign = match[1] === "-" ? -1n : 1n;
   const whole = BigInt(match[2]);
   const paddedFraction = (fraction + "00000000").slice(0, 8);
-  return sign * (whole * SCALE + BigInt(paddedFraction));
+  const units = whole * SCALE + BigInt(paddedFraction);
+  // PostgreSQL numeric(36,18) stores at most 18 whole digits.
+  // Fail before posting instead of depending on a database overflow.
+  if (units >= 10n ** 26n) {
+    throw new RangeError("USDT amount exceeds ledger numeric capacity");
+  }
+  return sign * units;
 }
 
 export function formatUsdt(value) {
@@ -44,10 +65,13 @@ export function assertBalancedLedgerEntries(entries) {
   }
   const totals = new Map();
   for (const entry of entries) {
-    const currency = String(entry.currency || "").trim().toUpperCase();
-    const type = String(entry.entry_type || "").toLowerCase();
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("Invalid ledger entry");
+    }
+    const currency = entry.currency;
+    const type = entry?.entry_type;
     const amount = toUsdtUnitsExact(entry.amount);
-    if (!currency || !["credit", "debit"].includes(type) || amount <= 0n) {
+    if (currency !== "USDT" || !["credit", "debit"].includes(type) || amount <= 0n) {
       throw new Error("Invalid ledger entry");
     }
     if (!totals.has(currency)) totals.set(currency, { credit: 0n, debit: 0n });

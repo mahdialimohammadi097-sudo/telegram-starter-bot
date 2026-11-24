@@ -2,6 +2,8 @@
 // Polling is the default; webhook mode is optional.
 
 import { Bot, webhookCallback } from "grammy";
+import { requireWebhookSecret } from "./src/webhook-secret-validation.js";
+import { requireWebhookUrl } from "./src/webhook-url-validation.js";
 import { registerCommands } from "./src/commands.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
 import { startScheduler } from "./src/scheduler.js";
@@ -33,6 +35,16 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error("[startup] PORT must be an integer between 1 and 65535.");
   process.exit(1);
 }
+
+// Reject insecure webhook configuration before opening HTTP or DB connections.
+const webhookSecret = mode === "webhook"
+  ? requireWebhookSecret(process.env.WEBHOOK_SECRET)
+  : null;
+
+// Validate webhook destination before starting any runtime service.
+const webhookUrl = mode === "webhook"
+  ? requireWebhookUrl(process.env.WEBHOOK_URL)
+  : "";
 
 const bot = new Bot(token);
 const runtimeHealth = createRuntimeHealthState();
@@ -234,7 +246,6 @@ async function main() {
     logCode:(code)=>console.error("[deposit-audit] read-only inspection unavailable:",code)
   });
 
-  const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
   healthMonitor = startHealthMonitor({
     bot,
     pool,
@@ -257,8 +268,7 @@ async function main() {
       throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
     }
 
-    const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined;
-    webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
+    webhookHandler = webhookCallback(bot, "http", { secretToken: webhookSecret });
 
     await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
       secret_token: secret,

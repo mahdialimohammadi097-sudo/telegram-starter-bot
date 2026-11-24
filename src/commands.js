@@ -14,6 +14,11 @@ const ADMIN_TIME_ZONE = "UTC";
 
 const adminDrafts = new Map();
 
+function safeDatabaseErrorCode(error) {
+  return typeof error?.code === "string" && /^[A-Z0-9]{2,8}$/.test(error.code)
+    ? error.code : "UNKNOWN";
+}
+
 async function getOwnerMenuLanguage(ctx) {
   if (ctx.from?.id !== ADMIN_ID) return "en";
   try {
@@ -216,7 +221,7 @@ export function registerCommands(bot) {
         return ctx.reply(message);
       }
     } catch (error) {
-      console.error("[access-control] status check failed:", error.message);
+      console.error("[access-control] status check failed:", safeDatabaseErrorCode(error));
       const message = "We cannot verify your account right now. Please try again later.";
       if (ctx.callbackQuery) {
         return ctx.answerCallbackQuery({ text: message, show_alert: true });
@@ -248,7 +253,7 @@ export function registerCommands(bot) {
         { reply_markup: mainKeyboard(language) }
       );
     } catch (error) {
-      console.error("[registration] Failed:", error.message);
+      console.error("[registration] Failed:", safeDatabaseErrorCode(error));
 
       await ctx.reply(
         "Unable to load your account. Please try again later."
@@ -373,7 +378,7 @@ export function registerCommands(bot) {
     try {
       await showScheduledPosts(ctx);
     } catch (error) {
-      console.error("[scheduled-posts] Failed:", error);
+      console.error("[scheduled-posts] Failed:", safeDatabaseErrorCode(error));
 
       await ctx.reply(
         "Unable to retrieve scheduled posts. Please try again."
@@ -481,7 +486,7 @@ export function registerCommands(bot) {
             "Nothing will be published until you approve it."
           );
         } catch (error) {
-          console.error("[newpost] Database error:", error);
+          console.error("[newpost] Database error:", safeDatabaseErrorCode(error));
 
           return ctx.reply(
             "Unable to save the post.\n" +
@@ -527,7 +532,7 @@ export function registerCommands(bot) {
           { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
-        console.error("[account] Failed:", error.message);
+        console.error("[account] Failed:", safeDatabaseErrorCode(error));
 
         return ctx.reply(
           "Unable to load account information. Please try again later."
@@ -563,7 +568,7 @@ export function registerCommands(bot) {
           { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
-        console.error("[wallet] Failed:", error.message);
+        console.error("[wallet] Failed:", safeDatabaseErrorCode(error));
 
         return ctx.reply(
           "Unable to load wallet balances. Please try again later.",

@@ -68,8 +68,81 @@ test("rejects forged confirmation count and malformed receipt provenance",()=>{
   {...input,receipt:{...input.receipt,logs:[{...log,topics:[topic,sender]}]}},
   {...input,receipt:{...input.receipt,logs:[{...log,topics:[topic,sender,"0x"+"0".repeat(64)]}]}},
   {...input,receipt:{...input.receipt,logs:[{...log,data:"0x1234"}]}},
-  {...input,receipt:{...input.receipt,logs:[{...log,removed:undefined}]}},
+  {...input,receipt:{...input.receipt,logs:[{...log,removed:"false"}]}},
   {...input,receipt:{...input.receipt,logs:[{...log,address:"0x"+"f".repeat(40)}]}}
  ];
  for(const value of variants)assert.throws(()=>inspectBscMainnetTransfer(value));
+});
+
+test("rejects zero-value Transfer logs as non-deposits",()=>{
+ const value={...input,receipt:{...input.receipt,logs:[{...log,data:"0x"+"0".repeat(64)}]}};
+ assert.throws(()=>inspectBscMainnetTransfer(value),/Zero-value/);
+});
+
+test("accepts mined receipt logs where removed is omitted",()=>{
+ const {removed,...minedLog}=log;
+ const value={...input,receipt:{...input.receipt,logs:[minedLog]}};
+ assert.equal(inspectBscMainnetTransfer(value).eventKey,"bsc:56:"+tx+":2");
+});
+
+test("accepts canonical hex RPC log index and rejects malformed or ambiguous indices",()=>{
+ const hexLog={...log,logIndex:"0x2"};
+ const value={...input,receipt:{...input.receipt,logs:[hexLog]}};
+ assert.equal(inspectBscMainnetTransfer(value).eventKey,"bsc:56:"+tx+":2");
+ for(const badIndex of ["0x02","0xzz","2",-1,2.5]){
+  const invalid={...input,receipt:{...input.receipt,logs:[{...log,logIndex:badIndex}]}};
+  assert.throws(()=>inspectBscMainnetTransfer(invalid));
+ }
+ assert.throws(()=>inspectBscMainnetTransfer({...input,receipt:{...input.receipt,logs:[log,hexLog]}}));
+});
+
+test("accepts canonical hexadecimal RPC block heights without losing precision",()=>{
+ const value={...input,receipt:{...input.receipt,blockNumber:"0x64",logs:[{...log,blockNumber:"0x64",logIndex:"0x2"}]}};
+ assert.equal(inspectBscMainnetTransfer(value).blockNumber,"100");
+});
+test("rejects malformed or unsafe RPC block heights",()=>{
+ for(const bad of ["0x064","0xzz","0x20000000000000",-1,100.5]){
+  const value={...input,receipt:{...input.receipt,blockNumber:bad}};
+  assert.throws(()=>inspectBscMainnetTransfer(value));
+ }
+});
+
+test("accepts canonical hexadecimal finalized head height",()=>{
+ const value={...input,finalizedBlockNumber:"0x78"};
+ assert.equal(inspectBscMainnetTransfer(value).blockNumber,"100");
+});
+test("rejects malformed or unsafe finalized head height",()=>{
+ for(const bad of ["0x078","0xzz","0x20000000000000",-1,120.5]){
+  assert.throws(()=>inspectBscMainnetTransfer({...input,finalizedBlockNumber:bad}),/finality/);
+ }
+});
+
+test("rejects a Transfer log with a different transaction index",()=>{
+ const receipt={...input.receipt,transactionIndex:"0x2",logs:[{...log,transactionIndex:"0x3"}]};
+ assert.throws(()=>inspectBscMainnetTransfer({...input,receipt}),/Transfer log/);
+});
+test("accepts matching receipt and log transaction indexes",()=>{
+ const receipt={...input.receipt,transactionIndex:"0x2",logs:[{...log,transactionIndex:"0x2"}]};
+ assert.equal(inspectBscMainnetTransfer({...input,receipt}).units,"100000000");
+});
+
+test("fails closed on missing or malformed transaction position evidence",()=>{
+ const variants=[
+  {receiptIndex:"0x2",logIndex:undefined},
+  {receiptIndex:undefined,logIndex:"0x2"},
+  {receiptIndex:"bad",logIndex:"bad"},
+  {receiptIndex:"0x2",logIndex:"bad"}
+ ];
+ for(const v of variants){
+  const receipt={...input.receipt,transactionIndex:v.receiptIndex,
+   logs:[{...log,transactionIndex:v.logIndex}]};
+  assert.throws(()=>inspectBscMainnetTransfer({...input,receipt}),/Transfer log/);
+ }
+});
+
+test("rejects malformed transfer fields without coercion",()=>{
+ for(const patch of [{data:log.data+"\n"},{data:[log.data]},{logIndex:"0x2\n"},{logIndex:"0x"+"f".repeat(1000)},{topics:[topic,sender+"\n",log.topics[2]]}]){
+  assert.throws(()=>inspectBscMainnetTransfer({...input,receipt:{...input.receipt,logs:[{...log,...patch}]}}));
+ }
+ for(const finalizedBlockNumber of ["0x78\n","0x"+"f".repeat(1000)])assert.throws(()=>inspectBscMainnetTransfer({...input,finalizedBlockNumber}));
 });
