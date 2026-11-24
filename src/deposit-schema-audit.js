@@ -78,7 +78,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  // A unique index on the event key and the ledger idempotency key is mandatory.
  const unique=await client.query(`
  SELECT t.relname AS tablename,a.attname AS column_name,
-        i.indisvalid AS valid,i.indisready AS ready,
+        i.indisvalid AS valid,i.indisready AS ready,i.indimmediate AS immediate,
         i.indpred IS NULL AS unfiltered,
         i.indexprs IS NULL AS plain_column,
         i.indnkeyatts AS key_count
@@ -90,7 +90,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  `,[schema,["verified_deposit_evidence","ledger_transactions"]]);
  const uniqueIndex=(table,column)=>unique.rows.some(r=>
    r.tablename===table && r.column_name===column &&
-   r.valid===true && r.ready===true && r.unfiltered===true &&
+   r.valid===true && r.ready===true && r.immediate===true && r.unfiltered===true &&
    r.plain_column===true && Number(r.key_count)===1);
  for(const [table,column] of [["verified_deposit_evidence","event_key"],
    ["ledger_transactions","idempotency_key"]])
@@ -107,7 +107,8 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  JOIN LATERAL unnest(c.conkey,c.confkey) AS pair(source_attnum,target_attnum) ON true
  JOIN pg_attribute source_col ON source_col.attrelid=source.oid AND source_col.attnum=pair.source_attnum
  JOIN pg_attribute target_col ON target_col.attrelid=target.oid AND target_col.attnum=pair.target_attnum
- WHERE c.contype='f' AND ns.nspname=$1 AND target_ns.nspname=$1`,[schema]);
+ WHERE c.contype='f' AND ns.nspname=$1 AND target_ns.nspname=$1
+   AND cardinality(c.conkey)=1 AND cardinality(c.confkey)=1`,[schema]);
  const fkSet=new Set(foreignKeys.rows.filter(r=>r.validated===true).map(r=>[r.source_table,r.source_column,r.target_table,r.target_column].join('.')));
  for(const relation of [
   ["user_wallet_assignments","user_id","users","id"],
