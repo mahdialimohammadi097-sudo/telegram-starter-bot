@@ -9,7 +9,7 @@ The production bot `@PROFINO1bot` and the production database must not be used f
 3. Apply the approved ledger and simulation schemas to that isolated database. This PR does not auto-create the financial schema.
 4. With staging database administrator access, mark only the independent database:
    `ALTER DATABASE your_staging_db SET profino.environment = 'isolated-staging';`
-   Reconnect afterward; verify `SELECT current_database(), current_setting('profino.environment', true);`
+   Reconnect afterward; verify `SELECT current_database(), current_setting('profino.environment', true);`. Preflight additionally checks the database-wide `pg_db_role_setting` entry with `setrole=0`; session-only or role-only markers are rejected.
 5. Set staging-only environment variables:
    - `PROFINO_DEPLOYMENT_ENV=staging`
    - `PROFINO_SIMULATION_MODE=isolated-staging`

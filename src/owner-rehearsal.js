@@ -3,6 +3,8 @@ import { reserveWithdrawal, cancelWithdrawal } from "../test-support/simulated-w
 import { getWalletBalances } from "./wallet-balances.js";
 import { toUsdtUnitsExact } from "./ledger-safety.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
+import { isolatedDatabaseIdentitySql, isIsolatedDatabaseIdentity } from "./isolated-database-identity.js";
+import { resolveDatabaseTls } from "./database-tls-policy.js";
 
 // PostgreSQL NUMERIC may return up to 18 fractional places, including zero padding.
  // Remove only insignificant trailing zeros. Reject nonrepresentable balances rather
@@ -45,13 +47,14 @@ export function registerOwnerRehearsal(bot, {
       if (!production?.name) throw new Error("Production database identity unavailable");
       sandbox = createPool({
         connectionString: env.PROFINO_TEST_DATABASE_URL, max: 1,
+        ssl: resolveDatabaseTls({ DATABASE_URL: env.PROFINO_TEST_DATABASE_URL,
+          PROFINO_DB_TLS_MODE: env.PROFINO_TEST_DB_TLS_MODE ?? "disable",
+          PROFINO_DB_TLS_CA_PEM: env.PROFINO_TEST_DB_TLS_CA_PEM }),
         connectionTimeoutMillis: 10000, query_timeout: 15000
       });
-      const { rows: [test] } = await sandbox.query(
-        "SELECT current_database() AS name, current_setting('profino.environment', true) AS marker"
-      );
-      if (!test?.name || test.name === production?.name ||
-          test.name !== env.PROFINO_TEST_DATABASE_NAME || test.marker !== "isolated-staging") {
+      const { rows: [test] } = await sandbox.query(isolatedDatabaseIdentitySql);
+      if (!isIsolatedDatabaseIdentity(test, env.PROFINO_TEST_DATABASE_NAME) ||
+          test.database_name.toLowerCase() === production.name.toLowerCase()) {
         throw new Error("Test database isolation check failed");
       }
       const { rows: [user] } = await sandbox.query(
