@@ -119,11 +119,8 @@ async function retryUntilAvailable(operation, label) {
 }
 
 async function closeHttpServer() {
-  if (!healthServer?.listening) return;
-  await new Promise((resolve) => {
-    healthServer.close(() => resolve());
-    healthServer.closeIdleConnections?.();
-  });
+  if (!healthServer) return;
+  await healthServer.drain();
 }
 
 async function shutdown(signal = "shutdown") {
