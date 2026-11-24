@@ -4,7 +4,10 @@ import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 // Restricted deployments must opt into verify-only after reviewed preparation.
 // This check covers operational admin/post objects, NOT financial readiness.
 const required = Object.freeze({
-  users: ["id", "telegram_id", "status"],
+  users: ["id", "telegram_id", "status", "username", "first_name", "last_name", "referral_code", "created_at"],
+  ledger_accounts: ["id", "user_id", "account_code", "account_type", "currency"],
+  ledger_transactions: ["id", "status", "transaction_type", "reference_id", "created_at"],
+  ledger_entries: ["id", "transaction_id", "account_id", "entry_type", "amount", "currency"],
   scheduled_posts: ["id", "title", "content", "status", "scheduled_at", "updated_at", "created_at", "preview_message_id", "preview_chat_id", "approved_by", "published_message_id", "published_at", "cancelled_at", "cancellation_reason", "edit_version", "last_edited_at"],
   scheduled_post_history: ["id", "post_id", "event_type", "old_status", "new_status", "details", "changed_at"],
   admin_users: ["user_id", "role", "status"],
@@ -12,7 +15,7 @@ const required = Object.freeze({
   admin_audit_logs: ["id", "admin_user_id", "actor_telegram_id", "action", "target_user_id", "currency", "metadata", "details", "created_at"]
 });
 const writeTables = ["users","scheduled_posts","admin_preferences"];
-const insertTables = ["users","scheduled_posts","scheduled_post_history","admin_preferences","admin_audit_logs"];
+const insertTables = ["ledger_accounts","users","scheduled_posts","scheduled_post_history","admin_preferences","admin_audit_logs"];
 
 export function runtimeSchemaMode(env = process.env) {
   const mode = env.PROFINO_RUNTIME_SCHEMA_MODE ?? "legacy-prepare";
@@ -32,7 +35,11 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
         pg_catalog.has_schema_privilege(current_user, n.oid, 'USAGE') AS schema_usage,
         pg_catalog.has_table_privilege(current_user, c.oid, 'SELECT') AS can_select,
         pg_catalog.has_table_privilege(current_user, c.oid, 'INSERT') AS can_insert,
-        pg_catalog.has_table_privilege(current_user, c.oid, 'UPDATE') AS can_update
+        pg_catalog.has_table_privilege(current_user, c.oid, 'UPDATE') AS can_update,
+        pg_catalog.pg_has_role(current_user, c.relowner, 'MEMBER') AS owner_access,
+        pg_catalog.has_table_privilege(current_user, c.oid, 'TRUNCATE, TRIGGER, DELETE') AS destructive_access,
+        pg_catalog.has_any_column_privilege(current_user, c.oid, 'INSERT, UPDATE') AS column_write,
+        pg_catalog.has_any_column_privilege(current_user, c.oid, 'UPDATE') AS column_update
       FROM pg_catalog.pg_class c
       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
@@ -50,7 +57,26 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
             (writeTables.includes(table) && row.can_update !== true)) {
           throw new Error("Runtime schema access or resolution mismatch");
         }
+        if (row.owner_access !== false || row.destructive_access !== false ||
+            (["ledger_transactions","ledger_entries","admin_audit_logs","scheduled_post_history","admin_users"].includes(table) && row.column_update !== false) ||
+            (["ledger_transactions","ledger_entries","admin_users"].includes(table) && row.column_write !== false) ||
+            (table === "ledger_accounts" && row.column_update !== false)) {
+          throw new Error("Runtime role has excessive operational or ledger access");
+        }
       }
+    }
+    const privileges = await client.query(
+      `SELECT pg_catalog.has_schema_privilege(current_user, n.oid, 'CREATE') AS schema_create,
+        pg_catalog.has_database_privilege(current_user, current_database(), 'CREATE') AS database_create,
+        EXISTS (SELECT 1 FROM pg_catalog.pg_roles r
+          WHERE pg_catalog.pg_has_role(current_user, r.oid, 'MEMBER')
+          AND (r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.rolbypassrls
+            OR r.rolname IN ('pg_write_all_data','pg_execute_server_program','pg_write_server_files','pg_read_server_files'))) AS privileged_role
+       FROM pg_catalog.pg_namespace n WHERE n.nspname = $1`, [schema]);
+    const role = privileges.rows?.[0];
+    if (privileges.rows?.length !== 1 || role?.schema_create !== false ||
+        role.database_create !== false || role.privileged_role !== false) {
+      throw new Error("Runtime role has excessive database privileges");
     }
     const trigger = await client.query(
 `

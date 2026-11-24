@@ -20,7 +20,10 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await q("CREATE ROLE "+role+" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE");madeRole=true;
   await q("SET search_path TO "+schema+",pg_catalog");
   // Operational metadata fixture, not a production migration or full schema contract.
-  await q(`CREATE TABLE users(id bigint,telegram_id bigint,status text);
+  await q(`CREATE TABLE users(id bigint,telegram_id bigint,status text,username text,first_name text,last_name text,referral_code text,created_at timestamptz);
+   CREATE TABLE ledger_accounts(id bigint,user_id bigint,account_code text,account_type text,currency text);
+   CREATE TABLE ledger_transactions(id bigint,status text,transaction_type text,reference_id text,created_at timestamptz);
+   CREATE TABLE ledger_entries(id bigint,transaction_id bigint,account_id bigint,entry_type text,amount numeric,currency text);
    CREATE TABLE scheduled_posts(id bigint,title text,content text,status text,scheduled_at timestamptz,updated_at timestamptz,created_at timestamptz,preview_message_id bigint,preview_chat_id bigint,approved_by bigint,published_message_id bigint,published_at timestamptz,cancelled_at timestamptz,cancellation_reason text,edit_version int,last_edited_at timestamptz);
    CREATE TABLE scheduled_post_history(id bigint,post_id bigint,event_type text,old_status text,new_status text,details jsonb,changed_at timestamptz);
    CREATE TABLE admin_users(user_id bigint,role text,status text);
@@ -30,7 +33,7 @@ test("restricted role verifies runtime inventory without schema creation rights"
    CREATE TRIGGER trg_scheduled_post_history AFTER INSERT OR UPDATE ON scheduled_posts FOR EACH ROW EXECUTE FUNCTION profino_log_scheduled_post_history();`);
   await q("GRANT USAGE ON SCHEMA "+schema+" TO "+role);
   await q("GRANT SELECT ON ALL TABLES IN SCHEMA "+schema+" TO "+role);
-  await q("GRANT INSERT ON users,scheduled_posts,scheduled_post_history,admin_preferences,admin_audit_logs TO "+role);
+  await q("GRANT INSERT ON ledger_accounts,users,scheduled_posts,scheduled_post_history,admin_preferences,admin_audit_logs TO "+role);
   await q("GRANT UPDATE ON users,scheduled_posts,admin_preferences TO "+role);
   const adapter={connect:async()=>({query:q,release(error){assert.equal(error,undefined);}})};
   await q("SET ROLE "+role);
@@ -38,6 +41,17 @@ test("restricted role verifies runtime inventory without schema creation rights"
   assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
   await assert.rejects(q("CREATE TABLE "+schema+".forbidden(id int)"),e=>e.code==="42501");
   await q("RESET ROLE");
+  // Test column-level privilege, not only table-level grants.
+  await q("GRANT UPDATE(amount) ON ledger_entries TO "+role);
+  await q("SET ROLE "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive operational or ledger access/);
+  await q("RESET ROLE");
+  await q("REVOKE UPDATE(amount) ON ledger_entries FROM "+role);
+  await q("GRANT CREATE ON SCHEMA "+schema+" TO "+role);
+  await q("SET ROLE "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive database privileges/);
+  await q("RESET ROLE");
+  await q("REVOKE CREATE ON SCHEMA "+schema+" FROM "+role);
   await q("REVOKE INSERT ON admin_audit_logs FROM "+role);
   await q("SET ROLE "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/access or resolution mismatch/);
