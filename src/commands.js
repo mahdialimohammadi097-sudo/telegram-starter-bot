@@ -10,6 +10,7 @@ import { pool } from "./database.js";
 import { getWalletBalances, getSimulationReceipt, getSimulatedTransferActivity, getDailySimulatedProfits, getSimulatedInvestmentActivity, getWalletHistoryPage, IncompleteWalletError } from "./wallet-balances.js";
 import { formatUsdt, toUsdtUnitsExact } from "./ledger-safety.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
+import { canonicalOwnerMenuChoice, getOwnerMenuLanguage, ownerMainKeyboard } from "./owner-menu-language.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
 import { clearPostHistorySession, registerPostHistory } from "./post-history.js";
@@ -328,10 +329,13 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         );
       }
 
+      const language = await getOwnerMenuLanguage(ctx, ADMIN_ID, getAdminLanguage);
       await ctx.reply(
-        `Welcome to PROFINO, ${user.first_name ?? "User"}!\n\n` +
-        "Your account is ready. Use the buttons below to continue.",
-        { reply_markup: mainMenu }
+        language === "fa"
+          ? "به پروفینو خوش آمدید!\n\nحساب شما آماده است. از دکمه‌های زیر استفاده کنید."
+          : `Welcome to PROFINO, ${user.first_name ?? "User"}!\n\n` +
+            "Your account is ready. Use the buttons below to continue.",
+        { reply_markup: language === "fa" ? ownerMainKeyboard() : mainMenu }
       );
     } catch (error) {
       console.error("[registration] Failed:", safeDiagnosticCode(error));
@@ -476,7 +480,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
   });
 
   bot.on("message:text", async (ctx) => {
-    const choice = ctx.message.text;
+    let choice = ctx.message.text;
     const userId = ctx.from.id;
 
     // Only the administrator can continue a post draft.
@@ -590,9 +594,13 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
       }
     }
 
+    // Do not translate free-form post drafts. Only the owner's private
+    // navigation can resolve legacy Persian reply-keyboard labels.
+    choice = canonicalOwnerMenuChoice(ctx, ADMIN_ID, choice);
+    const menuLanguage = await getOwnerMenuLanguage(ctx, ADMIN_ID, getAdminLanguage);
     if (choice === "⬅ Main Menu") {
-      return ctx.reply("Main Menu", {
-        reply_markup: mainMenu
+      return ctx.reply(adminText(menuLanguage, "Main Menu", "منوی اصلی"), {
+        reply_markup: menuLanguage === "fa" ? ownerMainKeyboard() : mainMenu
       });
     }
 
@@ -615,7 +623,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         const account = result.rows[0];
 
         return ctx.reply(
-          "MY ACCOUNT\n\n" +
+          adminText(menuLanguage, "MY ACCOUNT\n\n", "حساب من\n\n") +
           `Account ID: ${account.id}\n` +
           `Telegram ID: ${account.telegram_id}\n` +
           `Username: ${account.username ? "@" + account.username : "Not set"}\n` +
@@ -699,7 +707,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
             const action = simulationHistoryLabels.get(row.transaction_type);
             return time + " UTC · " + action + " · #" + row.reference_id + " · " + formatUsdt(row.amount) + " test USDT · /receipt_" + row.journal_id;
           });
-          const availability = choice === "Deposit" ? "Real deposits are disabled. Do not send funds." : "Real withdrawals are disabled.";
+          const availability = choice === "Deposit" ? adminText(menuLanguage, "Real deposits are disabled. Do not send funds.", "واریز واقعی غیرفعال است. وجهی ارسال نکنید.") : adminText(menuLanguage, "Real withdrawals are disabled.", "برداشت واقعی غیرفعال است.");
           const summary = lines.length ? "Latest posted activity (up to 10)\n" + lines.join("\n") : "No posted simulation activity yet.";
           let keyboard = walletMenu;
           if (choice === "Withdraw" && cancelTestWithdrawal && listTestHolds) {
@@ -771,7 +779,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
         const format = formatUsdt;
 
         return ctx.reply(
-          "MY WALLET\n\n" +
+          adminText(menuLanguage, "MY WALLET\n\n", "کیف پول من\n\n") +
           `Available Balance: ${format(balances.AVAILABLE)} USDT\n` +
           `Invested Balance: ${format(balances.INVESTED)} USDT\n` +
           (balances.WITHDRAWAL_HOLD !== undefined ? `Reserved for Withdrawal: ${format(balances.WITHDRAWAL_HOLD)} USDT\n` : "") +

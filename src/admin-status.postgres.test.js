@@ -105,6 +105,24 @@ test("private status confirmations commit once with their audit row and survive 
     assert.equal(await status(), "blocked");
     assert.equal((await audit()).length, 1);
 
+    // A BEFORE INSERT trigger can silently skip the audit row without raising a SQL error.
+    // The status update must still roll back in that case.
+    await client.query(`
+      CREATE FUNCTION skip_fixture_activation_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'user_activated' THEN RETURN NULL; END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER skip_fixture_activation_audit BEFORE INSERT ON admin_audit_logs
+      FOR EACH ROW EXECUTE FUNCTION skip_fixture_activation_audit();
+    `);
+    await click(activate);
+    assert.match(calls[0].payload.text, /به‌روزرسانی وضعیت کاربر ممکن نشد/);
+    assert.equal(await status(), "blocked");
+    assert.equal((await audit()).length, 1);
+    await client.query("DROP TRIGGER skip_fixture_activation_audit ON admin_audit_logs; DROP FUNCTION skip_fixture_activation_audit()");
+
     await client.query(`INSERT INTO admin_audit_logs (action)
       SELECT 'archive_' || i FROM generate_series(2, 12) i`);
     assert.deepEqual(await click("admin_logs"), ["answerCallbackQuery", "sendMessage"]);
