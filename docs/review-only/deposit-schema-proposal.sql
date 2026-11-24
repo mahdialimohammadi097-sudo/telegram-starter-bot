@@ -45,6 +45,27 @@ $guard$;
 CREATE TRIGGER deposit_evidence_immutable
  BEFORE UPDATE OR DELETE OR TRUNCATE ON public.verified_deposit_evidence
  FOR EACH STATEMENT EXECUTE FUNCTION public.reject_deposit_evidence_mutation();
+-- Ownership identity is immutable. Only a previously open interval may be closed once.
+CREATE FUNCTION public.guard_deposit_ownership_history() RETURNS trigger
+LANGUAGE plpgsql AS $history$
+BEGIN
+ IF TG_OP <> 'UPDATE' THEN
+  RAISE EXCEPTION 'Ownership history cannot be removed' USING ERRCODE='55000';
+ END IF;
+ IF ROW(NEW.id,NEW.wallet_id,NEW.user_id,NEW.chain_id,NEW.wallet_address,NEW.start_block,NEW.created_at)
+    IS DISTINCT FROM ROW(OLD.id,OLD.wallet_id,OLD.user_id,OLD.chain_id,OLD.wallet_address,OLD.start_block,OLD.created_at)
+    OR OLD.end_block IS NOT NULL OR NEW.end_block IS NULL THEN
+  RAISE EXCEPTION 'Ownership history identity is immutable' USING ERRCODE='55000';
+ END IF;
+ RETURN NEW;
+END;
+$history$;
+CREATE TRIGGER deposit_history_guard
+ BEFORE UPDATE OR DELETE ON public.deposit_address_ownership_history
+ FOR EACH ROW EXECUTE FUNCTION public.guard_deposit_ownership_history();
+CREATE TRIGGER deposit_history_no_truncate
+ BEFORE TRUNCATE ON public.deposit_address_ownership_history
+ FOR EACH STATEMENT EXECUTE FUNCTION public.guard_deposit_ownership_history();
 -- Immutable provenance, role grants and reconciliation
 -- are unresolved. No historical assignments may be inferred or backfilled.
 -- Deliberate rollback: this proposal cannot persist changes as supplied.
