@@ -15,6 +15,7 @@ export async function verifyActiveOwnerLock(client, schema) {
       l.lanname, p.proconfig,
       pg_catalog.pg_has_role(current_user, p.proowner, 'MEMBER') AS runtime_owns,
       pg_catalog.has_function_privilege(current_user, p.oid, 'EXECUTE') AS runtime_execute,
+      pg_catalog.has_function_privilege(current_user, p.oid, 'EXECUTE WITH GRANT OPTION') AS runtime_can_delegate,
       EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.proacl, pg_catalog.acldefault('f', p.proowner))) a
         WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_execute
     FROM pg_catalog.pg_proc p
@@ -28,7 +29,7 @@ export async function verifyActiveOwnerLock(client, schema) {
       row.prokind !== "f" || row.bigint_result !== true || row.lanname !== "sql" ||
       !Array.isArray(row.proconfig) || row.proconfig.length !== 1 ||
       row.proconfig[0] !== "search_path=pg_catalog, pg_temp" ||
-      row.runtime_owns !== false || row.runtime_execute !== true || row.public_execute !== false) {
+      row.runtime_owns !== false || row.runtime_execute !== true || row.runtime_can_delegate !== false || row.public_execute !== false) {
     throw new Error("Required restricted owner lock is missing or incompatible");
   }
 }

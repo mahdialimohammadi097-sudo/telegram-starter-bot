@@ -114,7 +114,10 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
       }
     }
     const privileges = await client.query(
-      `SELECT pg_catalog.has_schema_privilege(current_user, n.oid, 'CREATE') AS schema_create,
+      `SELECT current_user = session_user AS same_session_role,
+        EXISTS (SELECT 1 FROM pg_catalog.pg_roles r
+          WHERE r.rolname <> current_user AND pg_catalog.pg_has_role(current_user,r.oid,'MEMBER')) AS alternate_role,
+        pg_catalog.has_schema_privilege(current_user, n.oid, 'CREATE') AS schema_create,
         pg_catalog.has_database_privilege(current_user, current_database(), 'CREATE') AS database_create,
         EXISTS (SELECT 1 FROM pg_catalog.pg_roles r
           WHERE pg_catalog.pg_has_role(current_user, r.oid, 'MEMBER')
@@ -122,7 +125,8 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
             OR r.rolname IN ('pg_write_all_data','pg_execute_server_program','pg_write_server_files','pg_read_server_files'))) AS privileged_role
        FROM pg_catalog.pg_namespace n WHERE n.nspname = $1`, [schema]);
     const role = privileges.rows?.[0];
-    if (privileges.rows?.length !== 1 || role?.schema_create !== false ||
+    if (privileges.rows?.length !== 1 || role?.same_session_role !== true || role.alternate_role !== false ||
+        role.schema_create !== false ||
         role.database_create !== false || role.privileged_role !== false) {
       throw new Error("Runtime role has excessive database privileges");
     }
