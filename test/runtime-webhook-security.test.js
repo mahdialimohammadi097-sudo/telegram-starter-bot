@@ -6,8 +6,8 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../index.js", import.meta.url), "utf8");
 const guard = source.slice(source.indexOf("const webhookSecret ="), source.indexOf("const bot = new Bot(token);"));
 
-function evaluate(mode, secret) {
-  const context = { mode, process: { env: { WEBHOOK_SECRET: secret }, exit() { throw new Error("rejected"); } }, console: { error() {} } };
+function evaluate(mode, secret, url = "https://example.invalid") {
+  const context = { URL, mode, process: { env: { WEBHOOK_SECRET: secret, WEBHOOK_URL: url }, exit() { throw new Error("rejected"); } }, console: { error() {} } };
   return vm.runInNewContext(guard + "\nwebhookSecret", context);
 }
 
@@ -33,4 +33,22 @@ test("same validated secret is passed to webhook callback and registration", () 
   assert.match(source, /const secret = webhookSecret;/);
   assert.match(source, /secretToken: secret/);
   assert.match(source, /secret_token: secret/);
+});
+
+test("webhook startup rejects unsafe or invalid URL configuration", () => {
+  for (const url of ["", "http://example.invalid", "https://user:pass@example.invalid",
+    "https://example.invalid?token=synthetic", "https://example.invalid/#fragment",
+    "https://example.invalid?", "https://", "not-a-url"]) {
+    assert.throws(() => evaluate("webhook", "valid_secret", url), /rejected/);
+  }
+});
+
+test("webhook endpoint is canonicalized for registration and health monitoring", () => {
+  const normalize = vm.runInNewContext(guard + "\nvalidateWebhookUrl", {
+    URL, mode: "polling", process: { env: {} }
+  });
+  assert.equal(normalize("https://example.invalid/base///"), "https://example.invalid/base/telegram");
+  assert.match(source, /info\.url === webhookUrl/);
+  assert.match(source, /setWebhook\(webhookUrl,/);
+  assert.doesNotMatch(source, /console\.log\([^\n]*\$\{webhookUrl\}/);
 });
