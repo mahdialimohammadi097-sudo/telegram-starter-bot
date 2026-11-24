@@ -149,3 +149,29 @@ test("a synchronous Telegram probe failure does not prevent the database health 
     assert.deepEqual(states, [{ telegram: false, database: true }]);
   } finally { monitor.stop(); }
 });
+
+test("stop waits for an in-flight alert and prevents additional probes", async t => {
+  let finishSend, started;
+  const sendStarted = new Promise(resolve => { started = resolve; });
+  const blocked = new Promise(resolve => { finishSend = resolve; });
+  let checks = 0, sends = 0, drained = false;
+  const monitor = startHealthMonitor({
+    telegramCheck: async () => true,
+    pool: { async query() { checks++; throw new Error("fixture outage"); } },
+    bot: { api: { async sendMessage() { sends++; started(); await blocked; } } },
+    logger: { warn() {}, error() {} }
+  });
+  t.after(async () => { finishSend(); await monitor.stop(); });
+  await sendStarted;
+  assert.equal(monitor.check(), monitor.ready);
+  const stopping = monitor.stop().then(() => { drained = true; });
+  await Promise.resolve();
+  assert.equal(drained, false);
+  await monitor.check();
+  assert.equal(checks, 1);
+  finishSend();
+  await stopping;
+  await monitor.stop();
+  assert.equal(drained, true);
+  assert.equal(sends, 1);
+});

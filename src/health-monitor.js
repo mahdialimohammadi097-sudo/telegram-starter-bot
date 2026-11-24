@@ -35,12 +35,10 @@ export function startHealthMonitor({
 }) {
   let previous = { telegram: true, database: true };
   const pendingAlerts = new Map();
-  let running = false;
+  let activeCheck = null;
   let stopped = false;
 
-  async function check() {
-    if (stopped || running) return;
-    running = true;
+  async function performCheck() {
     try {
       const [telegramResult, databaseResult] = await Promise.allSettled([
         Promise.resolve().then(() => telegramCheck()),
@@ -72,9 +70,15 @@ export function startHealthMonitor({
       }
     } catch (error) {
       logger.error("[health] monitor check failed:", safeDiagnosticCode(error));
-    } finally {
-      running = false;
     }
+  }
+
+  function check() {
+    if (stopped) return Promise.resolve();
+    if (!activeCheck) {
+      activeCheck = performCheck().finally(() => { activeCheck = null; });
+    }
+    return activeCheck;
   }
 
   // Run once immediately, then at a fixed interval. This never receives Telegram updates.
@@ -87,6 +91,8 @@ export function startHealthMonitor({
     stop() {
       stopped = true;
       clearInterval(timer);
+      // Wait for any probe or Telegram delivery already in flight.
+      return activeCheck ?? Promise.resolve();
     },
     check
   };
