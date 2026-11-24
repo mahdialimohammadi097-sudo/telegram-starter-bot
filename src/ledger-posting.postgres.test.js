@@ -2298,3 +2298,12 @@ test("isolated withdrawal fixture enforces all four states and payout linkage", 
   `);
   assert.ok(statuses, "withdrawal status constraint must retain all four lifecycle states");
 });
+
+test("real PostgreSQL aborted transaction cannot report successful commit", { skip: !enabled }, async () => {
+  await assert.rejects(withLedgerTransaction(pool, async client => {
+    await assert.rejects(client.query("SELECT 1 / 0"), error => error.code === "22012");
+    return { posted: true };
+  }), /rolled back instead of committed/);
+  const health = await pool.query("SELECT 1 AS value");
+  assert.equal(health.rows[0].value, 1);
+});

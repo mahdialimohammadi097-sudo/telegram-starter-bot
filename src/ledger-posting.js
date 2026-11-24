@@ -84,8 +84,13 @@ export async function withLedgerTransaction(pool, operation) {
     transactionOpen = true;
 
     const result = await operation(client);
-    await client.query("COMMIT");
+    const completion = await client.query("COMMIT");
     transactionOpen = false;
+    // PostgreSQL can respond with command tag ROLLBACK when COMMIT is issued
+    // inside an aborted transaction, for example after a caught SQL error.
+    if (completion?.command === "ROLLBACK") {
+      throw new Error("Ledger transaction was rolled back instead of committed");
+    }
     return result;
   } catch (error) {
     if (transactionOpen) {
@@ -234,12 +239,15 @@ export async function postJournalInTransaction(client, {
   }
 
   for (const entry of normalizedEntries) {
-    await client.query(
+    const insertedEntry = await client.query(
       `INSERT INTO ledger_entries
          (transaction_id, account_id, entry_type, amount, currency)
        VALUES ($1, $2, $3, $4, $5)`,
       [transactionId, entry.account_id, entry.entry_type, entry.amount, entry.currency]
     );
+    if (insertedEntry.rowCount !== 1) {
+      throw new Error("Ledger entry insert did not create exactly one row");
+    }
   }
 
   const posted = await client.query(
