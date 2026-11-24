@@ -14,7 +14,7 @@ for (const scenario of [
       return {
         async query(sql) {
           queries.push(sql);
-          if (sql === "BEGIN" || sql === "ROLLBACK") return { rows: [], rowCount: 0 };
+          if (sql === "BEGIN" || sql === "ROLLBACK") return { command: sql, rows: [], rowCount: 0 };
           if (sql.includes("FROM simulation_withdrawals")) {
             return { rows: [{ id: "7", status: scenario.status, submitted_hash: scenario.submitted_hash, destination: "0x1111111111111111111111111111111111111111", amount: "1.00000000" }], rowCount: 1 };
           }

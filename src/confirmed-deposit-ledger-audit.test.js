@@ -8,6 +8,7 @@ function fixture(rows) {
   const client = { async query(sql) {
     queries.push(sql);
     if (sql.startsWith('SELECT id::text')) return { rows };
+    if (['BEGIN','COMMIT','ROLLBACK'].includes(sql)) return { command: sql, rows: [], rowCount: 0 };
     return { rows: [] };
   }, release() { released = true; } };
   return { pool: { connect: async () => client }, queries, released: () => released };
