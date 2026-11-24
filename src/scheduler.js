@@ -138,7 +138,7 @@ async function sendPreview(bot, post) {
   } catch (error) {
     console.error(
       `[scheduler] preview result uncertain for post ${post.id}:`,
-      error
+      "operation_failed"
     );
 
     try {
@@ -152,7 +152,7 @@ async function sendPreview(bot, post) {
     } catch (databaseError) {
       console.error(
         `[scheduler] could not record preview uncertainty for post ${post.id}:`,
-        databaseError
+        "operation_failed"
       );
     }
   }
@@ -170,7 +170,7 @@ async function processScheduledPosts(bot) {
       await sendPreview(bot, post);
     }
   } catch (error) {
-    console.error("[scheduler] processing error:", error);
+    console.error("[scheduler] processing error:", "operation_failed");
   } finally {
     isRunning = false;
   }
@@ -180,7 +180,7 @@ async function updateAdminMessage(ctx, text) {
   try {
     await ctx.editMessageText(text, { reply_markup: { inline_keyboard: [] } });
   } catch (error) {
-    console.error("[scheduler] could not update admin message:", error);
+    console.error("[scheduler] could not update admin message:", "operation_failed");
   }
 }
 
@@ -241,7 +241,7 @@ async function handlePostAction(ctx) {
         adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
       );
     } catch (error) {
-      console.error("[scheduler] rejection error:", error);
+      console.error("[scheduler] rejection error:", "operation_failed");
 
       await ctx.answerCallbackQuery({
         text: adminText(language, "Database error. Please try again.", "خطای پایگاه داده. دوباره تلاش کنید."),
@@ -277,7 +277,7 @@ async function handlePostAction(ctx) {
 
     post = result.rows[0];
   } catch (error) {
-    console.error("[scheduler] approval database error:", error);
+    console.error("[scheduler] approval database error:", "operation_failed");
 
     await ctx.answerCallbackQuery({
       text: adminText(language, "Database error. Nothing was published.", "خطای پایگاه داده؛ هیچ چیزی منتشر نشد."),
@@ -301,7 +301,7 @@ async function handlePostAction(ctx) {
   } catch (error) {
     console.error(
       `[scheduler] publication result uncertain for post ${postId}:`,
-      error
+      "operation_failed"
     );
 
     try {
@@ -315,7 +315,7 @@ async function handlePostAction(ctx) {
     } catch (databaseError) {
       console.error(
         "[scheduler] could not record publication uncertainty:",
-        databaseError
+        "operation_failed"
       );
     }
 
@@ -348,7 +348,7 @@ async function handlePostAction(ctx) {
   } catch (error) {
     console.error(
       `[scheduler] post ${postId} was sent, but database confirmation failed:`,
-      error
+      "operation_failed"
     );
 
     await updateAdminMessage(
@@ -390,7 +390,7 @@ export function startScheduler(bot) {
     .catch((error) => {
       console.error(
         "[scheduler] startup recovery failed. Scheduler remains disabled:",
-        error
+        "operation_failed"
       );
       return false;
     });
