@@ -277,6 +277,12 @@ test("review-only deposit schema validates in isolated temporary namespace", {sk
   await c.query("ROLLBACK TO SAVEPOINT overlap_check");
   await c.query("UPDATE pg_temp.deposit_address_ownership_history SET end_block=10");
   await c.query("INSERT INTO pg_temp.deposit_address_ownership_history(wallet_id,user_id,chain_id,wallet_address,start_block) VALUES(1,1,56,$1,10)",["0x"+"a".repeat(40)]);
+  for(const mutation of ["UPDATE pg_temp.deposit_address_ownership_history SET start_block=2","UPDATE pg_temp.deposit_address_ownership_history SET end_block=11 WHERE start_block=0","DELETE FROM pg_temp.deposit_address_ownership_history","TRUNCATE pg_temp.deposit_address_ownership_history"]){
+   await c.query("SAVEPOINT history_guard");
+   await assert.rejects(c.query(mutation),e=>e.code==="55000");
+   await c.query("ROLLBACK TO SAVEPOINT history_guard");
+  }
+  assert.equal((await c.query("SELECT count(*)::int AS n FROM pg_temp.deposit_address_ownership_history")).rows[0].n,2);
   const args=["bsc:56:0x"+"b".repeat(64)+":0","0x"+"c".repeat(64),"0x"+"d".repeat(40),"0x"+"a".repeat(40)];
   const insert="INSERT INTO pg_temp.verified_deposit_evidence(event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES($1,$2,1,$3,$4,100)";
   await c.query(insert,args);
