@@ -63,3 +63,10 @@ test("rejects wrong receipt attribution before any posting",()=>{
   }
  }
 });
+
+test("deposit owner identity cannot be rounded or exceed PostgreSQL bigint", () => {
+  for (const userId of [Number.MAX_SAFE_INTEGER + 1, "9223372036854775808", "1".repeat(200), { toString: () => "42" }]) {
+    assert.throws(() => requireUniqueDepositOwner(evidence, [{ ...owner, userId }]), /ownership mismatch/);
+  }
+  assert.equal(requireUniqueDepositOwner(evidence, [{ ...owner, userId: "9223372036854775807" }]).userId, "9223372036854775807");
+});
