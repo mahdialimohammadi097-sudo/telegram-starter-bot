@@ -22,3 +22,12 @@ test("repeat scans are stable and mixed matches are classified only once", () =>
   const value = "postgres://" + "tester:" + "fixture-secret" + "@localhost/db";
   for (let i = 0; i < 3; i++) assert.deepEqual(detectSecretKinds(value + "\n" + value), ["database-url"]);
 });
+
+test("does not match connection URL components across quoted source strings", () => {
+  const urlPrefix = "postgresql://";
+  const credentials = "test-user:synthetic-secret@127.0.0.1:1/db";
+  const source = JSON.stringify([urlPrefix, credentials]) + ".join('')";
+  assert.deepEqual(detectSecretKinds(source), []);
+  assert.deepEqual(detectSecretKinds(urlPrefix + credentials), ["database-url"]);
+  assert.deepEqual(detectSecretKinds(urlPrefix + "user:encoded%40secret@localhost/db"), ["database-url"]);
+});
