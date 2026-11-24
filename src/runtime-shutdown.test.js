@@ -172,3 +172,18 @@ test("a polling restart handles the queued command once when stopped halfway thr
   assert.deepEqual(replies(afterRestart), [42]);
   assert.match(afterRestart, /CONFIRMED_OFFSET 43/);
 });
+
+test("startup report failure never logs untrusted Telegram error_code data", { timeout: 12000 }, async t => {
+  const log = await runUntilShutdown(t, `
+    pg.Pool.prototype.query = async sql => sql.includes("AS server_time")
+      ? { rows: [{ server_time: new Date() }] } : { rows: [] };
+    pg.Pool.prototype.connect = async () => { throw new Error("offline scheduler"); };
+    Api.prototype.getMe = async () => ({ id: 7, username: "fixture_bot" });
+    Api.prototype.sendMessage = async () => { throw Object.assign(new Error("private_fixture_message"), { error_code: { secret: "private_fixture_code" } }); };
+    Api.prototype.deleteWebhook = async () => true;
+    Bot.prototype.start = async () => {};
+    Bot.prototype.stop = async () => {};
+  `, { signalOn: "[health] startup report could not be delivered:" });
+  assert.match(log, /startup report could not be delivered: UNAVAILABLE/);
+  assert.doesNotMatch(log, /private_fixture_code|private_fixture_message/);
+});

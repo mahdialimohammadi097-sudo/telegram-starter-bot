@@ -15,7 +15,7 @@ import { startHealthMonitor } from "./src/health-monitor.js";
 import { createRuntimeHealthState } from "./src/runtime-health.js";
 import { webhookConfiguration, telegramWebhookHandler } from "./src/telegram-webhook.js";
 import { startHealthHttpServer } from "./src/health-http.js";
-import { safeDiagnosticCode } from "./src/diagnostic-safety.js";
+import { safeDiagnosticCode, safeTelegramDiagnosticCode } from "./src/diagnostic-safety.js";
 import { prepareRuntimeSchema } from "./src/runtime-schema-policy.js";
 
 const ADMIN_ID = 8810232463;
@@ -170,7 +170,7 @@ async function sendStartupReport(botUsername) {
   } catch (error) {
     console.error(
       "[health] startup report could not be delivered:",
-      error?.error_code || safeDiagnosticCode(error)
+      safeTelegramDiagnosticCode(error, safeDiagnosticCode(error))
     );
   }
 }
