@@ -27,7 +27,7 @@ test("simulation refuses database without isolated staging marker", async () => 
 test("simulation refuses incomplete staging schema", async () => {
   const pool = { async query(sql) {
     return { rows: sql.includes("current_setting")
-      ? [{ environment: "isolated-staging", database_name: "profino_staging_it" }]
+      ? [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }]
       : [{ investments: true, withdrawals: false, reviewers: true }] };
   } };
   await assert.rejects(
@@ -40,7 +40,7 @@ test("simulation refuses incomplete staging schema", async () => {
 test("fully marked isolated staging exposes synthetic writers", async () => {
   const pool = { async query(sql) {
     return { rows: sql.includes("current_setting")
-      ? [{ environment: "isolated-staging", database_name: "profino_staging_it" }]
+      ? [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }]
       : sql.includes("pg_attribute")
         ? [{ extended_columns: true, payout_state_constraint: true }]
         : [{ investments: true, withdrawals: true, reviewers: true }] };
@@ -64,7 +64,7 @@ test("simulation rejects production bot and mismatched bot identity", async () =
 });
 
 test("simulation rejects wrong staging database identity before enabling writers", async () => {
-  const pool = { async query() { return { rows: [{ environment: "isolated-staging", database_name: "profino_production" }] }; } };
+  const pool = { async query() { return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_production" }] }; } };
   const env = { PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging", PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it" };
   await assert.rejects(createStagingSimulationHandlers(pool, env, "profino_staging_test_bot"), /independently marked isolated staging database/);
   await assert.rejects(createStagingSimulationHandlers(pool, { ...env, PROFINO_STAGING_DATABASE_NAME: "profino-db" }, "profino_staging_test_bot"), /explicitly named staging database/);
@@ -72,7 +72,7 @@ test("simulation rejects wrong staging database identity before enabling writers
 
 test("simulation refuses legacy withdrawal schema lacking payout state", async () => {
   const pool = { async query(sql) {
-    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] };
+    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }] };
     if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
     return { rows: [{ extended_columns: false, payout_state_constraint: false }] };
   } };
@@ -84,7 +84,7 @@ test("simulation refuses legacy withdrawal schema lacking payout state", async (
 
 test("simulation refuses extended columns without a four-state payout constraint", async () => {
   const pool = { async query(sql) {
-    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] };
+    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }] };
     if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
     return { rows: [{ extended_columns: true, payout_state_constraint: false }] };
   } };
@@ -96,7 +96,7 @@ test("simulation refuses extended columns without a four-state payout constraint
 
 test("simulation refuses payout constraint when required columns are missing", async () => {
   const pool = { async query(sql) {
-    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] };
+    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }] };
     if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
     return { rows: [{ extended_columns: false, payout_state_constraint: true }] };
   } };
@@ -109,7 +109,7 @@ test("simulation refuses payout constraint when required columns are missing", a
 test("staging schema preflight checks every supported withdrawal state", async () => {
   let checkedConstraint = false;
   const pool = { async query(sql) {
-    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it" }] };
+    if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }] };
     if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
     for (const state of ["reserved", "cancelled", "pending_receipt", "paid"]) {
       assert.ok(sql.includes(`LIKE '%${state}%'`), `missing constraint check for ${state}`);
@@ -179,4 +179,19 @@ test("staging database label must be a separate name segment, not hidden in prod
       /visibly identify an isolated test environment/
     );
   }
+});
+
+test("simulation rejects a session-only staging marker before schema access", async () => {
+  let calls = 0;
+  const pool = { async query(sql) {
+    calls++;
+    assert.match(sql, /pg_catalog\.pg_db_role_setting/);
+    assert.match(sql, /s\.setrole = 0/);
+    return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it", database_marker: false }] };
+  } };
+  await assert.rejects(createStagingSimulationHandlers(pool, {
+    PROFINO_SIMULATION_MODE: "isolated-staging", PROFINO_DEPLOYMENT_ENV: "staging",
+    PROFINO_STAGING_BOT_USERNAME: "profino_staging_test_bot", PROFINO_STAGING_DATABASE_NAME: "profino_staging_it"
+  }, "profino_staging_test_bot"), /independently marked isolated staging database/);
+  assert.equal(calls, 1);
 });
