@@ -2,12 +2,12 @@
 // A database transaction must independently enforce idempotency, ownership,
 // account locks, and balanced posting before real financial use.
 import {assertBalancedLedgerEntries} from "./ledger-safety.js";
-const KEY=/^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$/;
+import {isCanonicalDepositEventKey} from "./deposit-event-identity.js";
 const ID=/^[1-9][0-9]{0,18}$/;
 const MAX_ID=9223372036854775807n;
 const validId=v=>typeof v==="string"&&ID.test(v)&&BigInt(v)<=MAX_ID;
 export function draftBscDepositJournal({evidence,userAvailableAccountId,platformClearingAccountId}){
- if(!evidence || typeof evidence.eventKey!=="string" || !KEY.test(evidence.eventKey) ||
+ if(!evidence || !isCanonicalDepositEventKey(evidence.eventKey) ||
     !validId(evidence.userId) || !validId(evidence.walletId) ||
     !validId(userAvailableAccountId) || !validId(platformClearingAccountId) ||
     userAvailableAccountId===platformClearingAccountId ||
