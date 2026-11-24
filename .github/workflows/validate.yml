@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -40,3 +41,5 @@ jobs:
         run: npm test
       - name: Audit locked runtime dependencies
         run: npm audit --omit=dev --audit-level=high
+      - name: Scan reachable Git history for credentials
+        run: node scripts/check-secret-history.js
