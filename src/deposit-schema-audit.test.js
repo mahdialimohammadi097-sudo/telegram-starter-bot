@@ -48,11 +48,59 @@ test("schema audit rejects evidence tables missing validated format checks",asyn
   "verified_deposit_evidence_address_format"
  ];
  const client={query:async(sql)=>{
-  if(sql.includes("c.contype='c'")) return {rows:checks.slice(0,3).map(conname=>({conname,validated:true})).concat([{conname:checks[3],validated:false}])};
+  if(sql.includes("c.contype='c'")) return {rows:[
+   {conname:checks[0],validated:true,expression:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)
   return {rows:[]};
  }};
  const report=await auditDepositSchema(client);
  assert.equal(report.ready,false);
  assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
  assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
+});
+::text)"},
+   {conname:checks[1],validated:true,expression:"(block_hash ~ '^0x[0-9a-f]{64}
+  return {rows:[]};
+ }};
+ const report=await auditDepositSchema(client);
+ assert.equal(report.ready,false);
+ assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
+ assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
+});
+::text)"},
+   {conname:checks[2],validated:true,expression:"(token_contract ~ '^0x[0-9a-f]{40}
+  return {rows:[]};
+ }};
+ const report=await auditDepositSchema(client);
+ assert.equal(report.ready,false);
+ assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
+ assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
+});
+::text)"},
+   {conname:checks[3],validated:false,expression:"(deposit_address ~ '^0x[0-9a-f]{40}
+  return {rows:[]};
+ }};
+ const report=await auditDepositSchema(client);
+ assert.equal(report.ready,false);
+ assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
+ assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
+});
+::text)"}
+  ]};
+  return {rows:[]};
+ }};
+ const report=await auditDepositSchema(client);
+ assert.equal(report.ready,false);
+ assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
+ assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
+});
+
+test("schema audit refuses named but ineffective checks and nullable idempotency keys",async()=>{
+ const client={query:async(sql)=>({rows:sql.includes("c.contype='c'")?
+  [{conname:"verified_deposit_evidence_event_key_format",validated:true,expression:"true"}]:
+  sql.includes("information_schema.columns")?
+  [{table_name:"ledger_transactions",column_name:"idempotency_key",data_type:"text",is_nullable:"YES"}]:[]})};
+ const report=await auditDepositSchema(client);
+ assert.equal(report.ready,false);
+ assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
+ assert.ok(report.incompatible.includes("ledger_transactions.idempotency_key:not_null"));
 });
