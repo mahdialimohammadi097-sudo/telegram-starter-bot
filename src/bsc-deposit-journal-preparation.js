@@ -3,6 +3,7 @@
 // Caller must provide independently verified account identities; this function
 // does not authorize a financial transaction.
 import {inspectBscDepositWithHistoricalOwner} from "./bsc-deposit-ownership-preflight.js";
+import {validateDepositPostingDraft} from "./deposit-posting-invariants.js";
 import {draftBscDepositJournal} from "./deposit-ledger-journal-draft.js";
 import {inspectDepositJournalAccounts} from "./deposit-journal-account-db-inspection.js";
 export async function prepareBscDepositJournal({
@@ -16,5 +17,6 @@ export async function prepareBscDepositJournal({
   userId:evidence.userId,userAvailableAccountId,platformClearingAccountId,schema,lockRows
  });
  const journal=draftBscDepositJournal({evidence,...accounts});
+ validateDepositPostingDraft(journal);
  return Object.freeze({evidence,journal});
 }
