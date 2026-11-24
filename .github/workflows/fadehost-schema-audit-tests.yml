@@ -4,6 +4,7 @@ on:
     paths:
       - 'scripts/fadehost-schema-audit.js'
       - 'scripts/fadehost-schema-audit.test.js'
+      - 'src/deposit-schema-audit.js'
       - 'src/database-tls-policy.js'
       - 'src/transaction-safety.js'
       - 'src/diagnostic-safety.js'
