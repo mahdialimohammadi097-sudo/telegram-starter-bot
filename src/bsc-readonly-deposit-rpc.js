@@ -2,15 +2,16 @@
 // approved token policy. Never writes to the database or credits balances.
 import {inspectBscMainnetTransfer} from "./bsc-mainnet-transfer-inspection.js";
 const HASH=/^0x[0-9a-f]{64}$/i;
+const validHash=value=>typeof value==="string" && value.length===66 && HASH.test(value);
 const Q=/^0x(?:0|[1-9a-f][0-9a-f]*)$/i;
 const height=value=>{
- if(typeof value!=="string" || !Q.test(value)) throw new Error("Invalid RPC block quantity");
+ if(typeof value!=="string" || value.length>16 || !Q.test(value) || /\s/.test(value)) throw new Error("Invalid RPC block quantity");
  const n=BigInt(value);
  if(n>BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Unsafe RPC block quantity");
  return Number(n);
 };
 export async function readBscDepositEvidence({rpc,transactionHash,expected}){
- if(typeof rpc!=="function" || !HASH.test(transactionHash) ||
+ if(typeof rpc!=="function" || !validHash(transactionHash) ||
     !expected || expected.transactionHash?.toLowerCase()!==transactionHash.toLowerCase())
   throw new Error("Invalid read-only BSC evidence request");
  const request=async(method,params)=>{
@@ -35,7 +36,7 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
  const first=await request("eth_getBlockByNumber",[blockTag,false]);
  const head=await request("eth_blockNumber",[]);
  const second=await request("eth_getBlockByNumber",[blockTag,false]);
- if(!first || !second || !HASH.test(first.hash) || !HASH.test(second.hash) ||
+ if(!first || !second || !validHash(first.hash) || !validHash(second.hash) ||
     first.hash.toLowerCase()!==second.hash.toLowerCase() ||
     height(first.number)!==blockHeight || height(second.number)!==blockHeight ||
     receipt.blockHash?.toLowerCase()!==second.hash.toLowerCase())
@@ -64,7 +65,7 @@ export async function readBscDepositEvidence({rpc,transactionHash,expected}){
  if(latestHead<finalizedBlockNumber)
   throw new Error("RPC head regressed during evidence inspection");
  const finalBlock=await request("eth_getBlockByNumber",[blockTag,false]);
- if(!finalBlock || !HASH.test(finalBlock.hash) ||
+ if(!finalBlock || !validHash(finalBlock.hash) ||
     finalBlock.hash.toLowerCase()!==second.hash.toLowerCase() ||
     height(finalBlock.number)!==blockHeight)
   throw new Error("RPC canonical block changed after final receipt inspection");
