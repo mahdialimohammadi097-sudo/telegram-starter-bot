@@ -3,12 +3,22 @@
 // receipt, transaction, canonical block and head from its own verified RPC.
 const HEX64 = /^0x[0-9a-f]{64}$/;
 const ADDRESS = /^0x[0-9a-f]{40}$/;
-const UINT = /^(0|[1-9][0-9]*)$/;
+const UINT = /^(0|[1-9][0-9]{0,77})$/;
+const MAX_UINT256 = (1n << 256n) - 1n;
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const addressTopic = value => "0x" + "0".repeat(24) + value.slice(2);
 function quantity(value) {
-  if (typeof value !== "string" || !/^0x(?:0|[1-9a-f][0-9a-f]*)$/.test(value)) throw new Error("Invalid RPC quantity");
+  if (typeof value !== "string" || !/^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/.test(value)) throw new Error("Invalid RPC quantity");
   return BigInt(value);
+}
+function logQuantity(value) {
+  if (typeof value === "number" && !Number.isSafeInteger(value)) throw new Error("Unsafe log index");
+  if (typeof value !== "string" && typeof value !== "number") throw new Error("Invalid log index");
+  if (typeof value === "string" && value.startsWith("0x")) return quantity(value.toLowerCase());
+  if (!UINT.test(String(value))) throw new Error("Invalid log index");
+  const index = BigInt(value);
+  if (index > MAX_UINT256) throw new Error("Invalid log index: exceeds uint256");
+  return index;
 }
 export function verifyBep20DepositReceipt({receipt, transaction, block, head, tokenContract, depositAddress, minConfirmations = 20}) {
   if (!ADDRESS.test(tokenContract ?? "") || !ADDRESS.test(depositAddress ?? "") ||
@@ -30,9 +40,8 @@ export function verifyBep20DepositReceipt({receipt, transaction, block, head, to
     if (!Array.isArray(log.topics) || log.topics[0]?.toLowerCase() !== TRANSFER_TOPIC) continue;
     if (log.topics.length !== 3 || !/^0x[0-9a-fA-F]{64}$/.test(log.topics[1]) ||
         typeof log.topics[2] !== "string" || log.topics[2].toLowerCase() !== expectedTo ||
-        !/^0x[0-9a-fA-F]{64}$/.test(log.data ?? "") ||
-        !UINT.test(String(log.logIndex ?? "")) && !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(log.logIndex ?? "")) continue;
-    const index = typeof log.logIndex === "string" && log.logIndex.startsWith("0x") ? quantity(log.logIndex.toLowerCase()) : BigInt(log.logIndex);
+        typeof log.data !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(log.data)) continue;
+    const index = logQuantity(log.logIndex);
     const amount = BigInt(log.data);
     const indexKey = index.toString();
     if (seenIndices.has(indexKey)) throw new Error("Duplicate transfer log index");
