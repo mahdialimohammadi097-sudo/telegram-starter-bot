@@ -34,6 +34,17 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(1);
 }
 
+const webhookSecret = (process.env.WEBHOOK_SECRET || "").trim();
+if (mode === "webhook" && !/^[A-Za-z0-9_-]{1,256}$/.test(webhookSecret)) {
+  console.error("[startup] WEBHOOK_SECRET is required in webhook mode and must use Telegram-compatible characters.");
+  process.exit(1);
+}
+
+function safeErrorCode(error) {
+  const code = error?.error_code ?? error?.response?.error_code ?? error?.code;
+  return typeof code === "number" && Number.isInteger(code) ? code : "operation_failed";
+}
+
 const bot = new Bot(token);
 const runtimeHealth = createRuntimeHealthState();
 let healthServer = null;
@@ -54,7 +65,7 @@ function explainTelegramError(error) {
   } else if (code === 409) {
     console.error("[bot] Telegram polling conflict: another process may be using this token.");
   } else {
-    console.error("[bot] Telegram API error:", error?.message ?? error);
+    console.error("[bot] Telegram API error:", safeErrorCode(error));
   }
 }
 
@@ -73,7 +84,7 @@ async function retryUntilAvailable(operation, label) {
     } catch (error) {
       const code = error?.error_code ?? error?.response?.error_code;
       if (code === 401 || code === 404) throw error;
-      console.error(`[startup] ${label} unavailable:`, error?.message ?? error);
+      console.error(`[startup] ${label} unavailable:`, safeErrorCode(error));
       console.error(`[startup] retrying ${label} in ${Math.ceil(delayMs / 1000)} seconds`);
       await sleep(delayMs);
       delayMs = Math.min(delayMs * 2, 60_000);
@@ -103,7 +114,7 @@ async function shutdown(signal = "shutdown") {
     try {
       bot.stop();
     } catch (error) {
-      console.error("[shutdown] Telegram bot stop warning:", error?.message ?? error);
+      console.error("[shutdown] Telegram bot stop warning:", safeErrorCode(error));
     }
 
     await closeHttpServer();
@@ -112,7 +123,7 @@ async function shutdown(signal = "shutdown") {
       await closeDatabase();
       console.log("[shutdown] PostgreSQL pool closed.");
     } catch (error) {
-      console.error("[shutdown] PostgreSQL pool close failed:", error?.message ?? error);
+      console.error("[shutdown] PostgreSQL pool close failed:", safeErrorCode(error));
     }
   })();
 
@@ -122,7 +133,7 @@ async function shutdown(signal = "shutdown") {
 registerCommands(bot);
 
 bot.catch((error) => {
-  console.error("[bot] update handler error:", error.error ?? error);
+  console.error("[bot] update handler error:", safeErrorCode(error.error ?? error));
 });
 
 async function sendStartupReport(botUsername) {
@@ -133,7 +144,7 @@ async function sendStartupReport(botUsername) {
     try {
       schemaSnapshot = await inspectCoreSchema(pool);
     } catch (error) {
-      schemaError = error?.code || "inspection_failed";
+      schemaError = safeErrorCode(error);
       console.error("[health] database schema inspection failed:", schemaError);
     }
 
@@ -151,7 +162,7 @@ async function sendStartupReport(botUsername) {
   } catch (error) {
     console.error(
       "[health] startup report could not be delivered:",
-      error?.error_code || error?.message || "unknown"
+      safeErrorCode(error)
     );
   }
 }
@@ -257,7 +268,7 @@ async function main() {
       throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
     }
 
-    const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined;
+    const secret = webhookSecret;
     webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
 
     await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
@@ -276,14 +287,14 @@ async function main() {
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
     void shutdown(signal).catch((error) => {
-      console.error("[shutdown] failed:", error?.message ?? error);
+      console.error("[shutdown] failed:", safeErrorCode(error));
       process.exitCode = 1;
     });
   });
 }
 
 main().catch(async (error) => {
-  console.error("[startup] PROFINO could not start:", error?.message ?? error);
+  console.error("[startup] PROFINO could not start:", safeErrorCode(error));
   process.exitCode = 1;
   await shutdown("startup failure");
 });
