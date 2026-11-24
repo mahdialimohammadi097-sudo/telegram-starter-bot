@@ -259,3 +259,23 @@ test("validated deposit draft posts two balanced fixture legs atomically and rej
   assert.equal(r.rows[0].net,"0.000000000000000000");
  }finally{try{await c.query("ROLLBACK")}catch{}c.release();await pool.end()}
 });
+
+test("review-only deposit schema validates in isolated temporary namespace", {skip:!url,timeout:15000},async()=>{
+ const {readFileSync}=await import("node:fs");
+ const sql=readFileSync(new URL("../docs/review-only/deposit-schema-proposal.sql",import.meta.url),"utf8");
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const c=await pool.connect();
+ try{
+  await c.query("CREATE TEMP TABLE wallets(id bigint PRIMARY KEY); CREATE TEMP TABLE users(id bigint PRIMARY KEY)");
+  await c.query("INSERT INTO wallets VALUES(1); INSERT INTO users VALUES(1)");
+  const ddl=sql.replace(/public\./g,"pg_temp.").replace(/\bBEGIN;/,"").replace(/\bROLLBACK;/,"");
+  await c.query("BEGIN");
+  await c.query(ddl);
+  await c.query("INSERT INTO pg_temp.deposit_address_ownership_history(wallet_id,user_id,chain_id,wallet_address,start_block) VALUES(1,1,56,$1,0)",["0x"+"a".repeat(40)]);
+  const args=["bsc:56:0x"+"b".repeat(64)+":0","0x"+"c".repeat(64),"0x"+"d".repeat(40),"0x"+"a".repeat(40)];
+  const insert="INSERT INTO pg_temp.verified_deposit_evidence(event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES($1,$2,1,$3,$4,100)";
+  await c.query(insert,args);
+  await assert.rejects(c.query(insert,args),e=>e.code==="23505");
+  await c.query("ROLLBACK");
+ }finally{try{await c.query("ROLLBACK")}catch{}c.release();await pool.end()}
+});
