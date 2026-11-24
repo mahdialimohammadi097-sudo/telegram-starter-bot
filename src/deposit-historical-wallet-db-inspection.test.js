@@ -13,7 +13,8 @@ function fixture(rows){
    assert.deepEqual(params,[address,"150"]);
    return {rows,rowCount:rows.length};
   }
-  return {command:sql};
+  if(sql.includes("pg_catalog.current_setting('transaction_read_only')")) return {rows:[{read_only:"on",isolation:"repeatable read",statement_timeout:"10s",lock_timeout:"3s"}]};
+  return {command:sql.split(" ")[0]};
  },release(){}})}};
 }
 test("snapshot reports record consistency only without returning identities",async()=>{
