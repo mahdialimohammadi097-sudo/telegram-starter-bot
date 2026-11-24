@@ -56,3 +56,30 @@ test("webhook route is unavailable until a handler is registered", async (t) => 
   assert.equal(accepted.status, 200);
   assert.equal(await accepted.text(), "accepted");
 });
+
+test("webhook handler failures do not expose details or terminate health server", async (t) => {
+  const runtimeHealth = createRuntimeHealthState();
+  let handler = () => { throw new Error("synthetic-sensitive-detail"); };
+  const server = await startHealthHttpServer({
+    port: 0, runtimeHealth, getWebhookHandler: () => handler
+  });
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  for (const failure of [
+    () => { throw new Error("synthetic-sensitive-detail"); },
+    async () => { throw new Error("synthetic-sensitive-detail"); }
+  ]) {
+    handler = failure;
+    const response = await fetch(base + "/telegram", { method: "POST" });
+    assert.equal(response.status, 500);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(await response.text(), "internal server error");
+    const live = await fetch(base + "/livez");
+    assert.equal(live.status, 200);
+    await live.text();
+  }
+  handler = (_req, res) => res.end("accepted");
+  const recovered = await fetch(base + "/telegram", { method: "POST" });
+  assert.equal(recovered.status, 200);
+  assert.equal(await recovered.text(), "accepted");
+});
