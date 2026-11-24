@@ -19,6 +19,7 @@ export function scanHistory(cwd = process.cwd()) {
     input: objects, encoding: "utf8"
   }).trim().split("\n").filter(Boolean);
   const findings = new Map();
+  const findingObjects = [];
   let scanned = 0, binary = 0, reviewed = 0;
   for (const line of metadata) {
     const match = /^([a-f0-9]{40,64}) (blob|commit|tree|tag) (\d+)$/.exec(line);
@@ -31,9 +32,10 @@ export function scanHistory(cwd = process.cwd()) {
     for (const kind of detectSecretKinds(bytes.toString("utf8"))) {
       if (reviewedFixtures.has(oid) && kind === "database-url") { reviewed++; continue; }
       findings.set(kind, (findings.get(kind) ?? 0) + 1);
+      findingObjects.push({ kind, oid });
     }
   }
-  return { scanned, binary, reviewed, findings };
+  return { scanned, binary, reviewed, findings, findingObjects };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -41,6 +43,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const result = scanHistory();
     console.log("Historical text blobs scanned: " + result.scanned + "; binary excluded: " + result.binary + "; reviewed fixture matches: " + result.reviewed);
     for (const [kind, count] of result.findings) console.error("History secret policy: " + kind + " in " + count + " unique blob(s).");
+    // Git object identifiers allow a reviewer to locate historical content without
+    // publishing any matching values, filenames or raw errors in CI logs.
+    for (const { kind, oid } of result.findingObjects) console.error("History review object: " + kind + " " + oid);
     if (result.findings.size) process.exitCode = 1;
   } catch {
     console.error("History secret scan could not complete.");
