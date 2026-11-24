@@ -1,0 +1,5 @@
+# Runtime database privilege separation (review only)
+
+The existing runtime executes administrative/post schema preparation during startup. To preserve deployment compatibility, the default remains legacy-prepare until a supervised migration/role review. The new PROFINO_RUNTIME_SCHEMA_MODE=verify-only path performs only catalog inspection inside a bounded read-only transaction; on missing objects or access mismatch it stops startup, never falls back to DDL.
+
+This is a narrow compatibility inventory for existing operational tables and the post-history trigger. It is not a complete least-privilege, trigger-body, type, sequence, column-level permission, row-level security or financial schema audit. The restricted runtime role must separately pass database-access, catalog, actual registration/admin/post behavior and backup restore checks. A missing or incompatible object is a release blocker, not permission to elevate the bot role or apply production changes. No role, setting, migration or deployment has been changed. Keep the current private network and financial operations disabled.
