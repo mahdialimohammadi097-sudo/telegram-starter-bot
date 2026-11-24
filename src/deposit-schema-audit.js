@@ -47,6 +47,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   'verified_deposit_evidence.token_contract',
   'verified_deposit_evidence.deposit_address',
   'verified_deposit_evidence.amount_base_units',
+  'ledger_transactions.idempotency_key',
   'ledger_entries.amount',
   'ledger_entries.transaction_id',
   'ledger_entries.account_id'
@@ -121,19 +122,26 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  // CHECK constraints required to reject malformed chain events and addresses.
  // CREATE TABLE IF NOT EXISTS does not repair such a table.
  const checks=await client.query(`
- SELECT c.conname,c.convalidated AS validated
+ SELECT c.conname,c.convalidated AS validated,
+        pg_catalog.pg_get_expr(c.conbin,c.conrelid,false) AS expression
  FROM pg_constraint c
  JOIN pg_class t ON t.oid=c.conrelid
  JOIN pg_namespace n ON n.oid=t.relnamespace
  WHERE n.nspname=$1 AND t.relname='verified_deposit_evidence' AND c.contype='c'
  `,[schema]);
- const validChecks=new Set(checks.rows.filter(r=>r.validated===true).map(r=>r.conname));
- for(const name of [
-  "verified_deposit_evidence_event_key_format",
-  "verified_deposit_evidence_block_hash_format",
-  "verified_deposit_evidence_token_format",
-  "verified_deposit_evidence_address_format"
- ]) if(!validChecks.has(name)) incompatible.push("verified_deposit_evidence."+name+":check_constraint");
+ // Require the reviewed PostgreSQL expression, not merely a trusted-looking name.
+ // Semantically equivalent but differently rendered constraints need manual review.
+ const expectedChecks={
+  verified_deposit_evidence_event_key_format:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'::text)",
+  verified_deposit_evidence_block_hash_format:"(block_hash ~ '^0x[0-9a-f]{64}$'::text)",
+  verified_deposit_evidence_token_format:"(token_contract ~ '^0x[0-9a-f]{40}$'::text)",
+  verified_deposit_evidence_address_format:"(deposit_address ~ '^0x[0-9a-f]{40}$'::text)"
+ };
+ for(const [name,expression] of Object.entries(expectedChecks)) {
+  const matching=checks.rows.filter(r=>r.conname===name);
+  if(matching.length!==1 || matching[0].validated!==true || matching[0].expression!==expression)
+   incompatible.push("verified_deposit_evidence."+name+":check_constraint");
+ }
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
    missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
 }

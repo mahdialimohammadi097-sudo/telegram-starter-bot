@@ -72,6 +72,14 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   assert.deepEqual(result.missing,[]);
   assert.deepEqual(result.incompatible,[]);
   assert.equal(result.ready,true);
+  // A validated but ineffective constraint with the expected name is not evidence.
+  await q('ALTER TABLE '+prefix+'verified_deposit_evidence DROP CONSTRAINT verified_deposit_evidence_event_key_format');
+  await q('ALTER TABLE '+prefix+'verified_deposit_evidence ADD CONSTRAINT verified_deposit_evidence_event_key_format CHECK (true)');
+  await q('ALTER TABLE '+prefix+'ledger_transactions ALTER COLUMN idempotency_key DROP NOT NULL');
+  const weakened=await auditDepositSchema(pool,{schema});
+  assert.equal(weakened.ready,false);
+  assert.ok(weakened.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
+  assert.ok(weakened.incompatible.includes("ledger_transactions.idempotency_key:not_null"));
  }finally{
   await q('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
   await pool.end();
