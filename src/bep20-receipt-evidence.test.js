@@ -62,3 +62,22 @@ test("rejects self-transfers, mint logs and noncanonical sender topics",()=>{
   assert.throws(()=>verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[changed]}}),/Invalid transfer sender/);
  }
 });
+
+test("rejects zero-address policy and coercible canonical hashes",()=>{
+ const zero="0x"+"0".repeat(40);
+ for(const change of [{tokenContract:zero},{depositAddress:zero},{receipt:{...receipt,transactionHash:[txHash]},transaction:{...transaction,hash:[txHash]}}]){
+  assert.throws(()=>verifyBep20DepositReceipt({...base,...change}));
+ }
+});
+test("rejects reused log indices even for unrelated token contracts",()=>{
+ const other={...log,address:"0x"+"f".repeat(40)};
+ assert.throws(()=>verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[other,log]}}),/Duplicate transfer log index/);
+});
+test("requires consistent transaction indexes when any relevant index is supplied",()=>{
+ const indexed={...base,transaction:{...transaction,transactionIndex:"0x2"},receipt:{...receipt,transactionIndex:"0x2",logs:[{...log,transactionIndex:"0x2"}]}};
+ assert.equal(verifyBep20DepositReceipt(indexed).length,1);
+ for(const i of ["0x1",null,undefined,"0x02"]){
+  assert.throws(()=>verifyBep20DepositReceipt({...indexed,transaction:{...indexed.transaction,transactionIndex:i}}));
+  assert.throws(()=>verifyBep20DepositReceipt({...indexed,receipt:{...indexed.receipt,logs:[{...log,transactionIndex:i}]}}));
+ }
+});
