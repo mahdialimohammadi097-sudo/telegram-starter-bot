@@ -21,7 +21,21 @@ CREATE TABLE public.deposit_address_ownership_history (
  created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(chain_id,wallet_address,start_block)
 );
--- Overlap exclusion, immutable provenance, role grants and reconciliation
+-- Native GiST numeric ranges enforce non-overlapping ownership intervals,
+-- including concurrent inserts. Requires no additional extension.
+ALTER TABLE public.deposit_address_ownership_history
+ ADD CONSTRAINT deposit_history_no_overlap EXCLUDE USING gist (
+ numrange(('x'||substring(wallet_address from 3 for 10))::bit(40)::bigint::numeric,
+          ('x'||substring(wallet_address from 3 for 10))::bit(40)::bigint::numeric,'[]') WITH &&,
+ numrange(('x'||substring(wallet_address from 13 for 10))::bit(40)::bigint::numeric,
+          ('x'||substring(wallet_address from 13 for 10))::bit(40)::bigint::numeric,'[]') WITH &&,
+ numrange(('x'||substring(wallet_address from 23 for 10))::bit(40)::bigint::numeric,
+          ('x'||substring(wallet_address from 23 for 10))::bit(40)::bigint::numeric,'[]') WITH &&,
+ numrange(('x'||substring(wallet_address from 33 for 10))::bit(40)::bigint::numeric,
+          ('x'||substring(wallet_address from 33 for 10))::bit(40)::bigint::numeric,'[]') WITH &&,
+ numrange(start_block,end_block,'[)') WITH &&
+ );
+-- Immutable provenance, role grants and reconciliation
 -- are unresolved. No historical assignments may be inferred or backfilled.
 -- Deliberate rollback: this proposal cannot persist changes as supplied.
 ROLLBACK;
