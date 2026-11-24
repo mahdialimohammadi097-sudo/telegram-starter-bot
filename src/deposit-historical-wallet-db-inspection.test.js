@@ -51,3 +51,10 @@ test("history lookup rejects malformed database responses",async()=>{
   await assert.rejects(inspect({query:async()=>result},input),/Missing or ambiguous/);
  }
 });
+
+test("rejects trailing line terminators before querying historical ownership",async()=>{
+ let calls=0;
+ const client={query:async()=>{calls++;return {rows:[row]}}};
+ for(const patch of [{schema:"public\n"},{walletAddress:address+"\n"},{expectedUserId:"12\n"},{eventBlockNumber:"150\n"}])await assert.rejects(inspect(client,{...input,...patch}),/Invalid/);
+ assert.equal(calls,0);
+});
