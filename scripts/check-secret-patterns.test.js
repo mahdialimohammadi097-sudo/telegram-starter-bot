@@ -42,3 +42,13 @@ test("only known disposable database URLs and local placeholders are exempt", ()
 test("Telegram credential detection includes a trailing hyphen", () => {
   assert.deepEqual(detectSecretKinds("123456789:" + "A".repeat(34) + "-"), ["telegram-token"]);
 });
+
+test("reviewed disposable credentials are exempt only in the exact workflow path", () => {
+  const prefix = "postgresql://";
+  const url = prefix + "postgres:rehearsal@localhost:5432/catalog_rehearsal";
+  const workflow = ".github/workflows/catalog-owner-postgres.yml";
+  assert.deepEqual(detectSecretKinds(url, workflow), []);
+  assert.deepEqual(detectSecretKinds(url, "src/production.js"), ["database-url"]);
+  assert.deepEqual(detectSecretKinds(url + "\n" + prefix + "postgres:rehearsal@remote.invalid:5432/catalog_rehearsal", workflow), ["database-url"]);
+  assert.deepEqual(detectSecretKinds(prefix + "postgres:other-secret@localhost:5432/catalog_rehearsal", workflow), ["database-url"]);
+});
