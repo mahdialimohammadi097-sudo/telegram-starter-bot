@@ -113,3 +113,18 @@ test("stopping during a health probe suppresses stale status and alerts", async 
   await monitor.check();
   assert.equal(checks, 1);
 });
+
+test("synchronous probe failure marks only the affected service unavailable", async (t) => {
+  const statuses = [];
+  const monitor = startHealthMonitor({
+    bot: { api: { sendMessage: async () => {} } },
+    pool: { query() { throw new Error("synthetic database failure"); } },
+    telegramCheck: () => true,
+    onStatus: status => statuses.push(status),
+    logger: { warn() {}, error() {} }
+  });
+  t.after(() => monitor.stop());
+  await monitor.ready;
+  assert.deepEqual(statuses, [{ telegram: true, database: false }]);
+});
+
