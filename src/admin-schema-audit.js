@@ -1,3 +1,4 @@
+import { auditDepositSchema } from "./deposit-schema-audit.js";
 // Read-only, one-shot structural diagnostic for the existing production database.
 // No user rows, wallet addresses, balances or secrets are queried or returned.
 export async function inspectDepositSchemaReadOnly(pool) {
@@ -49,8 +50,13 @@ export async function inspectDepositSchemaReadOnly(pool) {
   const uniqueKeys=new Set(indexes.rows.map(r=>r.table_name+"."+r.column_name));
   for(const key of ["verified_deposit_evidence.event_key","ledger_transactions.idempotency_key"])
    if(!uniqueKeys.has(key))missing.push("unique:"+key);
+  // Legacy metadata remains useful for migration review, but cannot certify
+  // the stronger shared catalog contract (nullability, precision, FK and CHECK).
+  const catalog=await auditDepositSchema(client);
+  for(const column of catalog.missing) if(!missing.includes(column)) missing.push(column);
   await client.query("ROLLBACK");
-  return {audit:"deposit-schema",structuralReady:missing.length===0,missing,
+  return {audit:"deposit-schema",structuralReady:missing.length===0&&catalog.ready&&incompatibleTypes.length===0,missing,
+   catalogIncompatible:catalog.incompatible,
    migrationTypeCompatible:incompatibleTypes.length===0,incompatibleTypes,
    financialActivationReady:false,realDepositsEnabled:false,
    outstandingSecurityGates:["independent-historical-ownership-proof","independent-chain-finality-verification","production-backup-restore","owner-financial-authorization"]};
