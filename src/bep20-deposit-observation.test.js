@@ -34,3 +34,9 @@ test("rejects quantities outside the blockchain uint256 range",()=>{
   assert.throws(()=>validateBep20DepositObservation({...event,...change},policy),/Invalid/);
  }
 });
+
+test("rejects self-transfers and zero sender observations",()=>{
+ for(const from of [event.to,"0x"+"0".repeat(40)]){
+  assert.throws(()=>validateBep20DepositObservation({...event,from},policy),/Invalid transfer sender/);
+ }
+});
