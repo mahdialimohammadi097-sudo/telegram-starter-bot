@@ -63,3 +63,39 @@ test("monitor reports webhook receiver health through the status callback", asyn
   monitor.stop();
   assert.deepEqual(observed, { telegram: false, database: true });
 });
+
+test("synchronous probe failure marks only the affected service unavailable", async (t) => {
+  const statuses = [];
+  const monitor = startHealthMonitor({
+    bot: { api: { sendMessage: async () => {} } },
+    pool: { query() { throw new Error("synthetic database failure"); } },
+    telegramCheck: () => true,
+    onStatus: status => statuses.push(status),
+    logger: { warn() {}, error() {} }
+  });
+  t.after(() => monitor.stop());
+  await monitor.ready;
+  assert.deepEqual(statuses, [{ telegram: true, database: false }]);
+});
+
+test("stopping the monitor suppresses stale results and subsequent checks", async (t) => {
+  const statuses = [];
+  let checks = 0, alerts = 0, finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const monitor = startHealthMonitor({
+    bot: { api: { sendMessage: async () => { alerts++; } } },
+    pool: { query: async () => { await pending; throw new Error("synthetic outage"); } },
+    telegramCheck: async () => { checks++; return true; },
+    onStatus: status => statuses.push(status),
+    logger: { warn() {}, error() {} }
+  });
+  t.after(() => monitor.stop());
+  await Promise.resolve();
+  monitor.stop();
+  finish();
+  await monitor.ready;
+  await monitor.check();
+  assert.equal(checks, 1);
+  assert.equal(alerts, 0);
+  assert.deepEqual(statuses, []);
+});
