@@ -139,3 +139,10 @@ test("fails closed on missing or malformed transaction position evidence",()=>{
   assert.throws(()=>inspectBscMainnetTransfer({...input,receipt}),/Transfer log/);
  }
 });
+
+test("rejects malformed transfer fields without coercion",()=>{
+ for(const patch of [{data:log.data+"\n"},{data:[log.data]},{logIndex:"0x2\n"},{logIndex:"0x"+"f".repeat(1000)},{topics:[topic,sender+"\n",log.topics[2]]}]){
+  assert.throws(()=>inspectBscMainnetTransfer({...input,receipt:{...input.receipt,logs:[{...log,...patch}]}}));
+ }
+ for(const finalizedBlockNumber of ["0x78\n","0x"+"f".repeat(1000)])assert.throws(()=>inspectBscMainnetTransfer({...input,finalizedBlockNumber}));
+});
