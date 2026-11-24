@@ -76,23 +76,24 @@ if (!process.env.DATABASE_URL) {
    // Reject orphan-prone ledger schemas: posting rows must reference real
    // transactions and accounts through validated single-column foreign keys.
    const foreignKeys=await client.query(`SELECT tn.nspname AS target_schema, tt.relname AS target_table,
-      a.attname AS source_column
+      a.attname AS source_column, ta.attname AS target_column
      FROM pg_constraint c
      JOIN pg_class t ON t.oid=c.conrelid
      JOIN pg_namespace n ON n.oid=t.relnamespace
      JOIN pg_class tt ON tt.oid=c.confrelid
      JOIN pg_namespace tn ON tn.oid=tt.relnamespace
      JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=c.conkey[1]
+     JOIN pg_attribute ta ON ta.attrelid=tt.oid AND ta.attnum=c.confkey[1]
      WHERE n.nspname='public' AND t.relname='ledger_entries'
        AND c.contype='f' AND array_length(c.conkey,1)=1
        AND array_length(c.confkey,1)=1 AND c.convalidated`);
    if(!foreignKeys || !Array.isArray(foreignKeys.rows))
     throw new Error("Malformed foreign-key catalog result");
-   const references=new Set(foreignKeys.rows.map(x=>x.source_column+":"+x.target_schema+"."+x.target_table));
+   const references=new Set(foreignKeys.rows.map(x=>x.source_column+":"+x.target_schema+"."+x.target_table+"."+x.target_column));
    for(const [column,target] of [
     ["transaction_id","ledger_transactions"],["account_id","ledger_accounts"]
    ]){
-    if(!references.has(column+":public."+target))
+    if(!references.has(column+":public."+target+".id"))
      missing.push("foreign_key:ledger_entries."+column+"->"+target);
    }
    // Ledger integrity requires the database to reject zero/negative postings,
