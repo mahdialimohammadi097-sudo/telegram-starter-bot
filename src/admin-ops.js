@@ -84,8 +84,8 @@ async function recordAdminActivity(ctx, action, targetUserIdInput = null, detail
     );
     return { ok: result.rowCount === 1, id: result.rows[0]?.id };
   } catch (error) {
-    console.error("[admin-ops] activity recording failed:", error.message);
-    return { ok: false, error: String(error?.message || error).slice(0, 500) };
+    console.error("[admin-ops] activity recording failed:", "operation_failed");
+    return { ok: false, error: "operation_failed" };
   }
 }
 
@@ -784,7 +784,7 @@ export function registerAdminOps(bot) {
     } catch (error) {
       console.error("[admin-ops] schema diagnostic failed:", error);
       await ctx.reply(adminText(language, "Unable to inspect admin audit schema. Diagnostic: ", "بررسی ساختار ممیزی مدیریت ممکن نشد. جزئیات: ") +
-        String(error?.message || error).slice(0, 500));
+        "operation_failed");
     }
   });
 
@@ -941,7 +941,7 @@ export function registerAdminOps(bot) {
       console.error("[admin-ops] core database schema inspection failed:", error);
       await ctx.reply(
         adminText(language, "Unable to inspect the core database schema.\nDiagnostic: ", "بررسی ساختار پایگاه داده اصلی ممکن نشد.\nجزئیات: ") +
-        String(error?.message || error).slice(0, 500)
+        "operation_failed"
       );
     }
   });
