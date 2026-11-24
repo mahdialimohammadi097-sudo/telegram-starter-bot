@@ -1,8 +1,9 @@
 // Offline journal invariant validator; no database writes or runtime wiring.
 import {assertBalancedLedgerEntries,toUsdtUnitsExact} from "./ledger-safety.js";
+import {isCanonicalDepositEventKey} from "./deposit-event-identity.js";
 export function validateDepositPostingDraft(draft){
  if(!draft || !Array.isArray(draft.entries) || draft.entries.length!==2 ||
- typeof draft.eventKey!=="string" || !/^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$/.test(draft.eventKey) ||
+ !isCanonicalDepositEventKey(draft.eventKey) ||
  draft.idempotencyKey!=="deposit:"+draft.eventKey)
  throw new Error("Invalid deposit posting identity");
  assertBalancedLedgerEntries(draft.entries);
