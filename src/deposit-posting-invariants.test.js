@@ -15,3 +15,11 @@ for(const [name,mutate] of [
  ["reversed legs",d=>d.entries.reverse()],
  ["extra leg",d=>d.entries.push(d.entries[0])]
 ])test("rejects "+name,()=>{const d=make();mutate(d);assert.throws(()=>validateDepositPostingDraft(d));});
+
+test("rejects noncanonical event identities even with matching idempotency keys",()=>{
+ for(const index of ["4294967296","01","1\n","9".repeat(1000)]){
+  const d=make();d.eventKey="bsc:56:0x"+"a".repeat(64)+":"+index;
+  d.idempotencyKey="deposit:"+d.eventKey;
+  assert.throws(()=>validateDepositPostingDraft(d));
+ }
+});
