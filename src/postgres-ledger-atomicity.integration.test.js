@@ -3,8 +3,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
+import {toUsdtUnitsExact} from "./ledger-safety.js";
 import {randomUUID} from "node:crypto";
 const url=process.env.PROFINO_TEST_DATABASE_URL;
+// Fail closed before connecting: these tests create and drop fixture schemas.
+if(url){
+ const target=new URL(url);
+ if(target.protocol!=="postgresql:" || target.hostname!=="127.0.0.1" ||
+    target.port!=="5432" || target.username!=="profino_test" ||
+    target.pathname!=="/profino_test" || target.search || target.hash)
+  throw new Error("Integration tests require the isolated local profino_test database");
+}
+
 test("unique event claims and journal writes rollback atomically",{
  skip:!url?"requires PROFINO_TEST_DATABASE_URL":false
 },async()=>{
@@ -194,7 +204,7 @@ test("ledger-derived available balance cannot be spent twice under account row l
   const spend=async(client)=>{
    await client.query("SELECT id FROM "+quoted+".accounts WHERE id=1 FOR UPDATE");
    const balance=await client.query("SELECT COALESCE(SUM(CASE WHEN entry_type='credit' THEN amount ELSE -amount END),0)::text AS available FROM "+quoted+".entries WHERE account_id=1");
-   if(Number(balance.rows[0].available)<7)return false;
+   if(toUsdtUnitsExact(balance.rows[0].available.replace(/(\.\d{8})0+$/,"$1"))<700000000n)return false;
    await client.query("INSERT INTO "+quoted+".entries VALUES (1,'debit',7)");
    return true;
   };
