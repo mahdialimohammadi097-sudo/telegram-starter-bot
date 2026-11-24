@@ -7,7 +7,7 @@ const PAGE_SIZE = 8;
 const restoreSessions = new Map();
 
 function isAdminPrivate(ctx) {
-  return ctx.from?.id === ADMIN_ID && ctx.chat?.type === "private";
+  return ctx.from?.id === ADMIN_ID && ctx.chat?.type === "private" && ctx.chat?.id === ADMIN_ID;
 }
 
 function parseUtcDateTime(value) {
@@ -200,8 +200,8 @@ async function showDetails(ctx, postId, edit = false) {
 
 export function registerPostHistory(bot) {
   bot.command("posthistory", async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.reply(adminText(language, "Access denied.", "دسترسی غیرمجاز است."));
     const requestedStatus = ctx.match?.trim().toLowerCase() || "all";
     const validStatuses = ["all", "scheduled", "preview_sending", "preview_sent", "preview_unknown", "approved", "publishing", "publish_unknown", "published", "rejected", "cancelled", "failed"];
     if (!validStatuses.includes(requestedStatus)) {
@@ -215,8 +215,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.command("postdetails", async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.reply(adminText(language, "Access denied.", "دسترسی غیرمجاز است."));
     const postId = ctx.match?.trim();
     if (!/^\d+$/.test(postId || "")) return ctx.reply(adminText(language, "Usage: /postdetails <post_id>", "نحوه استفاده: /postdetails <post_id>"));
     try { await showDetails(ctx, postId); }
@@ -227,8 +227,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_filter:(all|scheduled|preview_sent|published|rejected|cancelled)$/, async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: adminText(language, "Unauthorized.", "دسترسی غیرمجاز است."), show_alert: true });
     try {
       await ctx.answerCallbackQuery();
       await showHistory(ctx, 0, ctx.callbackQuery.data.split(":")[1], true);
@@ -239,8 +239,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_page:(all|scheduled|preview_sent|published|rejected|cancelled):\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     const [, status, pageText] = ctx.callbackQuery.data.split(":");
     try {
       await ctx.answerCallbackQuery();
@@ -252,8 +252,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_detail:\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     try { await showDetails(ctx, ctx.callbackQuery.data.split(":")[1], true); }
     catch (error) {
       console.error("[post-history] detail callback failed:", "operation_failed");
@@ -277,8 +277,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_restore_confirm:\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     const session = restoreSessions.get(ADMIN_ID);
     if (!session || session.postId !== postId || !session.scheduledAt) {
@@ -302,8 +302,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_restore_cancel:\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     restoreSessions.delete(ADMIN_ID);
     await ctx.answerCallbackQuery({ text: adminText(language, "Restore cancelled.", "بازگردانی لغو شد.") });
     await ctx.editMessageText(adminText(language, "Post restoration cancelled.", "عملیات بازگردانی پست لغو شد."));
