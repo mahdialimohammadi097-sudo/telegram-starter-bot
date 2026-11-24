@@ -415,8 +415,20 @@ export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}
   schedulerStopped = false;
 
   const activeActions = new Set();
+  let recovered = false;
   bot.callbackQuery(/^post_(approve|reject):\d+$/, async ctx => {
     if (schedulerStopped) return;
+    if (!recovered) {
+      const authorized = ctx.from?.id === ADMIN_ID &&
+        ctx.callbackQuery?.message?.chat?.type === "private" &&
+        ctx.callbackQuery.message.chat.id === ADMIN_ID;
+      try {
+        await ctx.answerCallbackQuery({ text: authorized ? "Scheduler is recovering. Please try again." : "Unauthorized.", show_alert: true });
+      } catch (error) {
+        console.error("[scheduler] recovery acknowledgement failed:", safeDiagnosticCode(error));
+      }
+      return;
+    }
     const action = handlePostAction(ctx);
     activeActions.add(action);
     try {
@@ -444,6 +456,7 @@ export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}
       }
     }
     if (schedulerStopped) return false;
+    recovered = true;
     console.log("[scheduler] recovery completed.");
     startBatch(bot);
     schedulerTimer = setInterval(() => startBatch(bot), CHECK_INTERVAL_MS);
