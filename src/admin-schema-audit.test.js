@@ -34,7 +34,7 @@ test("read-only schema audit rolls back when catalog inspection fails",async()=>
  assert.equal(released,true);
 });
 
-test("schema audit marks structure ready only with all required columns and unique event key",async()=>{
+test("legacy column and index inventory alone cannot certify structural readiness",async()=>{
  const required={
   users:["id"],
   verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"],
@@ -53,8 +53,9 @@ test("schema audit marks structure ready only with all required columns and uniq
   return {rows:[]};
  },release:()=>{}};
  const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
- assert.equal(result.structuralReady,true);
- assert.deepEqual(result.missing,[]);
+ assert.equal(result.structuralReady,false);
+ assert.ok(result.missing.includes("users.status"));
+ assert.ok(result.catalogIncompatible.includes("ledger_entries.account_id:foreign_key"));
  assert.equal(result.outstandingSecurityGates.length,4);
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
@@ -79,7 +80,7 @@ test("schema audit rejects nonunique event index despite all columns existing",a
  },release:()=>{}};
  const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
  assert.equal(result.structuralReady,false);
- assert.deepEqual(result.missing,["unique:verified_deposit_evidence.event_key"]);
+ assert.ok(result.missing.includes("unique:verified_deposit_evidence.event_key"));
 });
 
 test("admin audit never leaks database exception messages or blocks bot startup",async()=>{
@@ -220,4 +221,19 @@ test("failure in the optional diagnostic logger does not interrupt startup",asyn
   logCode:()=>{throw new Error("synthetic logger failure");}
  });
  assert.equal(result,false);
+});
+
+test("startup report rejects ineffective evidence constraints even when legacy keys exist",async()=>{
+ const client={query:async(sql)=>{
+  if(sql.includes("c.contype='c'"))return {rows:[{conname:"verified_deposit_evidence_event_key_format",validated:true,expression:"true"}]};
+  if(sql.includes("information_schema.columns"))return {rows:[{table_name:"ledger_transactions",column_name:"idempotency_key",data_type:"text",is_nullable:"YES"}]};
+  if(sql.includes("FROM pg_index"))return {rows:[{table_name:"verified_deposit_evidence",column_name:"event_key"},{table_name:"ledger_transactions",column_name:"idempotency_key"}]};
+  return {rows:[]};
+ },release:()=>{}};
+ const result=await inspectDepositSchemaReadOnly({connect:async()=>client});
+ assert.equal(result.structuralReady,false);
+ assert.ok(result.catalogIncompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
+ assert.ok(result.catalogIncompatible.includes("ledger_transactions.idempotency_key:not_null"));
+ assert.equal(result.financialActivationReady,false);
+ assert.equal(result.realDepositsEnabled,false);
 });
