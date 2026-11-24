@@ -26,9 +26,13 @@ export function validateBep20Receipt(receipt, logIndex, canonicalBlock, policy) 
       quantity(receipt.blockNumber) !== quantity(canonicalBlock.number) ||
       quantity(receipt.status) !== 1n) throw new Error("Receipt failed or canonical block mismatch");
   const index = quantity(logIndex);
+  const seen = new Set();
   const matches = receipt.logs.filter(log => {
     if (!log || typeof log !== "object") throw new Error("Invalid receipt log");
-    return quantity(log.logIndex) === index;
+    const candidate = quantity(log.logIndex);
+    if (seen.has(candidate)) throw new Error("Transfer log identity mismatch");
+    seen.add(candidate);
+    return candidate === index;
   });
   if (matches.length !== 1) throw new Error("Transfer log identity mismatch");
   const log = matches[0];
@@ -37,8 +41,12 @@ export function validateBep20Receipt(receipt, logIndex, canonicalBlock, policy) 
       !validHash(log.data) || !validHash(log.transactionHash) || log.transactionHash.toLowerCase() !== receipt.transactionHash.toLowerCase() ||
       !validHash(log.blockHash) || log.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
       quantity(log.blockNumber) !== quantity(receipt.blockNumber)) throw new Error("Invalid transfer log");
+  if (log.transactionIndex !== undefined || receipt.transactionIndex !== undefined) {
+    if (quantity(log.transactionIndex) !== quantity(receipt.transactionIndex)) throw new Error("Inconsistent transfer transaction index");
+  }
   const from = topicAddress(log.topics[1]);
   const to = topicAddress(log.topics[2]);
+  if (log.address.toLowerCase() === "0x"+"0".repeat(40) || to === "0x"+"0".repeat(40)) throw new Error("Invalid transfer address");
   if (from === to || from === "0x" + "0".repeat(40)) throw new Error("Invalid transfer sender");
   const result = validateBep20DepositObservation({
     chainId: policy.chainId,
