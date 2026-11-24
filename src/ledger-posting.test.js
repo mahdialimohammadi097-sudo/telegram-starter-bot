@@ -1,3 +1,4 @@
+import { withLedgerTransaction } from "./ledger-posting.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeEntries, canonicalEntries } from "./ledger-posting.js";
@@ -302,4 +303,27 @@ test("rejects unsafe and out-of-range ledger identifiers", () => {
   assert.throws(() => normalizeEntries(entries("9223372036854775808")), /Invalid ledger account id/);
   assert.throws(() => normalizeEntries(entries("1".repeat(100))), /Invalid ledger account id/);
   assert.equal(normalizeEntries(entries("9223372036854775807"))[0].account_id, "9223372036854775807");
+});
+
+test("failed BEGIN discards the connection without invoking the transaction callback", async () => {
+  const failure = new Error("BEGIN response lost");
+  const calls = [];
+  const pool = { async connect() { return {
+    async query(sql) { calls.push(sql); throw failure; },
+    release(error) { calls.push(error); }
+  }; } };
+  await assert.rejects(withLedgerTransaction(pool, async () => { assert.fail("callback must not run"); }), error => error === failure);
+  assert.deepEqual(calls, ["BEGIN", failure]);
+});
+
+test("failed rollback preserves a frozen original error and discards the connection", async () => {
+  const original = Object.freeze(new Error("operation failed"));
+  const rollbackFailure = new Error("rollback failed");
+  const calls = [];
+  const pool = { async connect() { return {
+    async query(sql) { calls.push(sql); if (sql === "ROLLBACK") throw rollbackFailure; },
+    release(error) { calls.push(error); }
+  }; } };
+  await assert.rejects(withLedgerTransaction(pool, async () => { throw original; }), error => error === original);
+  assert.deepEqual(calls, ["BEGIN", "ROLLBACK", rollbackFailure]);
 });
