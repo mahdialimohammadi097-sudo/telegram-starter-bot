@@ -59,11 +59,11 @@ export function startHealthMonitor({
         try {
           await bot.api.sendMessage(ADMIN_ID, formatHealthAlert(changes, now()));
         } catch (error) {
-          logger.error("[health] alert delivery failed:", error?.error_code || "telegram_send_failed");
+          logger.error("[health] alert delivery failed:", "telegram_send_failed");
         }
       }
     } catch (error) {
-      logger.error("[health] monitor check failed:", error?.code || "check_failed");
+      logger.error("[health] monitor check failed:", "check_failed");
     } finally {
       running = false;
     }
