@@ -12,6 +12,7 @@ export async function inspectDepositSchemaReadOnly(pool) {
   deposit_address_ownership_history:["id","wallet_id","user_id","chain_id","wallet_address","start_block","end_block","recorded_at","verified_source"]
  };
  const client=await pool.connect();
+ let releaseError;
  try {
   await client.query("BEGIN READ ONLY ISOLATION LEVEL REPEATABLE READ");
   await client.query("SET LOCAL statement_timeout = '5000ms'");
@@ -53,9 +54,14 @@ export async function inspectDepositSchemaReadOnly(pool) {
    financialActivationReady:false,realDepositsEnabled:false,
    outstandingSecurityGates:["independent-historical-ownership-proof","independent-chain-finality-verification","production-backup-restore","owner-financial-authorization"]};
  } catch(error) {
-  await client.query("ROLLBACK").catch(()=>{});
+  try {
+   await client.query("ROLLBACK");
+  } catch {
+   // Never return a connection with uncertain transaction state to the pool.
+   releaseError=new Error("schema_audit_rollback_failed");
+  }
   throw error;
- } finally {client.release();}
+ } finally {client.release(releaseError);}
 }
 
 /**
