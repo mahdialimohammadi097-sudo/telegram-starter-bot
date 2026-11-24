@@ -39,6 +39,7 @@ async function recoverInterruptedOperations() {
 
 async function claimScheduledPosts() {
   const client = await pool.connect();
+  let releaseError;
 
   try {
     await client.query("BEGIN");
@@ -73,10 +74,14 @@ async function claimScheduledPosts() {
 
     return claimed.rows;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      releaseError = new Error("scheduler_rollback_failed");
+    }
     throw error;
   } finally {
-    client.release();
+    client.release(releaseError);
   }
 }
 
@@ -185,19 +190,20 @@ async function updateAdminMessage(ctx, text) {
 }
 
 async function handlePostAction(ctx) {
-  const language = await getAdminLanguage(ctx);
   if (
     ctx.from?.id !== ADMIN_ID ||
-    ctx.callbackQuery.message?.chat?.id !== ADMIN_ID
+    ctx.callbackQuery?.message?.chat?.id !== ADMIN_ID ||
+    ctx.callbackQuery?.message?.chat?.type !== "private"
   ) {
     await ctx.answerCallbackQuery({
-      text: adminText(language, "Unauthorized.", "دسترسی غیرمجاز است."),
+      text: "Unauthorized.",
       show_alert: true
     });
     return;
   }
 
-  const match = ctx.callbackQuery.data.match(
+  const language = await getAdminLanguage(ctx);
+  const match = (ctx.callbackQuery.data ?? "").match(
     /^post_(approve|reject):(\d+)$/
   );
 
