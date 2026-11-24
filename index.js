@@ -133,7 +133,7 @@ async function shutdown(signal = "shutdown") {
   console.log(`[shutdown] ${signal}: stopping PROFINO services`);
 
   shutdownPromise = (async () => {
-    scheduler?.stop();
+    const schedulerDrained = scheduler?.stop();
     healthMonitor?.stop();
 
     try {
@@ -142,7 +142,7 @@ async function shutdown(signal = "shutdown") {
       console.error("[shutdown] Telegram bot stop warning:", safeErrorCode(error));
     }
 
-    await closeHttpServer();
+    await Promise.all([closeHttpServer(), schedulerDrained]);
 
     try {
       await closeDatabase();
