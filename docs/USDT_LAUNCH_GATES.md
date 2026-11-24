@@ -41,3 +41,10 @@ Use existing GitHub Actions and local/offline tests. Do not require a paid FadeH
 - The PostgreSQL workflow uses a disposable PostgreSQL 17 service and tests uniqueness, concurrent claims, rollback after invalid journal posting, and retry after rollback. Its fixture tables are **not** the production ledger schema and its test code is **not** a production posting implementation.
 - GitHub review queries for PR #119 and PR #120 returned **zero submitted reviews**. Neither PR is approved for merging; #120 depends on #119.
 - Keep both PRs unmerged pending independent financial/security review, production-schema evidence, and an actual atomic posting implementation.
+
+## Atomic transaction contract evidence — 2026-11-24
+
+- Commit `18ab6ced768edac3bc31d917b6828d718df9ba06`: all three CI workflows passed.
+- The isolated transaction contract in `src/deposit-atomic-posting-contract.js` was exercised against disposable PostgreSQL tables: second-leg constraint failure rolls back both the event claim and first leg; retry succeeds and replay fails with a uniqueness violation.
+- This establishes fixture behavior only. The contract has no production adapter, runtime wiring, or verified production schema mapping. Commit outcome ambiguity, production reconciliation and independent review remain unresolved.
+- Next integration gate: obtain actual read-only schema evidence and map the production constraints before implementing a production-compatible adapter. Do not deploy or activate financial operations on the basis of fixture results.
