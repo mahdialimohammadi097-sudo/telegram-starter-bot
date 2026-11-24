@@ -44,7 +44,7 @@ test("canonical request comparison is independent of entry order", () => {
 });
 
 
-function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1, rollbackError = null } = {}) {
+function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1, entryInsertRowCount = 1, rollbackError = null } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
@@ -80,7 +80,7 @@ function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1, ro
         return { rowCount: 1, rows: [{ id: "77" }] };
       }
       if (normalized.startsWith("INSERT INTO ledger_entries")) {
-        return { rowCount: 1, rows: [] };
+        return { rowCount: entryInsertRowCount, rows: [] };
       }
       if (normalized.startsWith("UPDATE ledger_transactions")) {
         return { rowCount: statusUpdateRowCount, rows: [] };
@@ -326,4 +326,28 @@ test("failed rollback preserves a frozen original error and discards the connect
   }; } };
   await assert.rejects(withLedgerTransaction(pool, async () => { throw original; }), error => error === original);
   assert.deepEqual(calls, ["BEGIN", "ROLLBACK", rollbackFailure]);
+});
+
+test("a rollback command tag cannot masquerade as a successful ledger commit", async () => {
+  const calls = [];
+  const pool = { async connect() { return {
+    async query(sql) { calls.push(sql); return { command: sql === "COMMIT" ? "ROLLBACK" : sql }; },
+    release(error) { calls.push(["release", Boolean(error)]); }
+  }; } };
+  await assert.rejects(withLedgerTransaction(pool, async () => ({ posted: true })), /rolled back instead of committed/);
+  assert.deepEqual(calls, ["BEGIN", "COMMIT", ["release", true]]);
+});
+
+test("a skipped ledger entry insert rolls back rather than marking a journal posted", async () => {
+  const { pool, calls } = makePostingPool({ entryInsertRowCount: 0 });
+  const { postLedgerTransaction } = await import("./ledger-posting.js");
+  await assert.rejects(postLedgerTransaction({
+    pool, transactionType: "internal_transfer", idempotencyKey: "skipped-entry-fixture",
+    entries: [
+      { account_id: "1", entry_type: "debit", amount: "2", currency: "USDT" },
+      { account_id: "2", entry_type: "credit", amount: "2", currency: "USDT" }
+    ]
+  }), /did not create exactly one row/);
+  assert.ok(!calls.some(call => call.sql.startsWith("UPDATE ledger_transactions")));
+  assert.equal(calls.at(-2).sql, "ROLLBACK");
 });
