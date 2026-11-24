@@ -14,6 +14,8 @@ test("reads BSC chain and canonical block before producing verified evidence",as
  const result=await readVerifiedBep20Deposit({...args,rpc:async(method,params)=>{calls.push([method,params]);return responses[method]}});
  assert.equal(result[0].eventKey,`bsc:56:${txHash}:0`);
  assert.equal(calls.filter(c=>c[0]==="eth_getBlockByNumber").length,2);
+ for (const method of ["eth_getTransactionByHash","eth_chainId","eth_blockNumber"]) assert.equal(calls.filter(c=>c[0]===method).length,2);
+ assert.equal(calls.at(-1)[0],"eth_getBlockByNumber");
 });
 test("rejects wrong chain and missing RPC response",async()=>{
  for(const value of ["0x1",null]) await assert.rejects(readVerifiedBep20Deposit({...args,rpc:async m=>m==="eth_chainId"?value:responses[m]}));
@@ -36,7 +38,8 @@ test("rejects receipt changes and checks canonical block after the last receipt"
   return responses[m];
  }}),/Transfer evidence changed/);
  assert.equal(count,2);
- assert.equal(calls.at(-1),"eth_getBlockByNumber");
+ // Changed logs fail before any additional network lookup.
+ assert.equal(calls.at(-1),"eth_getTransactionReceipt");
 });
 test("rejects mutation of a reused RPC receipt object",async()=>{
  const mutable=structuredClone(receipt);
@@ -56,4 +59,30 @@ test("redacts transport errors and rejects coercible configuration before RPC",a
  await assert.rejects(readVerifiedBep20Deposit({...args,transactionHash:{toString:()=>txHash},rpc:async()=>{calls++}}),
   /Invalid trusted RPC reader/);
  assert.equal(calls,0);
+});
+
+test("rejects a changed transaction, chain or regressed head in repeated observations",async()=>{
+ for (const [method,value,pattern] of [
+  ["eth_getTransactionByHash",{...transaction,blockHash:txHash},/transaction changed/],
+  ["eth_chainId","0x1",/chain changed/],
+  ["eth_blockNumber","0x76",/head changed or regressed/],
+  ["eth_blockNumber","invalid",/head changed or regressed/]
+ ]) {
+  let count=0;
+  await assert.rejects(readVerifiedBep20Deposit({...args,rpc:async m=>{
+   if(m===method && ++count===2)return value;
+   return responses[m];
+  }}),pattern);
+ }
+});
+test("rejects changing sender even when amount and event identity stay unchanged",async()=>{
+ let count=0;
+ await assert.rejects(readVerifiedBep20Deposit({...args,rpc:async m=>{
+  if(m==="eth_getTransactionReceipt" && ++count===2){
+   const changed=structuredClone(receipt);
+   changed.logs[0].topics[1]="0x"+"0".repeat(24)+"f".repeat(40);
+   return changed;
+  }
+  return responses[m];
+ }}),/Transfer evidence changed/);
 });

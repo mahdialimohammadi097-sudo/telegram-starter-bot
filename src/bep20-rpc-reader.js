@@ -1,5 +1,6 @@
 // Read-only BSC JSON-RPC snapshot. Never accepts receipt data from Telegram.
 // Caller supplies a trusted RPC transport and independently configured chain.
+import {isDeepStrictEqual} from "node:util";
 import {verifyBep20DepositReceipt} from "./bep20-receipt-evidence.js";
 const HASH=/^0x[0-9a-f]{64}$/;
 const ADDRESS=/^0x[0-9a-f]{40}$/;
@@ -10,6 +11,7 @@ export async function readVerifiedBep20Deposit({
   if (typeof rpc !== "function" || typeof transactionHash !== "string" || !HASH.test(transactionHash) ||
       typeof tokenContract !== "string" || !ADDRESS.test(tokenContract) ||
       typeof depositAddress !== "string" || !ADDRESS.test(depositAddress) ||
+      [tokenContract,depositAddress].some(address=>address==="0x"+"0".repeat(40)) ||
       !Number.isSafeInteger(minConfirmations) || minConfirmations < 1) throw new Error("Invalid trusted RPC reader");
   const request = async (method, params) => {
     let result;
@@ -33,8 +35,20 @@ export async function readVerifiedBep20Deposit({
   const secondReceipt = await request("eth_getTransactionReceipt",[transactionHash]);
   if (secondReceipt.transactionHash !== receipt.transactionHash ||
       secondReceipt.blockHash !== receipt.blockHash || secondReceipt.blockNumber !== receipt.blockNumber ||
-      secondReceipt.status !== receipt.status) throw new Error("Receipt changed during verification");
-  // Canonical lookup must follow the last receipt read.
+      secondReceipt.status !== receipt.status || secondReceipt.transactionIndex !== receipt.transactionIndex)
+    throw new Error("Receipt changed during verification");
+  // Preserve all log fields, not just the subset returned by the parser.
+  if (!isDeepStrictEqual(receipt.logs,secondReceipt.logs)) throw new Error("Transfer evidence changed during verification");
+  const secondTransaction = await request("eth_getTransactionByHash",[transactionHash]);
+  if (secondTransaction.hash !== transaction.hash || secondTransaction.blockHash !== transaction.blockHash ||
+      secondTransaction.blockNumber !== transaction.blockNumber || secondTransaction.transactionIndex !== transaction.transactionIndex)
+    throw new Error("RPC transaction changed during verification");
+  if (await request("eth_chainId",[]) !== "0x38") throw new Error("RPC chain changed during verification");
+  const latestHead = await request("eth_blockNumber",[]);
+  if (typeof head !== "string" || !QUANTITY.test(head) ||
+      typeof latestHead !== "string" || !QUANTITY.test(latestHead) || BigInt(latestHead)<BigInt(head))
+    throw new Error("RPC head changed or regressed during verification");
+  // Canonical lookup must follow the last receipt and transaction reads.
   const canonical = await request("eth_getBlockByNumber",[receipt.blockNumber,false]);
   if (canonical.hash !== block.hash || canonical.number !== block.number)
     throw new Error("Canonical block changed during receipt verification");
