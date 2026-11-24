@@ -10,6 +10,7 @@ const reasons = Object.freeze({
   "Runtime role has excessive operational or ledger access": "EXCESSIVE_TABLE_PRIVILEGE",
   "Runtime generated ID sequence missing or incompatible": "SEQUENCE_INCOMPATIBLE",
   "Runtime role has excessive database privileges": "EXCESSIVE_DATABASE_PRIVILEGE",
+  "Runtime role has unreviewed application object access": "UNREVIEWED_OBJECT_ACCESS",
   "Required post history trigger missing or incompatible": "HISTORY_TRIGGER_INCOMPATIBLE",
   "Required restricted owner lock is missing or incompatible": "OWNER_LOCK_INCOMPATIBLE"
 });

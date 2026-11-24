@@ -130,6 +130,32 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
         role.database_create !== false || role.privileged_role !== false) {
       throw new Error("Runtime role has excessive database privileges");
     }
+    // Pre-financial runtime: deny writes to any other persistent relation
+    // in the application schema, including tables not yet in the inventory.
+    const extraAccess = await client.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname=$1 AND c.relkind IN ('r','p','v','m','f')
+          AND NOT (c.relname=ANY($2::text[]))
+          AND (pg_catalog.pg_has_role(current_user,c.relowner,'MEMBER')
+            OR pg_catalog.has_any_column_privilege(current_user,c.oid,'INSERT, UPDATE')
+            OR pg_catalog.has_table_privilege(current_user,c.oid,'INSERT, UPDATE, DELETE, TRUNCATE, TRIGGER'))
+      ) AS unexpected_relation_access,
+      EXISTS (
+        SELECT 1 FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname=$1 AND p.prosecdef
+          AND NOT (p.proname='profino_lock_active_owner' AND p.pronargs=0 AND p.prokind='f')
+          AND (pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
+            OR pg_catalog.pg_has_role(current_user,p.proowner,'MEMBER'))
+      ) AS unexpected_definer_access
+    `, [schema,Object.keys(required)]);
+    if (extraAccess.rows?.length !== 1 ||
+        extraAccess.rows[0]?.unexpected_relation_access !== false ||
+        extraAccess.rows[0]?.unexpected_definer_access !== false) {
+      throw new Error("Runtime role has unreviewed application object access");
+    }
     const trigger = await client.query(
 `
       SELECT t.tgenabled, t.tgtype::int AS trigger_type, p.proname, fn.nspname AS function_schema,
