@@ -49,42 +49,10 @@ test("schema audit rejects evidence tables missing validated format checks",asyn
  ];
  const client={query:async(sql)=>{
   if(sql.includes("c.contype='c'")) return {rows:[
-   {conname:checks[0],validated:true,expression:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)
-  return {rows:[]};
- }};
- const report=await auditDepositSchema(client);
- assert.equal(report.ready,false);
- assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
- assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
-});
-::text)"},
-   {conname:checks[1],validated:true,expression:"(block_hash ~ '^0x[0-9a-f]{64}
-  return {rows:[]};
- }};
- const report=await auditDepositSchema(client);
- assert.equal(report.ready,false);
- assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
- assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
-});
-::text)"},
-   {conname:checks[2],validated:true,expression:"(token_contract ~ '^0x[0-9a-f]{40}
-  return {rows:[]};
- }};
- const report=await auditDepositSchema(client);
- assert.equal(report.ready,false);
- assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
- assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
-});
-::text)"},
-   {conname:checks[3],validated:false,expression:"(deposit_address ~ '^0x[0-9a-f]{40}
-  return {rows:[]};
- }};
- const report=await auditDepositSchema(client);
- assert.equal(report.ready,false);
- assert.ok(report.incompatible.includes("verified_deposit_evidence."+checks[3]+":check_constraint"));
- assert.ok(!report.incompatible.includes("verified_deposit_evidence."+checks[0]+":check_constraint"));
-});
-::text)"}
+   {conname:checks[0],validated:true,expression:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'::text)"},
+   {conname:checks[1],validated:true,expression:"(block_hash ~ '^0x[0-9a-f]{64}$'::text)"},
+   {conname:checks[2],validated:true,expression:"(token_contract ~ '^0x[0-9a-f]{40}$'::text)"},
+   {conname:checks[3],validated:false,expression:"(deposit_address ~ '^0x[0-9a-f]{40}$'::text)"}
   ]};
   return {rows:[]};
  }};

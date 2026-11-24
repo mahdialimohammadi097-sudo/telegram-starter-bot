@@ -132,26 +132,10 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  // Require the reviewed PostgreSQL expression, not merely a trusted-looking name.
  // Semantically equivalent but differently rendered constraints need manual review.
  const expectedChecks={
-  verified_deposit_evidence_event_key_format:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)
- return Object.freeze({ready:missing.length===0&&incompatible.length===0,
-   missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
-}
-::text)",
-  verified_deposit_evidence_block_hash_format:"(block_hash ~ '^0x[0-9a-f]{64}
- return Object.freeze({ready:missing.length===0&&incompatible.length===0,
-   missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
-}
-::text)",
-  verified_deposit_evidence_token_format:"(token_contract ~ '^0x[0-9a-f]{40}
- return Object.freeze({ready:missing.length===0&&incompatible.length===0,
-   missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
-}
-::text)",
-  verified_deposit_evidence_address_format:"(deposit_address ~ '^0x[0-9a-f]{40}
- return Object.freeze({ready:missing.length===0&&incompatible.length===0,
-   missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
-}
-::text)"
+  verified_deposit_evidence_event_key_format:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'::text)",
+  verified_deposit_evidence_block_hash_format:"(block_hash ~ '^0x[0-9a-f]{64}$'::text)",
+  verified_deposit_evidence_token_format:"(token_contract ~ '^0x[0-9a-f]{40}$'::text)",
+  verified_deposit_evidence_address_format:"(deposit_address ~ '^0x[0-9a-f]{40}$'::text)"
  };
  for(const [name,expression] of Object.entries(expectedChecks)) {
   const matching=checks.rows.filter(r=>r.conname===name);
