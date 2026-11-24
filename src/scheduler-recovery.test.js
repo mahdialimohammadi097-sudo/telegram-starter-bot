@@ -83,7 +83,7 @@ test("approval and rejection cannot run before startup recovery completes", { ti
 });
 
 test("uncertain scheduler claim sessions are discarded without sending a preview", { timeout: 3000 }, async t => {
-  for (const mode of ["begin-failure", "ambiguous-begin", "rollback-failure", "rolled-back-commit", "ambiguous-commit", "clean-rollback"]) {
+  for (const mode of ["begin-failure", "ambiguous-begin", "rollback-failure", "ambiguous-rollback", "rolled-back-commit", "ambiguous-commit", "clean-rollback"]) {
     const { startScheduler } = await import("./scheduler.js?" + mode);
     const releases = [], queries = [];
     let sessions = 0, sends = 0;
@@ -100,6 +100,7 @@ test("uncertain scheduler claim sessions are discarded without sending a preview
             return { rows: [{ id: "42" }] };
           }
           if (sql === "ROLLBACK" && mode === "rollback-failure") throw new Error("fixture rollback failed");
+          if (sql === "ROLLBACK") return mode === "ambiguous-rollback" ? {} : { command: "ROLLBACK" };
           if (sql === "COMMIT") return { command: mode === "ambiguous-commit" ? undefined : "ROLLBACK" };
           if (sql.includes("AS unlocked")) return { rows: [{ unlocked: true }] };
           return { rows: [{ id: "42" }] };
@@ -114,7 +115,7 @@ test("uncertain scheduler claim sessions are discarded without sending a preview
       assert.equal(sends, 0);
       assert.deepEqual(releases, [{session:1,discard:false},{session:2,discard:mode!=="clean-rollback"}]);
       assert.equal(queries.some(sql => sql.includes("AS unlocked")), mode==="clean-rollback");
-      assert.equal(queries.includes("ROLLBACK"), ["rollback-failure","clean-rollback"].includes(mode));
+      assert.equal(queries.includes("ROLLBACK"), ["rollback-failure","ambiguous-rollback","clean-rollback"].includes(mode));
       assert.equal(queries.some(sql=>sql.includes("SKIP LOCKED")), !["begin-failure","ambiguous-begin"].includes(mode));
     } finally { await scheduler.stop(); connect.mock.restore(); }
   }

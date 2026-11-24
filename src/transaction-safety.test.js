@@ -4,7 +4,7 @@ import { rollbackTransaction } from "./transaction-safety.js";
 
 test("returns no discard error after a successful rollback", async () => {
   const calls = [];
-  const client = { async query(sql) { calls.push(sql); } };
+  const client = { async query(sql) { calls.push(sql); return { command: sql }; } };
   const original = new Error("posting failed");
 
   assert.equal(await rollbackTransaction(client, original), null);
@@ -29,3 +29,15 @@ test("frozen original errors cannot prevent discarding the broken client", async
 test("non-Error rollback failures still require client discard", async () => {
   assert.ok(await rollbackTransaction({ async query() { throw null; } }, null) instanceof Error);
 });
+
+for (const result of [undefined, null, {}, { command: "COMMIT" }, [{ command: "ROLLBACK" }]]) {
+  test("discards a client after an unconfirmed rollback: " + JSON.stringify(result), async () => {
+    const original = new Error("operation failed");
+    const calls = [];
+    const discard = await rollbackTransaction({ async query(sql) { calls.push(sql); return result; } }, original);
+    assert.ok(discard instanceof Error);
+    assert.match(discard.message, /rollback unconfirmed/);
+    assert.equal(original.rollbackError, discard);
+    assert.deepEqual(calls, ["ROLLBACK"]);
+  });
+}
