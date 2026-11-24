@@ -69,3 +69,25 @@ test("does not expose transport or parser errors and rejects oversized index",as
  await assert.rejects(inspect(tx,"0x0",policy),{message:"BSC RPC request failed"});
  await assert.rejects(inspect(tx,"0x"+"f".repeat(65),policy),/Invalid log index/);
 });
+
+test("rejects changes to transfer amount even when both receipt headers match",async()=>{
+ let reads=0;
+ const values={eth_chainId:"0x38",eth_getBlockByNumber:{hash:bh,number:"0x6d"},eth_blockNumber:"0x78"};
+ const inspect=createBscDepositEvidenceReader({rpcUrl:"https://rpc.example.org",fetchImpl:async(_url,options)=>{
+  const q=JSON.parse(options.body);
+  const result=q.method==="eth_getTransactionReceipt"?(++reads===1?receipt:{...receipt,logs:[{...receipt.logs[0],data:"0x"+(2n*10n**18n).toString(16).padStart(64,"0")}]}):values[q.method];
+  return {ok:true,json:async()=>({jsonrpc:"2.0",id:q.id,result})};
+ }});
+ await assert.rejects(inspect(tx,"0x0",policy),/Transfer evidence changed/);
+});
+test("rejects a mutable receipt reused by an RPC adapter",async()=>{
+ const mutable=structuredClone(receipt);
+ let reads=0;
+ const values={eth_chainId:"0x38",eth_getBlockByNumber:{hash:bh,number:"0x6d"},eth_blockNumber:"0x78"};
+ const inspect=createBscDepositEvidenceReader({rpcUrl:"https://rpc.example.org",fetchImpl:async(_url,options)=>{
+  const q=JSON.parse(options.body);
+  if(q.method==="eth_getTransactionReceipt" && ++reads===2) mutable.logs[0].data="0x"+(2n*10n**18n).toString(16).padStart(64,"0");
+  return {ok:true,json:async()=>({jsonrpc:"2.0",id:q.id,result:q.method==="eth_getTransactionReceipt"?mutable:values[q.method]})};
+ }});
+ await assert.rejects(inspect(tx,"0x0",policy),/Transfer evidence changed/);
+});

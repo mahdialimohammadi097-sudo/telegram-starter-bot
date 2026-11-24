@@ -38,3 +38,11 @@ test("accepts mined receipt logs without optional removed flag",()=>{
 test("rejects malformed removed flags",()=>{
  for(const removed of [null,0,"false",1]) assert.throws(()=>check({...receipt,logs:[{...log,removed}]}));
 });
+
+test("rejects nonprimitive receipt and log fields without implicit coercion",()=>{
+ const fake=value=>({toString:()=>value,toLowerCase:()=>value.toLowerCase()});
+ for(const field of ["transactionHash","blockHash"]) assert.throws(()=>check({...receipt,[field]:fake(receipt[field])}),/canonical block mismatch/);
+ for(const field of ["address","data","transactionHash","blockHash"]) assert.throws(()=>check({...receipt,logs:[{...log,[field]:fake(log[field])}]}),/Invalid transfer log/);
+ assert.throws(()=>check({...receipt,logs:[{...log,topics:[null,...log.topics.slice(1)]}]}),/Invalid transfer log/);
+ assert.throws(()=>check({...receipt,logs:[null,log]}),/Invalid receipt log/);
+});
