@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
+import { rollbackTransaction } from "./transaction-safety.js";
 
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
@@ -22,6 +23,8 @@ async function withSchedulerLock(shared, operation) {
   const suffix = shared ? "_shared" : "";
   let clean = false;
   let disconnected = false;
+  let discard = false;
+  let acquired = false;
   const onDisconnect = error => {
     disconnected = true;
     console.error("[scheduler] PostgreSQL session lost:", safeDiagnosticCode(error));
@@ -29,18 +32,19 @@ async function withSchedulerLock(shared, operation) {
   client.on("error", onDisconnect);
   try {
     await client.query("SELECT pg_advisory_lock" + suffix + "(780244, 1)");
-    return await operation(client);
+    acquired = true;
+    return await operation(client, () => { discard = true; });
   } finally {
     try {
-      if (!disconnected) {
+      if (acquired && !disconnected && !discard) {
         const result = await client.query("SELECT pg_advisory_unlock" + suffix + "(780244, 1) AS unlocked");
-        clean = result.rows[0].unlocked;
+        clean = result.rows[0]?.unlocked === true;
       }
     } catch (error) {
       console.error("[scheduler] PostgreSQL lock cleanup failed:", safeDiagnosticCode(error));
     } finally {
       client.off("error", onDisconnect);
-      client.release(disconnected || !clean);
+      client.release(disconnected || discard || !clean);
     }
   }
 }
@@ -54,10 +58,18 @@ async function recoverInterruptedOperations() {
   `));
 }
 
-async function claimScheduledPosts(client) {
-
+async function claimScheduledPosts(client, discardConnection) {
+  let transactionOpen = false;
+  async function commitClaim() {
+    const result = await client.query("COMMIT");
+    transactionOpen = false;
+    if (result?.command === "ROLLBACK") {
+      throw new Error("Scheduled post claim was rolled back");
+    }
+  }
   try {
     await client.query("BEGIN");
+    transactionOpen = true;
 
     const selected = await client.query(`
       SELECT id, title, content, scheduled_at
@@ -72,7 +84,7 @@ async function claimScheduledPosts(client) {
     const ids = selected.rows.map((post) => post.id);
 
     if (ids.length === 0) {
-      await client.query("COMMIT");
+      await commitClaim();
       return [];
     }
 
@@ -85,11 +97,11 @@ async function claimScheduledPosts(client) {
       RETURNING id, title, content, scheduled_at
     `, [ids]);
 
-    await client.query("COMMIT");
+    await commitClaim();
 
     return claimed.rows;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    if (!transactionOpen || await rollbackTransaction(client, error)) discardConnection();
     throw error;
   }
 }
@@ -175,8 +187,8 @@ async function sendPreview(bot, post, client, language) {
 
 async function processScheduledPosts(bot) {
   try {
-    await withSchedulerLock(true, async client => {
-      const posts = await claimScheduledPosts(client);
+    await withSchedulerLock(true, async (client, discardConnection) => {
+      const posts = await claimScheduledPosts(client, discardConnection);
       if (!posts.length) return;
       const language = await getAdminLanguage({ from: { id: ADMIN_ID } }, client);
       for (const post of posts) await sendPreview(bot, post, client, language);
