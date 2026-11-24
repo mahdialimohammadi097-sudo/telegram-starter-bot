@@ -27,3 +27,10 @@ test("rejects unsafe numeric amounts and malformed hashes",()=>{
  assert.throws(()=>validateBep20DepositObservation({...event,amountBaseUnits:Number.MAX_SAFE_INTEGER+1},policy));
  assert.throws(()=>validateBep20DepositObservation({...event,txHash:"0x123"},policy));
 });
+
+test("rejects quantities outside the blockchain uint256 range",()=>{
+ const overflow=(1n<<256n).toString();
+ for(const change of [{amountBaseUnits:overflow},{logIndex:overflow},{blockNumber:overflow},{amountBaseUnits:"9".repeat(10000)}]){
+  assert.throws(()=>validateBep20DepositObservation({...event,...change},policy),/Invalid/);
+ }
+});

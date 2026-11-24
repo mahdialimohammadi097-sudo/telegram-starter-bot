@@ -48,3 +48,10 @@ test("reject removed transfer logs and inconsistent log block numbers",()=>{
  ]) assert.throws(()=>verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[badLog]}}),/Inconsistent transfer log/);
  assert.equal(verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[{...log,blockNumber:"0x64",removed:false}]}}).length,1);
 });
+
+test("rejects unsafe or noncanonical log indices and oversized RPC heights",()=>{
+ for(const logIndex of [Number.MAX_SAFE_INTEGER+1,1.25,{},["1"],"01","0x01","0x"+"f".repeat(65),(1n<<256n).toString()]){
+  assert.throws(()=>verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[{...log,logIndex}]}}),/log index|RPC quantity/);
+ }
+ assert.throws(()=>verifyBep20DepositReceipt({...base,head:"0x"+"f".repeat(65)}),/Invalid RPC quantity/);
+});

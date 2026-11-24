@@ -13,3 +13,11 @@ test("rejects nonrepresentable fractional base units without rounding",()=>{
 test("rejects invalid or zero amounts",()=>{
  for(const v of ["0","-1","1.5","01","1e18",1n,undefined]) assert.throws(()=>bep20BaseUnitsToLedgerAmount(v));
 });
+
+test("rejects amounts outside uint256 before ledger conversion",()=>{
+ const max=(1n<<256n)-1n;
+ const scale=10000000000n;
+ assert.match(bep20BaseUnitsToLedgerAmount((max-max%scale).toString()),/^\d+\.\d{8}$/);
+ assert.throws(()=>bep20BaseUnitsToLedgerAmount(((max/scale+1n)*scale).toString()),/uint256/);
+ assert.throws(()=>bep20BaseUnitsToLedgerAmount("9".repeat(10000)),/Invalid base units/);
+});

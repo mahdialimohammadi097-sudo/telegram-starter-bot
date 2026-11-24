@@ -2,7 +2,8 @@
 // This module does not query a chain, move money, or credit balances.
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
-const UINT = /^(0|[1-9][0-9]*)$/;
+const UINT = /^(0|[1-9][0-9]{0,77})$/;
+const MAX_UINT256 = (1n << 256n) - 1n;
 
 function address(value, label) {
   if (typeof value !== "string" || !ADDRESS.test(value)) throw new TypeError("Invalid " + label);
@@ -13,7 +14,9 @@ function unsigned(value, label) {
       !UINT.test(String(value)) || (typeof value === "number" && !Number.isSafeInteger(value))) {
     throw new TypeError("Invalid " + label);
   }
-  return BigInt(value);
+  const parsed = BigInt(value);
+  if (parsed > MAX_UINT256) throw new RangeError("Invalid " + label + ": exceeds uint256");
+  return parsed;
 }
 
 // All network and contract values must come from reviewed configuration.
