@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Bot, webhookCallback } from "grammy";
 import { createRuntimeHealthState } from "./runtime-health.js";
 import { startHealthHttpServer } from "./health-http.js";
 
@@ -82,4 +83,33 @@ test("webhook handler failures do not expose details or terminate health server"
   const recovered = await fetch(base + "/telegram", { method: "POST" });
   assert.equal(recovered.status, 200);
   assert.equal(await recovered.text(), "accepted");
+});
+
+test("real grammY HTTP adapter rejects unauthenticated updates before dispatch", async (t) => {
+  const runtimeHealth = createRuntimeHealthState();
+  const dispatched = [];
+  const bot = new Bot("123456:synthetic-test-token");
+  // No external API requests or real Telegram credentials are used.
+  bot.init = async () => {};
+  bot.handleUpdate = async (update) => { dispatched.push(update.update_id); };
+  const handler = webhookCallback(bot, "http", { secretToken: "synthetic-test-secret" });
+  const server = await startHealthHttpServer({
+    port: 0, runtimeHealth, getWebhookHandler: () => handler
+  });
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const endpoint = `http://127.0.0.1:${server.address().port}/telegram`;
+  async function send(id, secret) {
+    const headers = { "content-type": "application/json" };
+    if (secret !== undefined) headers["x-telegram-bot-api-secret-token"] = secret;
+    const response = await fetch(endpoint, {
+      method: "POST", headers, body: JSON.stringify({ update_id: id })
+    });
+    await response.text();
+    return response.status;
+  }
+  assert.equal(await send(1), 401);
+  assert.equal(await send(2, "incorrect"), 401);
+  assert.deepEqual(dispatched, []);
+  assert.equal(await send(3, "synthetic-test-secret"), 200);
+  assert.deepEqual(dispatched, [3]);
 });
