@@ -15,7 +15,8 @@ test("verify-only never runs preparation even when schema verification fails",as
  const queries=[],releases=[];
  const pool={connect:async()=>({query:async sql=>{
   queries.push(sql);
-  return sql.includes("pg_catalog.pg_class c")?{rows:[]}:{command:sql};
+  if(sql.includes("pg_catalog.current_setting('transaction_read_only')"))return {rows:[{read_only:"on",isolation:"repeatable read",statement_timeout:"10s",lock_timeout:"3s"}]};
+  return sql.includes("pg_catalog.pg_class c")?{rows:[]}:{command:sql.split(" ")[0]};
  },release(error){releases.push(error)}})};
  const forbidden=()=>assert.fail("DDL must not run");
  await assert.rejects(prepareRuntimeSchema({pool,env:{PROFINO_RUNTIME_SCHEMA_MODE:"verify-only"},ensurePostHistorySchema:forbidden,ensureAdminOpsSchema:forbidden}),/missing/);

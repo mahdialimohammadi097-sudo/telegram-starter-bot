@@ -2,9 +2,8 @@
 // Never starts Telegram, alters schema, or processes money.
 import pg from "pg";
 import { resolveDatabaseTls } from "../src/database-tls-policy.js";
-import { rollbackTransaction } from "../src/transaction-safety.js";
+import { runReadOnlyDepositAudit } from "../src/read-only-deposit-audit.js";
 import { safeDiagnosticCode } from "../src/diagnostic-safety.js";
-import { auditDepositSchema } from "../src/deposit-schema-audit.js";
 let report;
 const output = value => { report = value; };
 if (!process.env.DATABASE_URL) {
@@ -16,25 +15,18 @@ if (!process.env.DATABASE_URL) {
   pool = new pg.Pool({connectionString:process.env.DATABASE_URL,max:1,
    ssl:resolveDatabaseTls(),connectionTimeoutMillis:8000,
    options:"-c default_transaction_read_only=on -c statement_timeout=8000 -c lock_timeout=3000"});
-  const client=await pool.connect();
-  let discard;
-  try {
-   await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-   const result=await auditDepositSchema(client);
+  pool.on("error",()=>{});
+  const result=await runReadOnlyDepositAudit(pool);
    // Keep the existing unique:... missing markers for operators consuming the
    // old schedule output, while exposing the complete reviewed audit findings.
    const missing=[...result.missing];
    for (const finding of result.incompatible) {
     if (finding.endsWith(":unique_index")) missing.push("unique:"+finding.slice(0,-":unique_index".length));
    }
-   const completion=await client.query("COMMIT");
-   if(completion.command!=="COMMIT") throw new Error("Read-only audit transaction did not commit");
-   output({audit:"fadehost-schema",ready:result.ready,missing,incompatible:result.incompatible,
+    output({audit:"fadehost-schema",ready:result.ready,missing,incompatible:result.incompatible,
     financialActivationReady:false,realDepositsEnabled:false});
    if(!result.ready)process.exitCode=2;
-  } catch(e) {discard=await rollbackTransaction(client,e);throw e}
-  finally {client.release(discard || undefined)}
- } catch(e) {
+  } catch(e) {
   output({audit:"fadehost-schema",ready:false,error:"READ_ONLY_AUDIT_FAILED",
    code:safeDiagnosticCode(e)});
   process.exitCode=3;
