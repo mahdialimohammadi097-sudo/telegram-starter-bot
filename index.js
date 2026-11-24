@@ -240,6 +240,7 @@ async function main() {
     port,
     runtimeHealth,
     getBotUsername: () => botUsername,
+    webhookPath: webhookUrl ? new URL(webhookUrl).pathname : "/telegram",
     getWebhookHandler: () => webhookHandler
   });
 
