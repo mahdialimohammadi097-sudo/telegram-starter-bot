@@ -1,4 +1,4 @@
-import { safeDiagnosticCode } from "./diagnostic-safety.js";
+import { safeDiagnosticCode, safeTelegramDiagnosticCode } from "./diagnostic-safety.js";
 
 const ADMIN_ID = 8810232463;
 
@@ -65,7 +65,7 @@ export function startHealthMonitor({
           await bot.api.sendMessage(ADMIN_ID, formatHealthAlert([...pendingAlerts.values()], now()));
           pendingAlerts.clear();
         } catch (error) {
-          logger.error("[health] alert delivery failed:", Number.isInteger(error?.error_code) ? error.error_code : "telegram_send_failed");
+          logger.error("[health] alert delivery failed:", safeTelegramDiagnosticCode(error, "telegram_send_failed"));
         }
       }
     } catch (error) {
