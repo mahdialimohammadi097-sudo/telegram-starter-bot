@@ -1,4 +1,5 @@
 import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
+import { verifyActiveOwnerLock } from "./restricted-owner-lock.js";
 
 // The existing production startup contract is retained during transition.
 // Restricted deployments must opt into verify-only after reviewed preparation.
@@ -96,6 +97,7 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
         row.function_schema !== schema || row.unconditional !== true || row.no_arguments !== true) {
       throw new Error("Required post history trigger missing or incompatible");
     }
+    await verifyActiveOwnerLock(client, schema);
     return Object.freeze({ operationalInventoryVerified: true, financialActivationReady: false });
   });
 }

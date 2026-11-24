@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import pg from "pg";
 import {verifyRuntimeSchema} from "./runtime-schema-policy.js";
+import {activeOwnerLockBody} from "./restricted-owner-lock.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
 function safeTarget(){
  if(!url || process.env.PROFINO_DISPOSABLE_POSTGRES!=="yes")return false;
@@ -31,6 +32,11 @@ test("restricted role verifies runtime inventory without schema creation rights"
    CREATE TABLE admin_audit_logs(id bigint,admin_user_id bigint,actor_telegram_id bigint,action text,target_user_id bigint,currency text,metadata jsonb,details jsonb,created_at timestamptz);
    CREATE FUNCTION profino_log_scheduled_post_history() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$;
    CREATE TRIGGER trg_scheduled_post_history AFTER INSERT OR UPDATE ON scheduled_posts FOR EACH ROW EXECUTE FUNCTION profino_log_scheduled_post_history();`);
+  await q("INSERT INTO users(id,telegram_id,status) VALUES (1,8810232463,'active')");
+  await q("INSERT INTO admin_users VALUES (1,'owner','active')");
+  await q("CREATE FUNCTION "+schema+".profino_lock_active_owner() RETURNS bigint LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $owner_lock$"+activeOwnerLockBody(schema)+"$owner_lock$");
+  await q("REVOKE ALL ON FUNCTION "+schema+".profino_lock_active_owner() FROM PUBLIC");
+  await q("GRANT EXECUTE ON FUNCTION "+schema+".profino_lock_active_owner() TO "+role);
   await q("GRANT USAGE ON SCHEMA "+schema+" TO "+role);
   await q("GRANT SELECT ON ALL TABLES IN SCHEMA "+schema+" TO "+role);
   await q("GRANT INSERT ON ledger_accounts,users,scheduled_posts,scheduled_post_history,admin_preferences,admin_audit_logs TO "+role);
@@ -40,7 +46,19 @@ test("restricted role verifies runtime inventory without schema creation rights"
   assert.equal((await q("SELECT has_schema_privilege(current_user,$1,'CREATE') AS allowed",[schema])).rows[0].allowed,false);
   assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
   await assert.rejects(q("CREATE TABLE "+schema+".forbidden(id int)"),e=>e.code==="42501");
+  await assert.rejects(q("SELECT user_id FROM admin_users FOR SHARE"),e=>e.code==="42501");
+  assert.equal((await q("SELECT "+schema+".profino_lock_active_owner() AS id")).rows[0].id,"1");
   await q("RESET ROLE");
+  await q("UPDATE admin_users SET status='revoked'");
+  await q("SET ROLE "+role);
+  assert.equal((await q("SELECT "+schema+".profino_lock_active_owner() AS id")).rows[0].id,null);
+  await q("RESET ROLE");
+  await q("UPDATE admin_users SET status='active'");
+  await q("GRANT EXECUTE ON FUNCTION "+schema+".profino_lock_active_owner() TO PUBLIC");
+  await q("SET ROLE "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/owner lock is missing or incompatible/);
+  await q("RESET ROLE");
+  await q("REVOKE ALL ON FUNCTION "+schema+".profino_lock_active_owner() FROM PUBLIC");
   // Test column-level privilege, not only table-level grants.
   await q("GRANT UPDATE(amount) ON ledger_entries TO "+role);
   await q("SET ROLE "+role);
