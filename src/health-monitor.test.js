@@ -106,6 +106,10 @@ test("stopping during a health probe suppresses stale status and alerts", async 
     onStatus: () => { events.push("status"); },
     logger: { warn() {}, error() {} }
   });
+  // Probes are now dispatched in a microtask to contain synchronous failures.
+  // Wait until the probe has actually started before testing in-flight shutdown.
+  await Promise.resolve();
+  assert.equal(typeof failProbe, "function");
   monitor.stop();
   failProbe(new Error("offline"));
   await monitor.ready;
