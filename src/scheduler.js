@@ -201,18 +201,19 @@ async function updateAdminMessage(ctx, text) {
 }
 
 async function handlePostAction(ctx) {
-  const language = await getAdminLanguage(ctx);
   if (
     ctx.from?.id !== ADMIN_ID ||
-    ctx.callbackQuery.message?.chat?.id !== ADMIN_ID
+    ctx.callbackQuery?.message?.chat?.type !== "private" ||
+    ctx.callbackQuery?.message?.chat?.id !== ADMIN_ID
   ) {
     await ctx.answerCallbackQuery({
-      text: adminText(language, "Unauthorized.", "دسترسی غیرمجاز است."),
+      text: "Unauthorized.",
       show_alert: true
     });
     return;
   }
 
+  const language = await getAdminLanguage(ctx);
   const match = ctx.callbackQuery.data.match(
     /^post_(approve|reject):(\d+)$/
   );
