@@ -1,5 +1,6 @@
 
 import { InlineKeyboard } from "grammy";
+import { setTimeout as delay } from "node:timers/promises";
 import { pool } from "./database.js";
 import { getAdminLanguage, adminText } from "./admin-language.js";
 
@@ -365,7 +366,7 @@ async function handlePostAction(ctx) {
   }
 }
 
-export function startScheduler(bot) {
+export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}) {
   if (isStarted) {
     return { ready: Promise.resolve(false), stop() {} };
   }
@@ -374,8 +375,10 @@ export function startScheduler(bot) {
   schedulerStopped = false;
 
   const activeActions = new Set();
+  let recovered = false;
+  const retryController = new AbortController();
   bot.callbackQuery(/^post_(approve|reject):\d+$/, async ctx => {
-    if (schedulerStopped) return;
+    if (schedulerStopped || !recovered) return;
     const action = handlePostAction(ctx);
     activeActions.add(action);
     try {
@@ -385,31 +388,39 @@ export function startScheduler(bot) {
     }
   });
 
-  const ready = recoverInterruptedOperations()
-    .then(() => {
-      if (schedulerStopped) return false;
-      console.log("[scheduler] recovery completed.");
+  async function initialize() {
+    while (!schedulerStopped) {
+      try {
+        await recoverInterruptedOperations();
+        break;
+      } catch {
+        console.error("[scheduler] startup recovery failed:", "operation_failed");
+        if (schedulerStopped) return false;
+        try {
+          await delay(recoveryRetryMs, undefined, { signal: retryController.signal });
+        } catch (error) {
+          if (retryController.signal.aborted) return false;
+          throw error;
+        }
+      }
+    }
+    if (schedulerStopped) return false;
+    recovered = true;
+    console.log("[scheduler] recovery completed.");
+    startBatch(bot);
+    schedulerTimer = setInterval(() => startBatch(bot), CHECK_INTERVAL_MS);
+    schedulerTimer.unref?.();
+    console.log("[scheduler] scheduled-post system started.");
+    return true;
+  }
 
-      startBatch(bot);
-
-      schedulerTimer = setInterval(() => startBatch(bot), CHECK_INTERVAL_MS);
-      schedulerTimer.unref?.();
-
-      console.log("[scheduler] scheduled-post system started.");
-      return true;
-    })
-    .catch((error) => {
-      console.error(
-        "[scheduler] startup recovery failed. Scheduler remains disabled:",
-        "operation_failed"
-      );
-      return false;
-    });
+  const ready = initialize();
 
   return {
     ready,
     async stop() {
       schedulerStopped = true;
+      retryController.abort();
       if (schedulerTimer) clearInterval(schedulerTimer);
       schedulerTimer = null;
       await ready;
