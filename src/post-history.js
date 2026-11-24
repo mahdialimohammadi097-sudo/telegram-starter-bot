@@ -1,5 +1,6 @@
 import { parseUtcDateTime, postStatusLabel } from "./post-schedule.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
+import { postHistoryTriggerBody } from "./post-history-trigger-body.js";
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
 import { getAdminLanguage, adminText } from "./admin-language.js";
@@ -40,38 +41,7 @@ export async function ensurePostHistorySchema() {
 
   await pool.query(`
     CREATE OR REPLACE FUNCTION profino_log_scheduled_post_history()
-    RETURNS TRIGGER AS $$
-    DECLARE
-      event_name VARCHAR(40);
-      event_details JSONB := '{}'::jsonb;
-    BEGIN
-      IF TG_OP = 'INSERT' THEN
-        event_name := 'created';
-        event_details := jsonb_build_object('title', NEW.title, 'scheduled_at', NEW.scheduled_at);
-        INSERT INTO scheduled_post_history(post_id, event_type, new_status, details)
-        VALUES (NEW.id, event_name, NEW.status, event_details);
-        RETURN NEW;
-      END IF;
-
-      IF OLD.status IS DISTINCT FROM NEW.status THEN
-        event_name := 'status_changed';
-        event_details := jsonb_build_object('title', NEW.title);
-      ELSIF OLD.scheduled_at IS DISTINCT FROM NEW.scheduled_at THEN
-        event_name := 'rescheduled';
-        event_details := jsonb_build_object('old_scheduled_at', OLD.scheduled_at, 'new_scheduled_at', NEW.scheduled_at);
-      ELSIF OLD.title IS DISTINCT FROM NEW.title OR OLD.content IS DISTINCT FROM NEW.content THEN
-        event_name := 'content_edited';
-        event_details := jsonb_build_object('title_changed', OLD.title IS DISTINCT FROM NEW.title,
-                                            'content_changed', OLD.content IS DISTINCT FROM NEW.content);
-      ELSE
-        RETURN NEW;
-      END IF;
-
-      INSERT INTO scheduled_post_history(post_id, event_type, old_status, new_status, details)
-      VALUES (NEW.id, event_name, OLD.status, NEW.status, event_details);
-      RETURN NEW;
-    END;
-    $$ LANGUAGE plpgsql
+    RETURNS TRIGGER AS $$${postHistoryTriggerBody}$$ LANGUAGE plpgsql
   `);
 
   await pool.query(`
