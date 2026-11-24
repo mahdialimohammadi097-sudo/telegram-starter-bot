@@ -181,3 +181,26 @@ test("read-only audit rejects bigint chain IDs against reviewed integer schema",
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
 });
+
+test("schema audit discards a client after rollback failure and preserves original error",async()=>{
+ const original=new Error("catalog unavailable");
+ let releases=0,releaseError;
+ const client={query:async(sql)=>{
+  if(sql.includes("information_schema.columns"))throw original;
+  if(sql==="ROLLBACK")throw new Error("synthetic rollback failure");
+  return {rows:[]};
+ },release:(error)=>{releases++;releaseError=error;}};
+ await assert.rejects(inspectDepositSchemaReadOnly({connect:async()=>client}),
+  error=>error===original);
+ assert.equal(releases,1);
+ assert.equal(releaseError?.message,"schema_audit_rollback_failed");
+});
+
+test("successful schema audit releases a reusable client",async()=>{
+ let releases=0,releaseError;
+ const client={query:async()=>({rows:[]}),
+  release:(error)=>{releases++;releaseError=error;}};
+ await inspectDepositSchemaReadOnly({connect:async()=>client});
+ assert.equal(releases,1);
+ assert.equal(releaseError,undefined);
+});
