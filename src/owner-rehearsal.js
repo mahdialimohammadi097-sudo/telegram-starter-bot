@@ -1,8 +1,28 @@
 import pg from "pg";
 import { reserveWithdrawal, cancelWithdrawal } from "../test-support/simulated-withdrawal.js";
 import { getWalletBalances } from "./wallet-balances.js";
-import { formatUsdt } from "./ledger-safety.js";
+import { toUsdtUnitsExact } from "./ledger-safety.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
+
+// PostgreSQL NUMERIC may return up to 18 fractional places, including zero padding.
+ // Remove only insignificant trailing zeros. Reject nonrepresentable balances rather
+ // than rounding them into a false reconciliation success.
+function exactBalanceUnits(value) {
+  if (typeof value !== "string" || !/^-?\d+(?:\.\d+)?$/.test(value)) {
+    throw new Error("Invalid test wallet balance");
+  }
+  const decimal = value.includes(".") ? value.replace(/0+$/, "").replace(/\.$/, "") : value;
+  const units = toUsdtUnitsExact(decimal);
+  if (units < 0n) throw new Error("Negative test wallet balance");
+  return units;
+}
+
+function reconciliationSnapshot(balance) {
+  return {
+    available: exactBalanceUnits(balance.AVAILABLE),
+    hold: exactBalanceUnits(Object.hasOwn(balance, "WITHDRAWAL_HOLD") ? balance.WITHDRAWAL_HOLD : "0")
+  };
+}
 
 export function registerOwnerRehearsal(bot, {
   productionPool, ownerId, getLanguage, env = process.env,
@@ -38,13 +58,12 @@ export function registerOwnerRehearsal(bot, {
         "SELECT id FROM users WHERE telegram_id = $1 AND status = 'active'", [ownerId]
       );
       if (!user) throw new Error("Active test owner is missing");
-      const before = await balances(sandbox, user.id);
+      const before = reconciliationSnapshot(await balances(sandbox, user.id));
       const request = await reserve(sandbox, user.id, "owner-rehearsal:" + ctx.message.message_id, "1");
       await cancel(sandbox, user.id, request.id);
-      const after = await balances(sandbox, user.id);
+      const after = reconciliationSnapshot(await balances(sandbox, user.id));
       // The sandbox owner must be dedicated to this rehearsal while it runs.
-      if (formatUsdt(before.AVAILABLE) !== formatUsdt(after.AVAILABLE) ||
-          formatUsdt(before.WITHDRAWAL_HOLD ?? "0") !== formatUsdt(after.WITHDRAWAL_HOLD ?? "0")) {
+      if (before.available !== after.available || before.hold !== after.hold) {
         throw new Error("Test wallet reconciliation failed");
       }
       await say("Admin test passed. Reserved and released 1 test USDT. Balances reconciled.",
