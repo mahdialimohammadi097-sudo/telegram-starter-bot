@@ -223,3 +223,38 @@ test("schema audit rejects NOT VALID evidence format constraints",{skip:skipUnsa
   await pool.end();
  }
 });
+
+test("schema audit rejects deferrable unique constraints as deposit conflict arbiters",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_deferred_"+randomUUID().replaceAll("-","");
+ const prefix='"'+schema+'".';
+ try {
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE '+prefix+'verified_deposit_evidence (event_key text UNIQUE DEFERRABLE INITIALLY IMMEDIATE)');
+  await pool.query('CREATE TABLE '+prefix+'ledger_transactions (idempotency_key text UNIQUE DEFERRABLE INITIALLY DEFERRED)');
+  const report=await auditDepositSchema(pool,{schema});
+  assert.equal(report.ready,false);
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.event_key:unique_index"));
+  assert.ok(report.incompatible.includes("ledger_transactions.idempotency_key:unique_index"));
+ } finally {
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
+
+test("schema audit rejects composite FK masquerading as independent ownership link",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_composite_"+randomUUID().replaceAll("-","");
+ const prefix='"'+schema+'".';
+ try {
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE TABLE '+prefix+'users (id bigint, tenant_id bigint, UNIQUE(id,tenant_id))');
+  await pool.query('CREATE TABLE '+prefix+'user_wallet_assignments (user_id bigint, tenant_id bigint, FOREIGN KEY(user_id,tenant_id) REFERENCES '+prefix+'users(id,tenant_id))');
+  const report=await auditDepositSchema(pool,{schema});
+  assert.equal(report.ready,false);
+  assert.ok(report.incompatible.includes("user_wallet_assignments.user_id:foreign_key"));
+ } finally {
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
