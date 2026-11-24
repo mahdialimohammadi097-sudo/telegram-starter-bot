@@ -33,3 +33,12 @@ test("rejects missing identities, malformed event key and identical ledger accou
   {...valid,entries:[{...valid.entries[0],account_id:"0"},valid.entries[1]]}
  ])assert.throws(()=>check(journal));
 });
+
+test("pilot event identity enforces canonical uint32 log index",()=>{
+ for(const index of ["4294967296","01","1".repeat(1000),"1\n"]){
+  const eventKey="bsc:56:0x"+"a".repeat(64)+":"+index;
+  assert.throws(()=>check({...valid,eventKey,idempotencyKey:"deposit:"+eventKey}));
+ }
+ const eventKey="bsc:56:0x"+"a".repeat(64)+":4294967295";
+ assert.doesNotThrow(()=>check({...valid,eventKey,idempotencyKey:"deposit:"+eventKey}));
+});
