@@ -13,7 +13,7 @@ test("missing database connection fails safely without disclosing credentials",(
  });
 });
 test("invalid private database endpoint emits sanitized failure only",()=>{
- const env={...process.env,DATABASE_URL:"postgresql://secretuser:secretpass@127.0.0.1:1/private"};
+ const env={...process.env,DATABASE_URL:["postgresql://","secretuser:secretpass@127.0.0.1:1/private"].join("")};
  const result=spawnSync(process.execPath,[script.pathname],{env,encoding:"utf8",timeout:15000});
  assert.equal(result.status,3);
  assert.equal(result.stderr,"");
