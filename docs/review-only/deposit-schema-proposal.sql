@@ -66,6 +66,10 @@ CREATE TRIGGER deposit_history_guard
 CREATE TRIGGER deposit_history_no_truncate
  BEFORE TRUNCATE ON public.deposit_address_ownership_history
  FOR EACH STATEMENT EXECUTE FUNCTION public.guard_deposit_ownership_history();
+-- Explicitly deny implicit PUBLIC privileges; the owner can still bypass guards.
+REVOKE ALL ON TABLE public.verified_deposit_evidence, public.deposit_address_ownership_history FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.reject_deposit_evidence_mutation(), public.guard_deposit_ownership_history() FROM PUBLIC;
+-- Dedicated non-owner runtime role and narrowly scoped grants remain mandatory.
 -- Immutable provenance, role grants and reconciliation
 -- are unresolved. No historical assignments may be inferred or backfilled.
 -- Deliberate rollback: this proposal cannot persist changes as supplied.
