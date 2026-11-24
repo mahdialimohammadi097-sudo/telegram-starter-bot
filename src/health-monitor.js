@@ -33,20 +33,23 @@ export function startHealthMonitor({
 }) {
   let previous = { telegram: true, database: true };
   let running = false;
+  let stopped = false;
 
   async function check() {
-    if (running) return;
+    if (running || stopped) return;
     running = true;
     try {
       const [telegramResult, databaseResult] = await Promise.allSettled([
-        telegramCheck(),
-        pool.query("SELECT 1 AS health_check")
+        Promise.resolve().then(() => telegramCheck()),
+        Promise.resolve().then(() => pool.query("SELECT 1 AS health_check"))
       ]);
+      if (stopped) return;
       const current = {
         telegram: telegramResult.status === "fulfilled" && telegramResult.value !== false,
         database: databaseResult.status === "fulfilled"
       };
       onStatus(current);
+      if (stopped) return;
       const changes = getHealthChanges(previous, current);
 
       for (const change of changes) {
@@ -77,6 +80,7 @@ export function startHealthMonitor({
   return {
     ready,
     stop() {
+      stopped = true;
       clearInterval(timer);
     },
     check
