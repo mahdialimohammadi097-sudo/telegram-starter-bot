@@ -11,6 +11,8 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Compare live receipt to recorded transfer expectations
         run: >
           node scripts/verify-bsc-testnet-withdrawal.mjs
