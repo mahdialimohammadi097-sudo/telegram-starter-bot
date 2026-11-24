@@ -5,6 +5,9 @@ const HASH = /^0x[0-9a-f]{64}$/i;
 const QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/i;
 const ADDRESS = /^0x[0-9a-f]{40}$/i;
 
+const validHash = value => typeof value === "string" && HASH.test(value);
+const validAddress = value => typeof value === "string" && ADDRESS.test(value);
+
 function quantity(value) {
   if (typeof value !== "string" || !QUANTITY.test(value)) throw new Error("Invalid RPC quantity");
   return BigInt(value);
@@ -18,18 +21,21 @@ function topicAddress(value) {
 // canonical block data. This parser NEVER posts to the ledger.
 export function validateBep20Receipt(receipt, logIndex, canonicalBlock, policy) {
   if (!receipt || !canonicalBlock || !policy || !Array.isArray(receipt.logs)) throw new Error("Missing RPC evidence");
-  if (!HASH.test(receipt.transactionHash) || !HASH.test(receipt.blockHash) ||
-      !HASH.test(canonicalBlock.hash) || receipt.blockHash.toLowerCase() !== canonicalBlock.hash.toLowerCase() ||
+  if (!validHash(receipt.transactionHash) || !validHash(receipt.blockHash) ||
+      !validHash(canonicalBlock.hash) || receipt.blockHash.toLowerCase() !== canonicalBlock.hash.toLowerCase() ||
       quantity(receipt.blockNumber) !== quantity(canonicalBlock.number) ||
       quantity(receipt.status) !== 1n) throw new Error("Receipt failed or canonical block mismatch");
   const index = quantity(logIndex);
-  const matches = receipt.logs.filter(log => quantity(log.logIndex) === index);
+  const matches = receipt.logs.filter(log => {
+    if (!log || typeof log !== "object") throw new Error("Invalid receipt log");
+    return quantity(log.logIndex) === index;
+  });
   if (matches.length !== 1) throw new Error("Transfer log identity mismatch");
   const log = matches[0];
-  if (log.removed === true || (log.removed !== undefined && log.removed !== false) || !ADDRESS.test(log.address) || !Array.isArray(log.topics) ||
-      log.topics.length !== 3 || log.topics[0].toLowerCase() !== TRANSFER_TOPIC ||
-      !HASH.test(log.data) || log.transactionHash?.toLowerCase() !== receipt.transactionHash.toLowerCase() ||
-      log.blockHash?.toLowerCase() !== receipt.blockHash.toLowerCase() ||
+  if (log.removed === true || (log.removed !== undefined && log.removed !== false) || !validAddress(log.address) || !Array.isArray(log.topics) ||
+      log.topics.length !== 3 || typeof log.topics[0] !== "string" || log.topics[0].toLowerCase() !== TRANSFER_TOPIC ||
+      !validHash(log.data) || !validHash(log.transactionHash) || log.transactionHash.toLowerCase() !== receipt.transactionHash.toLowerCase() ||
+      !validHash(log.blockHash) || log.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
       quantity(log.blockNumber) !== quantity(receipt.blockNumber)) throw new Error("Invalid transfer log");
   const from = topicAddress(log.topics[1]);
   const to = topicAddress(log.topics[2]);

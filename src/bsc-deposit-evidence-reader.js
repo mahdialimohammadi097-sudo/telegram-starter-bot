@@ -25,7 +25,7 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
       redirect: "error"
     });
       if (!response.ok) throw new Error("BSC RPC HTTP failure");
-      data = await response.json();
+      data = structuredClone(await response.json());
     } catch {
       // Transport/parser errors can contain the private RPC URL or response.
       throw new Error("BSC RPC request failed");
@@ -43,19 +43,28 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
     const chainId = await rpc("eth_chainId", []);
     if (chainId !== "0x38") throw new Error("RPC is not BSC mainnet");
     const receipt = await rpc("eth_getTransactionReceipt", [txHash]);
-    if (receipt.transactionHash?.toLowerCase() !== txHash.toLowerCase()) throw new Error("RPC receipt mismatch");
+    if (typeof receipt.transactionHash !== "string" || receipt.transactionHash.toLowerCase() !== txHash.toLowerCase() ||
+        typeof receipt.blockNumber !== "string" || !Q.test(receipt.blockNumber)) throw new Error("RPC receipt mismatch");
     const block = await rpc("eth_getBlockByNumber", [receipt.blockNumber, false]);
     if (!block || !HASH.test(block.hash)) throw new Error("Missing canonical block");
     const head = await rpc("eth_blockNumber", []);
     if (typeof head !== "string" || !Q.test(head)) throw new Error("Invalid RPC head");
     const secondReceipt = await rpc("eth_getTransactionReceipt", [txHash]);
-    if (secondReceipt.transactionHash?.toLowerCase() !== receipt.transactionHash.toLowerCase() ||
+    if (typeof secondReceipt.transactionHash !== "string" || typeof secondReceipt.blockHash !== "string" ||
+        typeof receipt.blockHash !== "string" ||
+        secondReceipt.transactionHash.toLowerCase() !== receipt.transactionHash.toLowerCase() ||
         secondReceipt.blockHash?.toLowerCase() !== receipt.blockHash.toLowerCase() ||
         secondReceipt.blockNumber !== receipt.blockNumber ||
         secondReceipt.status !== receipt.status) throw new Error("Transaction receipt changed during inspection");
     const canonical = await rpc("eth_getBlockByNumber", [secondReceipt.blockNumber, false]);
     if (canonical.hash !== block.hash || canonical.number !== block.number) throw new Error("Canonical block changed during inspection");
-    const evidence = validateBep20Receipt(secondReceipt, logIndex, canonical, {...configured, confirmedHeadBlock: BigInt(head).toString()});
+    const verificationPolicy = {...configured, confirmedHeadBlock: BigInt(head).toString()};
+    const firstEvidence = validateBep20Receipt(receipt, logIndex, canonical, verificationPolicy);
+    const evidence = validateBep20Receipt(secondReceipt, logIndex, canonical, verificationPolicy);
+    // Header equality alone does not establish a consistent transfer observation.
+    if (JSON.stringify(firstEvidence) !== JSON.stringify(evidence)) {
+      throw new Error("Transfer evidence changed during inspection");
+    }
     const ledgerAmount = bep20BaseUnitsToLedgerAmount(evidence.amountBaseUnits);
     return Object.freeze({ ...evidence, ledgerAmount });
   };
