@@ -2,7 +2,7 @@ import { validateBep20DepositObservation } from "./bep20-deposit-observation.js"
 
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const HASH = /^0x[0-9a-f]{64}$/i;
-const QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]*)$/i;
+const QUANTITY = /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/i;
 const ADDRESS = /^0x[0-9a-f]{40}$/i;
 
 function quantity(value) {
