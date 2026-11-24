@@ -26,3 +26,12 @@ test("unsafe JavaScript numeric IDs are rejected instead of silently rounding", 
   assert.throws(() => simulationRequestKey("withdrawal", 10, Number.MAX_SAFE_INTEGER + 1), /Unsafe numeric/);
   assert.equal(simulationRequestKey("investment", "9007199254740993", "10"), "telegram-investment:9007199254740993:10");
 });
+
+test("rejects ambiguous and out-of-range identities in both key positions", () => {
+  for (const id of [Number.MAX_SAFE_INTEGER + 1, "9223372036854775808", "9".repeat(10000), ["12"], {toString: () => "12"}, "012", 1.5, true]) {
+    assert.throws(() => simulationRequestKey("investment", id, 34), TypeError);
+    assert.throws(() => simulationRequestKey("investment", 12, id), TypeError);
+  }
+  assert.equal(simulationRequestKey("investment", "9223372036854775807", 34n),
+    simulationRequestKey("investment", 9223372036854775807n, "34"));
+});
