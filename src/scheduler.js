@@ -415,8 +415,13 @@ export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}
   schedulerStopped = false;
 
   const activeActions = new Set();
+  let recovered = false;
   bot.callbackQuery(/^post_(approve|reject):\d+$/, async ctx => {
     if (schedulerStopped) return;
+    if (!recovered) {
+      await ctx.answerCallbackQuery({ text: "Scheduler is recovering. Please try again.", show_alert: true });
+      return;
+    }
     const action = handlePostAction(ctx);
     activeActions.add(action);
     try {
@@ -444,6 +449,7 @@ export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}
       }
     }
     if (schedulerStopped) return false;
+    recovered = true;
     console.log("[scheduler] recovery completed.");
     startBatch(bot);
     schedulerTimer = setInterval(() => startBatch(bot), CHECK_INTERVAL_MS);
