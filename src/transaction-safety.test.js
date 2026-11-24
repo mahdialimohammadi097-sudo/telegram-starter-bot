@@ -20,3 +20,12 @@ test("preserves the original error and returns rollback failure for client disca
   assert.equal(await rollbackTransaction(client, original), rollbackFailure);
   assert.equal(original.rollbackError, rollbackFailure);
 });
+
+test("frozen original errors cannot prevent discarding the broken client", async () => {
+  const original = Object.freeze(new Error("operation failed"));
+  const rollbackFailure = new Error("rollback failed");
+  assert.equal(await rollbackTransaction({ async query() { throw rollbackFailure; } }, original), rollbackFailure);
+});
+test("non-Error rollback failures still require client discard", async () => {
+  assert.ok(await rollbackTransaction({ async query() { throw null; } }, null) instanceof Error);
+});

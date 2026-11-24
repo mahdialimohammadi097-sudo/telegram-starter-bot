@@ -10,7 +10,7 @@ const validStatuses = ["all", "scheduled", "preview_sending", "preview_sent", "p
 const restoreSessions = new Map();
 
 function isAdminPrivate(ctx) {
-  return ctx.from?.id === ADMIN_ID && ctx.chat?.type === "private";
+  return ctx.from?.id === ADMIN_ID && ctx.chat?.type === "private" && ctx.chat.id === ADMIN_ID;
 }
 
 
@@ -228,8 +228,8 @@ function currentRestorePrompt(ctx, postId) {
 
 export function registerPostHistory(bot) {
   bot.command("posthistory", async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.reply(adminText(language, "Access denied.", "دسترسی غیرمجاز است."));
     const requestedStatus = ctx.match?.trim().toLowerCase() || "all";
     if (!validStatuses.includes(requestedStatus)) {
       return ctx.reply(adminText(language, "Invalid status. Use /posthistory followed by: " + validStatuses.join(", ") + ".", "وضعیت نامعتبر است. پس از /posthistory یکی از این موارد را وارد کنید: " + validStatuses.join("، ") + "."));
@@ -242,8 +242,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.command("postdetails", async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.reply(adminText(language, "Access denied.", "دسترسی غیرمجاز است."));
     const postId = ctx.match?.trim();
     if (!/^\d+$/.test(postId || "")) return ctx.reply(adminText(language, "Usage: /postdetails <post_id>", "نحوه استفاده: /postdetails <post_id>"));
     try { await showDetails(ctx, postId); }
@@ -266,8 +266,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_page:([a-z_]+):\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     const [, status, pageText] = ctx.callbackQuery.data.split(":");
     if (!validStatuses.includes(status)) return ctx.answerCallbackQuery({ text: adminText(language, "Invalid status.", "وضعیت نامعتبر است."), show_alert: true });
     try {
@@ -280,8 +280,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_detail:(\d+)(?::([a-z_]+):(\d+))?$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     const [, id, status, page] = ctx.match;
     const back = validStatuses.includes(status) ? `posthist_page:${status}:${page}` : "posthist_filter:all";
     try { await showDetails(ctx, id, true, back); }
@@ -307,8 +307,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_restore_confirm:\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     const session = currentRestorePrompt(ctx, postId);
     if (!session) {
@@ -351,8 +351,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_restore_cancel:\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     if (!currentRestorePrompt(ctx, postId)) {
       return ctx.answerCallbackQuery({ text: adminText(language, "Restore session expired. Start again.", "مهلت نشست بازگردانی تمام شده است. دوباره شروع کنید."), show_alert: true });

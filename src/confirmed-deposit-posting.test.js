@@ -20,3 +20,10 @@ test('noncanonical event identities cannot bypass idempotency', async () => {
 test('posting refuses missing durable evidence adapter before opening database',async()=>{
  await assert.rejects(postConfirmedDeposit({pool,evidence,resolveAndLockAssignments(){}}),/Durable verified evidence/);
 });
+
+test("invalid clearing identifiers fail before opening a database transaction", async () => {
+  for (const clearingAccountId of [Number.MAX_SAFE_INTEGER + 1, "9223372036854775808", "1".repeat(200), { toString: () => "42" }]) {
+    await assert.rejects(postConfirmedDeposit({ pool, evidence, clearingAccountId, persistVerifiedEvidence,
+      resolveAndLockAssignments() {} }), /Invalid clearing account/);
+  }
+});

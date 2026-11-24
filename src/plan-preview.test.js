@@ -38,7 +38,7 @@ test("private admin command uses the selected language and only reads preference
     return { rows: [{ language }] };
   });
   const invoke = (id, type, match) => commands.get("planpreview")({
-    from: { id }, chat: { type }, match, reply: message => message
+    from: { id }, chat: { id, type }, match, reply: message => message
   });
   assert.equal(await invoke(123, "private", "PRO 100"), "Access denied.");
   assert.equal(await invoke(8810232463, "group", "PRO 100"), "Access denied.");

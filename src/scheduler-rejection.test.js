@@ -22,7 +22,7 @@ test("an expired rejection acknowledgement still clears the preview buttons", as
   const edits = [];
   await onAction({
     from: { id: admin },
-    callbackQuery: { data: "post_reject:42", message: { message_id: 9, chat: { id: admin } } },
+    callbackQuery: { data: "post_reject:42", message: { message_id: 9, chat: { id: admin, type: "private" } } },
     async answerCallbackQuery(answer) {
       answers.push(answer.text);
       throw new Error("expired callback");

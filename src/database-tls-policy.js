@@ -14,9 +14,18 @@ export function resolveDatabaseTls(env = process.env) {
   }
   // node-postgres may replace the explicit ssl object when URL TLS parameters exist.
   // Reject such ambiguity instead of silently losing certificate verification.
-  const url = new URL(env.DATABASE_URL ?? "postgresql://localhost");
-  for (const key of ["sslmode", "sslrootcert", "sslcert", "sslkey"]) {
-    if (url.searchParams.has(key)) {
+  let url;
+  try {
+    url = new URL(env.DATABASE_URL ?? "postgresql://localhost");
+  } catch {
+    // URL parsing errors can contain the original connection string.
+    throw new Error("Invalid DATABASE_URL configuration");
+  }
+  if (!["postgres:", "postgresql:"].includes(url.protocol)) {
+    throw new Error("Invalid DATABASE_URL protocol");
+  }
+  for (const key of url.searchParams.keys()) {
+    if (key.toLowerCase().startsWith("ssl") || key.toLowerCase() === "uselibpqcompat") {
       throw new Error("DATABASE_URL TLS parameters conflict with explicit TLS policy");
     }
   }

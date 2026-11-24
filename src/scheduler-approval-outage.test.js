@@ -35,7 +35,7 @@ for (const failure of ["connect", "lock"]) {
     const send = t.mock.fn();
     await approve({
       from: { id: admin },
-      callbackQuery: { data: "post_approve:42", message: { chat: { id: admin }, message_id: 27 } },
+      callbackQuery: { data: "post_approve:42", message: { chat: { id: admin, type: "private" }, message_id: 27 } },
       api: { sendMessage: send },
       async answerCallbackQuery(answer) { alerts.push(answer); }
     });

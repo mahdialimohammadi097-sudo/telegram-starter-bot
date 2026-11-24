@@ -12,7 +12,7 @@ const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
 
 function isSuperAdminPrivate(ctx) {
-  return ctx.from?.id === SUPER_ADMIN_ID && ctx.chat?.type === "private";
+  return ctx.from?.id === SUPER_ADMIN_ID && ctx.chat?.type === "private" && ctx.chat.id === SUPER_ADMIN_ID;
 }
 
 function userStatusLabel(status, language) {
