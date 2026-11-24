@@ -1,10 +1,11 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { createCatalogDepositOwnerResolver } from "./catalog-deposit-owner.js";
 import { requireUniqueDepositOwner } from "./deposit-owner-guard.js";
 const url = process.env.CATALOG_REHEARSAL_URL;
-test("catalog locks prevent concurrent assignment writes", {skip: !url}, async () => {
+test("catalog locks prevent concurrent assignment writes", {skip: !isDisposablePostgresTarget(url, "catalog_rehearsal")}, async () => {
   const parsed = new URL(url);
   assert.ok(["localhost","127.0.0.1"].includes(parsed.hostname));
   assert.equal(parsed.pathname,"/catalog_rehearsal");

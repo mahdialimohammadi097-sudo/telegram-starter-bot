@@ -1,9 +1,10 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Bot } from "grammy";
 
 test("Telegram registration preserves identity and invite codes across repeated deep links", {
-  skip: !process.env.DATABASE_URL
+  skip: !isDisposablePostgresTarget(process.env.DATABASE_URL, "profino_test")
 }, async t => {
   const { pool } = await import("./database.js");
   const { registerCommands } = await import("./commands.js");

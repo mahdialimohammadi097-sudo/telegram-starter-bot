@@ -1,9 +1,10 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import pg from "pg";
 
 test("an unconfirmed preview is held for review across a scheduler restart", {
-  skip: !process.env.DATABASE_URL
+  skip: !isDisposablePostgresTarget(process.env.DATABASE_URL, "profino_test")
 }, async t => {
   const { pool } = await import("./database.js");
   // One PostgreSQL session keeps all fixtures isolated in temporary tables.
