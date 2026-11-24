@@ -18,7 +18,7 @@ test("admin language lookup falls back without disclosing database error details
   assert.doesNotMatch(JSON.stringify(logs), /synthetic-sensitive-detail/);
 });
 
-for (const name of ["admin-language.js", "admin-ops.js", "commands.js", "scheduler.js"]) {
+for (const name of ["admin-language.js", "admin-ops.js", "commands.js", "scheduler.js", "post-management.js", "post-history.js"]) {
   test(name + " error log calls retain fixed diagnostic labels", () => {
     const code = source(name);
     const calls = [...code.matchAll(/console\.error\([\s\S]*?\);/g)];
