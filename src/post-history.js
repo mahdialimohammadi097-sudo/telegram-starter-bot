@@ -209,7 +209,7 @@ export function registerPostHistory(bot) {
     }
     try { await showHistory(ctx, 0, requestedStatus); }
     catch (error) {
-      console.error("[post-history] list failed:", error);
+      console.error("[post-history] list failed:", "operation_failed");
       await ctx.reply(adminText(language, "Unable to load post history. Please try again.", "بارگذاری تاریخچه پست‌ها ممکن نشد. دوباره تلاش کنید."));
     }
   });
@@ -221,7 +221,7 @@ export function registerPostHistory(bot) {
     if (!/^\d+$/.test(postId || "")) return ctx.reply(adminText(language, "Usage: /postdetails <post_id>", "نحوه استفاده: /postdetails <post_id>"));
     try { await showDetails(ctx, postId); }
     catch (error) {
-      console.error("[post-history] details failed:", error);
+      console.error("[post-history] details failed:", "operation_failed");
       await ctx.reply(adminText(language, "Unable to load post details. Please try again.", "بارگذاری جزئیات پست ممکن نشد. دوباره تلاش کنید."));
     }
   });
@@ -233,7 +233,7 @@ export function registerPostHistory(bot) {
       await ctx.answerCallbackQuery();
       await showHistory(ctx, 0, ctx.callbackQuery.data.split(":")[1], true);
     } catch (error) {
-      console.error("[post-history] filter failed:", error);
+      console.error("[post-history] filter failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to apply this filter.", "اعمال این فیلتر ممکن نشد."), show_alert: true });
     }
   });
@@ -246,7 +246,7 @@ export function registerPostHistory(bot) {
       await ctx.answerCallbackQuery();
       await showHistory(ctx, Number(pageText), status, true);
     } catch (error) {
-      console.error("[post-history] pagination failed:", error);
+      console.error("[post-history] pagination failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load this page.", "بارگذاری این صفحه ممکن نشد."), show_alert: true });
     }
   });
@@ -256,7 +256,7 @@ export function registerPostHistory(bot) {
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     try { await showDetails(ctx, ctx.callbackQuery.data.split(":")[1], true); }
     catch (error) {
-      console.error("[post-history] detail callback failed:", error);
+      console.error("[post-history] detail callback failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post details.", "بارگذاری جزئیات پست ممکن نشد."), show_alert: true });
     }
   });
@@ -296,7 +296,7 @@ export function registerPostHistory(bot) {
         adminText(language, "PROFINO — POST RESTORED\n\nPost: #" + postId + "\nTitle: " + result.rows[0].title + "\nNew schedule: " + formatUtc(result.rows[0].scheduled_at) + "\nStatus: SCHEDULED\n\nA new private preview will be sent at the scheduled time. Publication still requires your approval.", "پروفینو — پست بازگردانی شد\n\nپست: شماره " + postId + "\nعنوان: " + result.rows[0].title + "\nزمان جدید: " + formatUtc(result.rows[0].scheduled_at, language) + "\nوضعیت: زمان‌بندی‌شده\n\nدر زمان مقرر پیش‌نمایش خصوصی جدید ارسال می‌شود. انتشار همچنان به تأیید شما نیاز دارد.")
       );
     } catch (error) {
-      console.error("[post-history] restore failed:", error);
+      console.error("[post-history] restore failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to restore post.", "بازگردانی پست ممکن نشد."), show_alert: true });
     }
   });
