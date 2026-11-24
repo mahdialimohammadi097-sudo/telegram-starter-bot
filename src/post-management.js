@@ -7,6 +7,12 @@ import { getAdminLanguage, adminText } from "./admin-language.js";
 const ADMIN_ID = 8810232463;
 const sessions = new Map();
 
+function isAdminCallback(ctx) {
+  return ctx.from?.id === ADMIN_ID &&
+    ctx.callbackQuery?.message?.chat?.type === "private" &&
+    ctx.callbackQuery?.message?.chat?.id === ADMIN_ID;
+}
+
 function previewKeyboard(postId, language = "en") {
   return new InlineKeyboard()
     .text(adminText(language, "Approve & Publish", "تأیید و انتشار"), "post_approve:" + postId)
@@ -74,6 +80,7 @@ export function clearPostManagementSession(userId) {
 
 export function registerPostManagement(bot) {
   bot.callbackQuery(/^post_edit:\d+$/, async (ctx) => {
+    if (!isAdminCallback(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const postId = ctx.callbackQuery.data.split(":")[1];
     const language = await getAdminLanguage(ctx);
     try {
@@ -99,13 +106,16 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_edit_title:\d+$/, async (ctx) => {
+    if (!isAdminCallback(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     await startFieldEdit(ctx, "title");
   });
   bot.callbackQuery(/^post_edit_content:\d+$/, async (ctx) => {
+    if (!isAdminCallback(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     await startFieldEdit(ctx, "content");
   });
 
   bot.callbackQuery(/^post_edit_back:\d+$/, async (ctx) => {
+    if (!isAdminCallback(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
@@ -130,6 +140,7 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_time:\d+$/, async (ctx) => {
+    if (!isAdminCallback(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
@@ -156,6 +167,7 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_cancel:\d+$/, async (ctx) => {
+    if (!isAdminCallback(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
@@ -179,6 +191,7 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_cancel_back:\d+$/, async (ctx) => {
+    if (!isAdminCallback(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
@@ -196,6 +209,7 @@ export function registerPostManagement(bot) {
   });
 
   bot.callbackQuery(/^post_cancel_confirm:\d+$/, async (ctx) => {
+    if (!isAdminCallback(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     try {
@@ -231,7 +245,7 @@ export function registerPostManagement(bot) {
   });
 
   bot.on("message:text", async (ctx, next) => {
-    if (ctx.from?.id !== ADMIN_ID || ctx.chat?.type !== "private") return next();
+    if (ctx.from?.id !== ADMIN_ID || ctx.chat?.type !== "private" || ctx.chat.id !== ADMIN_ID) return next();
     const session = sessions.get(ADMIN_ID);
     if (!session) return next();
 
