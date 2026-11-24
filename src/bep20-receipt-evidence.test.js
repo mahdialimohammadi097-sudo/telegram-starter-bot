@@ -55,3 +55,10 @@ test("rejects unsafe or noncanonical log indices and oversized RPC heights",()=>
  }
  assert.throws(()=>verifyBep20DepositReceipt({...base,head:"0x"+"f".repeat(65)}),/Invalid RPC quantity/);
 });
+
+test("rejects self-transfers, mint logs and noncanonical sender topics",()=>{
+ for(const sender of [log.topics[2],"0x"+"0".repeat(64),"0x"+"f".repeat(24)+"e".repeat(40)]){
+  const changed={...log,topics:[log.topics[0],sender,log.topics[2]]};
+  assert.throws(()=>verifyBep20DepositReceipt({...base,receipt:{...receipt,logs:[changed]}}),/Invalid transfer sender/);
+ }
+});
