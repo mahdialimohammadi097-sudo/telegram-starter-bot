@@ -77,3 +77,11 @@ test("preflight never treats malformed duplicate flags as safe",async()=>{
    {eventKey}),/Malformed/);
  }
 });
+
+test("rejects noncanonical log indices before any database query",async()=>{
+ let calls=0;const client={query:async()=>{calls++;throw new Error("unexpected query")}};
+ for(const index of ["4294967296","01","1\n","9".repeat(1000)]){
+  await assert.rejects(inspect(client,{eventKey:"bsc:56:0x"+"a".repeat(64)+":"+index}),/Invalid/);
+ }
+ assert.equal(calls,0);
+});
