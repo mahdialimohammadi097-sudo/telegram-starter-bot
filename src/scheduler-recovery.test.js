@@ -81,3 +81,39 @@ test("approval and rejection cannot run before startup recovery completes", { ti
   assert.equal(await scheduler.ready, true);
   await scheduler.stop();
 });
+
+test("uncertain scheduler claim sessions are discarded without sending a preview", { timeout: 3000 }, async t => {
+  for (const mode of ["begin-failure", "rollback-failure", "rolled-back-commit", "clean-rollback"]) {
+    const { startScheduler } = await import("./scheduler.js?" + mode);
+    const releases = [], queries = [];
+    let sessions = 0, sends = 0;
+    const connect = t.mock.method(pool, "connect", async () => {
+      const session = ++sessions;
+      return Object.assign(new EventEmitter(), {
+        async query(sql) {
+          if (session === 1) return { rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] };
+          queries.push(sql);
+          if (sql === "BEGIN" && mode === "begin-failure") throw new Error("fixture begin failed");
+          if (sql.includes("SKIP LOCKED")) {
+            if (mode.includes("rollback") && mode !== "rolled-back-commit") throw new Error("fixture claim failed");
+            return { rows: [{ id: "42" }] };
+          }
+          if (sql === "ROLLBACK" && mode === "rollback-failure") throw new Error("fixture rollback failed");
+          if (sql === "COMMIT") return { command: "ROLLBACK" };
+          if (sql.includes("AS unlocked")) return { rows: [{ unlocked: true }] };
+          return { rows: [{ id: "42" }] };
+        },
+        release(discard) { releases.push({session,discard}); }
+      });
+    });
+    const scheduler = startScheduler({ callbackQuery() {}, api: { sendMessage: async () => { sends++; } } });
+    try {
+      assert.equal(await scheduler.ready, true);
+      await scheduler.stop();
+      assert.equal(sends, 0);
+      assert.deepEqual(releases, [{session:1,discard:false},{session:2,discard:mode!=="clean-rollback"}]);
+      assert.equal(queries.some(sql => sql.includes("AS unlocked")), mode==="clean-rollback");
+      assert.equal(queries.includes("ROLLBACK"), ["rollback-failure","clean-rollback"].includes(mode));
+    } finally { await scheduler.stop(); connect.mock.restore(); }
+  }
+});
