@@ -246,6 +246,12 @@ test("validated deposit draft posts two balanced fixture legs atomically and rej
    rollback:()=>c.query("ROLLBACK")
   };
   const post=()=>exerciseAtomicDepositPosting(adapter,draft);
+  // Force the second leg to fail at the database boundary.
+  await c.query("ALTER TABLE fixture_legs ADD CONSTRAINT fixture_no_credit CHECK(entry_type <> 'credit')");
+  await assert.rejects(post(),e=>e.code==="23514");
+  const failed=await c.query("SELECT (SELECT count(*)::int FROM fixture_claims) AS claims,(SELECT count(*)::int FROM fixture_legs) AS legs");
+  assert.deepEqual(failed.rows[0],{claims:0,legs:0});
+  await c.query("ALTER TABLE fixture_legs DROP CONSTRAINT fixture_no_credit");
   await post();
   await assert.rejects(post(),e=>e.code==="23505");
   const r=await c.query("SELECT count(*)::int AS n,SUM(CASE WHEN entry_type='credit' THEN amount ELSE -amount END)::text AS net FROM fixture_legs");
