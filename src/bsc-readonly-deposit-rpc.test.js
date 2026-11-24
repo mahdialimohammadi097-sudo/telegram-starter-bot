@@ -162,3 +162,8 @@ test("rejects missing transaction index on either side of RPC provenance",async(
   await assert.rejects(readBscDepositEvidence({rpc,transactionHash:tx,expected}),/provenance/);
  }
 });
+
+test("rejects malformed or oversized RPC quantities and hashes",async()=>{
+ for(const eth_blockNumber of ["0x78\n","0x"+"f".repeat(1000)])await assert.rejects(readBscDepositEvidence({rpc:makeRpc({eth_blockNumber}),transactionHash:tx,expected}));
+ for(const bad of [tx+"\n",[tx]])await assert.rejects(readBscDepositEvidence({rpc:makeRpc(),transactionHash:bad,expected}));
+});
