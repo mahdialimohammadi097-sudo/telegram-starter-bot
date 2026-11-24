@@ -14,7 +14,7 @@ test("a temporary recovery outage retries before claiming scheduled posts", { ti
       async query(sql) {
         if (sql.includes("preview_unknown")) operations.push("recover");
         if (sql.includes("SKIP LOCKED")) operations.push("claim");
-        return { rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] };
+        return { command: sql.split(" ")[0], rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] };
       },
       release() {}
     });
@@ -47,7 +47,7 @@ test("approval and rejection cannot run before startup recovery completes", { ti
     return Object.assign(new EventEmitter(), {
       async query(sql) {
         if (sql.includes("preview_unknown")) await blocked;
-        return { rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] };
+        return { command: sql.split(" ")[0], rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] };
       },
       release() {}
     });
@@ -83,7 +83,7 @@ test("approval and rejection cannot run before startup recovery completes", { ti
 });
 
 test("uncertain scheduler claim sessions are discarded without sending a preview", { timeout: 3000 }, async t => {
-  for (const mode of ["begin-failure", "rollback-failure", "rolled-back-commit", "clean-rollback"]) {
+  for (const mode of ["begin-failure", "ambiguous-begin", "rollback-failure", "rolled-back-commit", "ambiguous-commit", "clean-rollback"]) {
     const { startScheduler } = await import("./scheduler.js?" + mode);
     const releases = [], queries = [];
     let sessions = 0, sends = 0;
@@ -91,15 +91,16 @@ test("uncertain scheduler claim sessions are discarded without sending a preview
       const session = ++sessions;
       return Object.assign(new EventEmitter(), {
         async query(sql) {
-          if (session === 1) return { rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] };
+          if (session === 1) return { command: sql.split(" ")[0], rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] };
           queries.push(sql);
           if (sql === "BEGIN" && mode === "begin-failure") throw new Error("fixture begin failed");
+          if (sql === "BEGIN") return {command: mode === "ambiguous-begin" ? undefined : "BEGIN"};
           if (sql.includes("SKIP LOCKED")) {
             if (mode.includes("rollback") && mode !== "rolled-back-commit") throw new Error("fixture claim failed");
             return { rows: [{ id: "42" }] };
           }
           if (sql === "ROLLBACK" && mode === "rollback-failure") throw new Error("fixture rollback failed");
-          if (sql === "COMMIT") return { command: "ROLLBACK" };
+          if (sql === "COMMIT") return { command: mode === "ambiguous-commit" ? undefined : "ROLLBACK" };
           if (sql.includes("AS unlocked")) return { rows: [{ unlocked: true }] };
           return { rows: [{ id: "42" }] };
         },
@@ -114,6 +115,7 @@ test("uncertain scheduler claim sessions are discarded without sending a preview
       assert.deepEqual(releases, [{session:1,discard:false},{session:2,discard:mode!=="clean-rollback"}]);
       assert.equal(queries.some(sql => sql.includes("AS unlocked")), mode==="clean-rollback");
       assert.equal(queries.includes("ROLLBACK"), ["rollback-failure","clean-rollback"].includes(mode));
+      assert.equal(queries.some(sql=>sql.includes("SKIP LOCKED")), !["begin-failure","ambiguous-begin"].includes(mode));
     } finally { await scheduler.stop(); connect.mock.restore(); }
   }
 });

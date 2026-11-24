@@ -53,7 +53,7 @@ test("admin status transaction rolls back if audit insertion fails", async () =>
   const client = {
     async query(sql) {
       queries.push(sql);
-      if (sql === "BEGIN" || sql === "ROLLBACK") return {};
+      if (sql === "BEGIN" || sql === "ROLLBACK") return {command:sql};
       if (sql.includes("xmin::text")) return { rowCount: 1, rows: [{ id: 9, status: "active", version: "12" }] };
       if (sql.includes("FROM admin_users")) return { rowCount: 1, rows: [{ user_id: 1 }] };
       if (sql.startsWith("UPDATE users")) return { rowCount: 1, rows: [{ id: 9, telegram_id: 123, status: "blocked" }] };
@@ -79,7 +79,7 @@ test("admin status transaction destroys a connection when rollback itself fails"
   let commits = 0;
   const client = {
     async query(sql) {
-      if (sql === "BEGIN") return {};
+      if (sql === "BEGIN") return {command:sql};
       if (sql === "ROLLBACK") throw rollbackFailure;
       if (sql === "COMMIT") { commits++; return {}; }
       if (sql.includes("xmin::text")) return { rowCount: 1, rows: [{ id: 9, status: "active", version: "12" }] };

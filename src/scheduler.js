@@ -66,9 +66,11 @@ async function claimScheduledPosts(client, discardConnection) {
     if (result?.command === "ROLLBACK") {
       throw new Error("Scheduled post claim was rolled back");
     }
+    if (result?.command !== "COMMIT") throw new Error("Scheduled post claim commit unconfirmed");
   }
   try {
-    await client.query("BEGIN");
+    const started = await client.query("BEGIN");
+    if (started?.command !== "BEGIN") throw new Error("Scheduled post claim start unconfirmed");
     transactionOpen = true;
 
     const selected = await client.query(`

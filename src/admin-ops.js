@@ -458,7 +458,8 @@ export async function commitUserStatus(telegramId, newStatus, expectedStatus, ve
   let transactionOpen = false;
   let releaseError = null;
   try {
-    await client.query("BEGIN");
+    const started = await client.query("BEGIN");
+    if (started?.command !== "BEGIN") throw new Error("User status transaction start unconfirmed.");
     transactionOpen = true;
     const locked = await client.query(
       "SELECT id, status, xmin::text AS version FROM users WHERE telegram_id = $1 FOR UPDATE",
@@ -467,8 +468,9 @@ export async function commitUserStatus(telegramId, newStatus, expectedStatus, ve
 
     if (!locked.rowCount || locked.rows[0].version !== version ||
         !isConfirmationCurrent(locked.rows[0].status, expectedStatus, newStatus)) {
-      await client.query("ROLLBACK");
+      const completion = await client.query("ROLLBACK");
       transactionOpen = false;
+      if (completion?.command !== "ROLLBACK") throw new Error("User status rollback unconfirmed.");
       return false;
     }
 
