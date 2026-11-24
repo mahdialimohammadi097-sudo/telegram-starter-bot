@@ -7,6 +7,7 @@ import { inspectCoreSchema, formatCoreSchema } from "./database-diagnostics.js";
 import { adminText, getAdminLanguage } from "./admin-language.js";
 import { rollbackTransaction } from "./transaction-safety.js";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
+import { editAdminMessageSafely } from "./admin-message-edit.js";
 
 const SUPER_ADMIN_ID = 8810232463;
 const PAGE_SIZE = 8;
@@ -135,7 +136,7 @@ async function showDashboard(ctx, edit = false, showQueue = false) {
       ].join("\n");
 
   if (edit) {
-    return ctx.editMessageText(message, { reply_markup: dashboardKeyboard(language, showQueue) });
+    return editAdminMessageSafely(ctx, message, { reply_markup: dashboardKeyboard(language, showQueue) });
   }
   return ctx.reply(message, { reply_markup: dashboardKeyboard(language, showQueue) });
 }
@@ -298,7 +299,7 @@ async function showPosts(ctx, edit = false) {
     .text(language === "fa" ? "تاریخچه انتشار" : "Post history", "admin_posthistory")
     .row()
     .text(language === "fa" ? "بازگشت" : "Back", "admin_home");
-  if (edit) return ctx.editMessageText(message, { reply_markup: keyboard });
+  if (edit) return editAdminMessageSafely(ctx, message, { reply_markup: keyboard });
   return ctx.reply(message, { reply_markup: keyboard });
 }
 
@@ -581,9 +582,8 @@ async function showAdminLanguage(ctx, language, edit = false) {
 async function sendAdminScreen(ctx, message, keyboard, edit) {
   if (edit) {
     try {
-      return await ctx.editMessageText(message, { reply_markup: keyboard });
+      return await editAdminMessageSafely(ctx, message, { reply_markup: keyboard });
     } catch (error) {
-      if (error.error_code === 400 && /message is not modified/i.test(error.description || "")) return;
       console.error("[admin-ops] admin screen edit failed:", safeDiagnosticCode(error));
     }
   }
