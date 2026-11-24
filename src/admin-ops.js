@@ -562,7 +562,7 @@ export function registerAdminOps(bot) {
     try {
       await showAdminLanguage(ctx);
     } catch (error) {
-      console.error("[admin-ops] language settings failed:", error);
+      console.error("[admin-ops] language settings failed:", "operation_failed");
       await ctx.reply(adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."));
     }
   });
@@ -574,7 +574,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showAdminLanguage(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] language screen failed:", error);
+      console.error("[admin-ops] language screen failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load language settings.", "بارگذاری تنظیمات زبان ممکن نشد."), show_alert: true });
     }
   });
@@ -597,7 +597,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery({ text: language === "fa" ? "زبان فارسی ذخیره شد." : "English preference saved." });
       await showAdminLanguage(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] language preference update failed:", error);
+      console.error("[admin-ops] language preference update failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to save language preference.", "ذخیره تنظیم زبان ممکن نشد."), show_alert: true });
     }
   });
@@ -609,7 +609,7 @@ export function registerAdminOps(bot) {
     try {
       await showDashboard(ctx);
     } catch (error) {
-      console.error("[admin-ops] dashboard failed:", error);
+      console.error("[admin-ops] dashboard failed:", "operation_failed");
       await ctx.reply(adminText(language, "Unable to load the admin dashboard. Please try again.", "بارگذاری داشبورد مدیریت ممکن نشد. دوباره تلاش کنید."));
     }
   });
@@ -619,7 +619,7 @@ export function registerAdminOps(bot) {
     const language = await getAdminLanguage(ctx);
     try { await showDashboard(ctx); }
     catch (error) {
-      console.error("[admin-ops] stats failed:", error);
+      console.error("[admin-ops] stats failed:", "operation_failed");
       await ctx.reply(adminText(language, "Unable to load admin statistics.", "بارگذاری آمار مدیریت ممکن نشد."));
     }
   });
@@ -634,7 +634,7 @@ export function registerAdminOps(bot) {
     await recordAdminActivity(ctx, "admin_user_lookup", telegramId);
     try { await showUser(ctx, telegramId); }
     catch (error) {
-      console.error("[admin-ops] user lookup failed:", error);
+      console.error("[admin-ops] user lookup failed:", "operation_failed");
       await ctx.reply(adminText(language, "Unable to load this user.", "بارگذاری اطلاعات این کاربر ممکن نشد."));
     }
   });
@@ -686,7 +686,7 @@ export function registerAdminOps(bot) {
         : "PROFINO — USER SEARCH\n\n" + lines.join("\n") + "\n\nShowing up to 10 matches.";
       return ctx.reply(message, { reply_markup: keyboard });
     } catch (error) {
-      console.error("[admin-ops] user search failed:", error);
+      console.error("[admin-ops] user search failed:", "operation_failed");
       return ctx.reply(language === "fa"
         ? "در حال حاضر جست‌وجوی کاربران ممکن نیست."
         : "Unable to search users right now.");
@@ -782,7 +782,7 @@ export function registerAdminOps(bot) {
           : "No CHECK constraints found.")
       );
     } catch (error) {
-      console.error("[admin-ops] schema diagnostic failed:", error);
+      console.error("[admin-ops] schema diagnostic failed:", "operation_failed");
       await ctx.reply(adminText(language, "Unable to inspect admin audit schema. Diagnostic: ", "بررسی ساختار ممیزی مدیریت ممکن نشد. جزئیات: ") +
         "operation_failed");
     }
@@ -800,10 +800,10 @@ export function registerAdminOps(bot) {
     }
     try { await showAuditLog(ctx); }
     catch (error) {
-      console.error("[admin-ops] audit log failed:", error);
+      console.error("[admin-ops] audit log failed:", "operation_failed");
       await ctx.reply(
         adminText(language, "Unable to load admin activity.\nDiagnostic: ", "بارگذاری فعالیت‌های مدیریت ممکن نشد\nجزئیات: ") +
-        String(error?.message || error).slice(0, 700)
+        "operation_failed"
       );
     }
   });
@@ -815,7 +815,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showDashboard(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] dashboard refresh failed:", error);
+      console.error("[admin-ops] dashboard refresh failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to refresh.", "به‌روزرسانی ممکن نشد."), show_alert: true });
     }
   });
@@ -828,7 +828,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showUsers(ctx, page, true);
     } catch (error) {
-      console.error("[admin-ops] users list failed:", error);
+      console.error("[admin-ops] users list failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load users.", "بارگذاری کاربران ممکن نشد."), show_alert: true });
     }
   });
@@ -840,7 +840,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showUser(ctx, ctx.callbackQuery.data.split(":")[1], true);
     } catch (error) {
-      console.error("[admin-ops] user details failed:", error);
+      console.error("[admin-ops] user details failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load user.", "بارگذاری اطلاعات کاربر ممکن نشد."), show_alert: true });
     }
   });
@@ -850,7 +850,7 @@ export function registerAdminOps(bot) {
     const [, telegramId, status] = ctx.callbackQuery.data.split(":");
     try { await confirmUserStatus(ctx, telegramId, status); }
     catch (error) {
-      console.error("[admin-ops] status confirmation failed:", error);
+      console.error("[admin-ops] status confirmation failed:", "operation_failed");
       const language = await getAdminLanguage(ctx);
       await ctx.answerCallbackQuery({
         text: language === "fa" ? "آماده‌سازی تغییر وضعیت ممکن نشد." : "Unable to prepare status change.",
@@ -864,7 +864,7 @@ export function registerAdminOps(bot) {
     const [, telegramId, status, expectedStatus] = ctx.callbackQuery.data.split(":");
     try { await applyUserStatus(ctx, telegramId, status, expectedStatus); }
     catch (error) {
-      console.error("[admin-ops] status update failed:", error);
+      console.error("[admin-ops] status update failed:", "operation_failed");
       const language = await getAdminLanguage(ctx);
       await ctx.answerCallbackQuery({
         text: language === "fa" ? "به‌روزرسانی وضعیت کاربر ممکن نشد." : "Unable to update user status.",
@@ -880,7 +880,7 @@ export function registerAdminOps(bot) {
       await ctx.answerCallbackQuery();
       await showPosts(ctx, true);
     } catch (error) {
-      console.error("[admin-ops] post overview failed:", error);
+      console.error("[admin-ops] post overview failed:", "operation_failed");
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post overview.", "بارگذاری نمای کلی پست‌ها ممکن نشد."), show_alert: true });
     }
   });
@@ -908,17 +908,17 @@ export function registerAdminOps(bot) {
       // dashboard message; this avoids Telegram edit restrictions.
       await showAuditLog(ctx, false);
     } catch (error) {
-      console.error("[admin-ops] activity view failed:", error);
+      console.error("[admin-ops] activity view failed:", "operation_failed");
 
       // Do not answer the same callback query twice. If editing the dashboard
       // fails (or the audit query fails), send a visible fallback message.
       try {
         await ctx.reply(
           adminText(language, "Unable to load admin activity.\nDiagnostic: ", "بارگذاری فعالیت‌های مدیریت ممکن نشد\nجزئیات: ") +
-          String(error?.message || error).slice(0, 700)
+          "operation_failed"
         );
       } catch (replyError) {
-        console.error("[admin-ops] activity fallback reply failed:", replyError);
+        console.error("[admin-ops] activity fallback reply failed:", "operation_failed");
       }
     }
   });
@@ -938,7 +938,7 @@ export function registerAdminOps(bot) {
         }
       }
     } catch (error) {
-      console.error("[admin-ops] core database schema inspection failed:", error);
+      console.error("[admin-ops] core database schema inspection failed:", "operation_failed");
       await ctx.reply(
         adminText(language, "Unable to inspect the core database schema.\nDiagnostic: ", "بررسی ساختار پایگاه داده اصلی ممکن نشد.\nجزئیات: ") +
         "operation_failed"
