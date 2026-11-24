@@ -57,9 +57,9 @@ test("concurrent PostgreSQL transactions cannot claim the same deposit",{
   await first.query("INSERT INTO "+quoted+".claims(event_key) VALUES ($1)",["event-same"]);
   await first.query("INSERT INTO "+quoted+".journal(event_key,amount) VALUES ($1,$2)",["event-same","10.00000000"]);
   // The second writer waits on the first writer's unique-key decision.
-  const secondAttempt=second.query("INSERT INTO "+quoted+".claims(event_key) VALUES ($1)",["event-same"]);
+  const secondAttempt=assert.rejects(second.query("INSERT INTO "+quoted+".claims(event_key) VALUES ($1)",["event-same"]),e=>e.code==="23505");
   await first.query("COMMIT");
-  await assert.rejects(secondAttempt,e=>e.code==="23505");
+  await secondAttempt;
   await second.query("ROLLBACK");
   const claims=await admin.query("SELECT count(*)::int AS n FROM "+quoted+".claims");
   const entries=await admin.query("SELECT count(*)::int AS n FROM "+quoted+".journal");
