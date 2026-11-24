@@ -6,7 +6,7 @@ const rules = [
   ["private-key", /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/],
   ["github-token", /\b(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{50,255})\b/],
   ["telegram-token", /\b[1-9]\d{7,11}:[A-Za-z0-9_-]{35}\b/],
-  ["database-url", /\bpostgres(?:ql)?:\/\/[^\s:/@]+:[^\s/@]+@[^\s/"'`]+/gi]
+  ["database-url", /\bpostgres(?:ql)?:\/\/[^\s:/@"'`]+:[^\s/@"'`]+@[^\s/"'`]+/gi]
 ];
 
 function placeholderDatabaseUrl(value) {
