@@ -8,7 +8,7 @@ const CHANNEL_USERNAME = "@PROFINO1";
 const CHECK_INTERVAL_MS = 15000;
 const BATCH_SIZE = 5;
 
-let isRunning = false;
+let activeBatch = null;
 let isStarted = false;
 let schedulerStopped = false;
 let schedulerTimer = null;
@@ -164,10 +164,6 @@ async function sendPreview(bot, post) {
 }
 
 async function processScheduledPosts(bot) {
-  if (isRunning || schedulerStopped) return;
-
-  isRunning = true;
-
   try {
     const posts = await claimScheduledPosts();
 
@@ -176,8 +172,12 @@ async function processScheduledPosts(bot) {
     }
   } catch (error) {
     console.error("[scheduler] processing error:", "operation_failed");
-  } finally {
-    isRunning = false;
+  }
+}
+
+function startBatch(bot) {
+  if (!schedulerStopped && !activeBatch) {
+    activeBatch = processScheduledPosts(bot).finally(() => { activeBatch = null; });
   }
 }
 
@@ -373,21 +373,26 @@ export function startScheduler(bot) {
   isStarted = true;
   schedulerStopped = false;
 
-  bot.callbackQuery(
-    /^post_(approve|reject):\d+$/,
-    handlePostAction
-  );
+  const activeActions = new Set();
+  bot.callbackQuery(/^post_(approve|reject):\d+$/, async ctx => {
+    if (schedulerStopped) return;
+    const action = handlePostAction(ctx);
+    activeActions.add(action);
+    try {
+      await action;
+    } finally {
+      activeActions.delete(action);
+    }
+  });
 
   const ready = recoverInterruptedOperations()
     .then(() => {
       if (schedulerStopped) return false;
       console.log("[scheduler] recovery completed.");
 
-      processScheduledPosts(bot);
+      startBatch(bot);
 
-      schedulerTimer = setInterval(() => {
-        processScheduledPosts(bot);
-      }, CHECK_INTERVAL_MS);
+      schedulerTimer = setInterval(() => startBatch(bot), CHECK_INTERVAL_MS);
       schedulerTimer.unref?.();
 
       console.log("[scheduler] scheduled-post system started.");
@@ -403,10 +408,12 @@ export function startScheduler(bot) {
 
   return {
     ready,
-    stop() {
+    async stop() {
       schedulerStopped = true;
       if (schedulerTimer) clearInterval(schedulerTimer);
       schedulerTimer = null;
+      await ready;
+      await Promise.all([activeBatch, Promise.allSettled(activeActions)]);
     }
   };
 }
