@@ -1,3 +1,5 @@
+import http from "node:http";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Bot, webhookCallback } from "grammy";
@@ -138,4 +140,59 @@ test("configured webhook path and proxy-stripped path authenticate consistently"
   assert.equal(await send("/bot/telegram", 3, "incorrect"), 401);
   assert.equal(await send("/other/telegram", 4), 404);
   assert.deepEqual(seen, [1, 2]);
+});
+
+function gate() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+test("HTTP shutdown releases an unfinished webhook body without waiting for the sender", { timeout: 4000 }, async t => {
+  const started = gate();
+  const server = await startHealthHttpServer({
+    port: 0, runtimeHealth: createRuntimeHealthState(),
+    getWebhookHandler: () => async req => {
+      started.resolve();
+      for await (const chunk of req) void chunk;
+    }
+  });
+  const client = http.request({ hostname: "127.0.0.1", port: server.address().port, path: "/telegram", method: "POST" });
+  client.on("error", () => {});
+  t.after(() => { client.destroy(); server.closeAllConnections(); server.close(); });
+  client.write('{"update_id":');
+  await started.promise;
+  await server.drain();
+  assert.equal(server.listening, false);
+});
+
+test("HTTP shutdown waits for accepted webhook work after the sender disconnects", { timeout: 4000 }, async t => {
+  const started = gate();
+  const finish = gate();
+  const disconnected = gate();
+  let calls = 0;
+  const server = await startHealthHttpServer({
+    port: 0, runtimeHealth: createRuntimeHealthState(),
+    getWebhookHandler: () => async (req, res) => {
+      calls++;
+      res.once("close", disconnected.resolve);
+      for await (const chunk of req) void chunk;
+      started.resolve();
+      await finish.promise;
+    }
+  });
+  const client = http.request({ hostname: "127.0.0.1", port: server.address().port, path: "/telegram", method: "POST" });
+  client.on("error", () => {});
+  t.after(() => { finish.resolve(); client.destroy(); server.closeAllConnections(); server.close(); });
+  client.end('{"update_id":1}');
+  await started.promise;
+  client.destroy();
+  await disconnected.promise;
+  let drained = false;
+  const stopping = server.drain().then(() => { drained = true; });
+  await nextTurn();
+  assert.equal(drained, false);
+  finish.resolve();
+  await stopping;
+  assert.equal(calls, 1);
 });
