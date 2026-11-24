@@ -12,7 +12,7 @@ function safeTarget(){
 test("restricted role verifies runtime inventory without schema creation rights",{skip:!safeTarget(),timeout:20000},async()=>{
  const nonce=randomUUID().replaceAll("-","");
  const schema="runtime_"+nonce,role="runtime_role_"+nonce;
- const pool=new pg.Pool({connectionString:url,max:1,connectionTimeoutMillis:5000});
+ const pool=new pg.Pool({connectionString:url,max:2,connectionTimeoutMillis:5000});
  const client=await pool.connect();
  const q=(sql,params)=>client.query(sql,params);
  let madeSchema=false,madeRole=false;
@@ -48,8 +48,24 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await assert.rejects(q("CREATE TABLE "+schema+".forbidden(id int)"),e=>e.code==="42501");
   await assert.rejects(q("SELECT user_id FROM admin_users FOR SHARE"),e=>e.code==="42501");
   assert.equal((await q("SELECT "+schema+".profino_lock_active_owner() AS id")).rows[0].id,"1");
+  // Prove that the SECURITY DEFINER row lock survives the function call
+  // and prevents a concurrent membership revocation until transaction end.
+  const revoker=await pool.connect();
+  try{
+   await q("BEGIN");
+   assert.equal((await q("SELECT "+schema+".profino_lock_active_owner() AS id")).rows[0].id,"1");
+   await revoker.query("BEGIN");
+   await revoker.query("SET LOCAL lock_timeout = '200ms'");
+   await assert.rejects(revoker.query("UPDATE "+schema+".admin_users SET status='revoked'"),e=>e.code==="55P03");
+   await revoker.query("ROLLBACK");
+   await q("COMMIT");
+   assert.equal((await revoker.query("UPDATE "+schema+".admin_users SET status='revoked'")).rowCount,1);
+  }finally{
+   await q("ROLLBACK");
+   await revoker.query("ROLLBACK");
+   revoker.release(true);
+  }
   await q("RESET ROLE");
-  await q("UPDATE admin_users SET status='revoked'");
   await q("SET ROLE "+role);
   assert.equal((await q("SELECT "+schema+".profino_lock_active_owner() AS id")).rows[0].id,null);
   await q("RESET ROLE");
@@ -59,6 +75,11 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/owner lock is missing or incompatible/);
   await q("RESET ROLE");
   await q("REVOKE ALL ON FUNCTION "+schema+".profino_lock_active_owner() FROM PUBLIC");
+  await q("CREATE OR REPLACE FUNCTION "+schema+".profino_lock_active_owner() RETURNS bigint LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $owner_lock$SELECT 1::bigint$owner_lock$");
+  await q("SET ROLE "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/owner lock is missing or incompatible/);
+  await q("RESET ROLE");
+  await q("CREATE OR REPLACE FUNCTION "+schema+".profino_lock_active_owner() RETURNS bigint LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $owner_lock$"+activeOwnerLockBody(schema)+"$owner_lock$");
   // Test column-level privilege, not only table-level grants.
   await q("GRANT UPDATE(amount) ON ledger_entries TO "+role);
   await q("SET ROLE "+role);
