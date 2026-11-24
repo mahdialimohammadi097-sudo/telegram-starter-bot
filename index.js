@@ -95,7 +95,7 @@ async function shutdown(signal = "shutdown") {
   shutdownPromise = (async () => {
     const httpDrained = healthServer?.drain();
     const schedulerDrained = scheduler?.stop();
-    healthMonitor?.stop();
+    const healthDrained = healthMonitor?.stop();
 
     try {
       await bot.stop();
@@ -103,7 +103,13 @@ async function shutdown(signal = "shutdown") {
       console.error("[shutdown] Telegram bot stop warning:", safeDiagnosticCode(error));
     }
 
-    await Promise.all([httpDrained, schedulerDrained]);
+    const drains = await Promise.allSettled([httpDrained, schedulerDrained, healthDrained]);
+    for (const drain of drains) {
+      if (drain.status === "rejected") {
+        console.error("[shutdown] service drain failed:", safeDiagnosticCode(drain.reason));
+        process.exitCode = 1;
+      }
+    }
     await Promise.allSettled([pollingBatchLoop, ...webhookUpdates]);
 
     try {
