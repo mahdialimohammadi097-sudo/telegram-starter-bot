@@ -25,3 +25,35 @@ test("rejects block changes between independent canonical reads",async()=>{
    return responses[m];
  }}),/Canonical block changed/);
 });
+
+test("rejects receipt changes and checks canonical block after the last receipt",async()=>{
+ const calls=[];
+ let count=0;
+ await assert.rejects(readVerifiedBep20Deposit({...args,rpc:async m=>{
+  calls.push(m);
+  if(m==="eth_getTransactionReceipt" && ++count===2)
+   return {...receipt,logs:[{...receipt.logs[0],data:"0x"+"0".repeat(63)+"1"}]};
+  return responses[m];
+ }}),/Transfer evidence changed/);
+ assert.equal(count,2);
+ assert.equal(calls.at(-1),"eth_getBlockByNumber");
+});
+test("rejects mutation of a reused RPC receipt object",async()=>{
+ const mutable=structuredClone(receipt);
+ let count=0;
+ await assert.rejects(readVerifiedBep20Deposit({...args,rpc:async m=>{
+  if(m==="eth_getTransactionReceipt"){
+   if(++count===2) mutable.logs[0].data="0x"+"0".repeat(63)+"1";
+   return mutable;
+  }
+  return responses[m];
+ }}),/Transfer evidence changed/);
+});
+test("redacts transport errors and rejects coercible configuration before RPC",async()=>{
+ await assert.rejects(readVerifiedBep20Deposit({...args,rpc:async()=>{throw new Error("synthetic-sensitive-detail")}}),
+  error=>error.message==="Trusted RPC request failed" && !error.cause);
+ let calls=0;
+ await assert.rejects(readVerifiedBep20Deposit({...args,transactionHash:{toString:()=>txHash},rpc:async()=>{calls++}}),
+  /Invalid trusted RPC reader/);
+ assert.equal(calls,0);
+});
