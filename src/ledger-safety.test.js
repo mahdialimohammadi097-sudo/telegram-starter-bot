@@ -69,3 +69,19 @@ test("exact USDT parsing rejects unsafe JavaScript numbers but preserves decimal
   assert.throws(() => toUsdtUnitsExact(NaN), /Unsafe numeric USDT/);
   assert.equal(toUsdtUnitsExact("9007199254740992"), 900719925474099200000000n);
 });
+
+test("financial amount boundary refuses already-rounded numeric fractions", () => {
+  for (const amount of [0.1, 1.25, 90071992.54740993, 100000000.00000001]) {
+    assert.throws(() => toUsdtUnitsExact(amount), /Unsafe numeric USDT/);
+  }
+  assert.equal(toUsdtUnitsExact("90071992.54740993"), 9007199254740993n);
+  assert.equal(toUsdtUnitsExact(25), 2500000000n);
+  assert.equal(toUsdtUnitsExact(25n), 2500000000n);
+  assert.equal(formatUsdt(1.25), "1.25000000");
+});
+
+test("exact ledger validation refuses implicit conversion from objects", () => {
+  for (const amount of [null, undefined, true, ["1"], { toString: () => "1" }]) {
+    assert.throws(() => toUsdtUnitsExact(amount), /Invalid USDT amount/);
+  }
+});
