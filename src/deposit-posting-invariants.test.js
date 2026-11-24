@@ -23,3 +23,7 @@ test("rejects noncanonical event identities even with matching idempotency keys"
   assert.throws(()=>validateDepositPostingDraft(d));
  }
 });
+
+test("rejects whitespace in every posting identifier",()=>{
+ for(const mutate of [d=>d.userId+="\n",d=>d.walletId+="\n",d=>d.entries[0].account_id+="\n",d=>d.entries[1].account_id+="\n"]){const d=make();mutate(d);assert.throws(()=>validateDepositPostingDraft(d));}
+});
