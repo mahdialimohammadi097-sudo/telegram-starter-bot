@@ -24,3 +24,14 @@ test("PostgreSQL 17 returns bounded current-role evidence inside read-only snaps
     await assert.rejects(inspectDatabaseAccess(pool),/incomplete or unsafe/);
   } finally { await pool.end(); }
 });
+
+test("real PostgreSQL aborted read-only audit does not return a successful report", {skip:!safeTarget()}, async () => {
+  const pool = new pg.Pool({connectionString:url,max:1});
+  try {
+    await assert.rejects(runReadOnlyDepositAudit(pool, async client => {
+      await assert.rejects(client.query("SELECT 1 / 0"), e => e.code === "22012");
+      return {ready:true};
+    }), /did not commit/);
+    assert.equal((await pool.query("SELECT 1 AS value")).rows[0].value,1);
+  } finally { await pool.end(); }
+});
