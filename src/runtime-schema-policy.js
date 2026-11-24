@@ -1,5 +1,6 @@
 import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 import { verifyActiveOwnerLock } from "./restricted-owner-lock.js";
+import { postHistoryTriggerBody } from "./post-history-trigger-body.js";
 
 // The existing production startup contract is retained during transition.
 // Restricted deployments must opt into verify-only after reviewed preparation.
@@ -113,7 +114,10 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
       }
     }
     const privileges = await client.query(
-      `SELECT pg_catalog.has_schema_privilege(current_user, n.oid, 'CREATE') AS schema_create,
+      `SELECT current_user = session_user AS same_session_role,
+        EXISTS (SELECT 1 FROM pg_catalog.pg_roles r
+          WHERE r.rolname <> current_user AND pg_catalog.pg_has_role(current_user,r.oid,'MEMBER')) AS alternate_role,
+        pg_catalog.has_schema_privilege(current_user, n.oid, 'CREATE') AS schema_create,
         pg_catalog.has_database_privilege(current_user, current_database(), 'CREATE') AS database_create,
         EXISTS (SELECT 1 FROM pg_catalog.pg_roles r
           WHERE pg_catalog.pg_has_role(current_user, r.oid, 'MEMBER')
@@ -121,26 +125,35 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
             OR r.rolname IN ('pg_write_all_data','pg_execute_server_program','pg_write_server_files','pg_read_server_files'))) AS privileged_role
        FROM pg_catalog.pg_namespace n WHERE n.nspname = $1`, [schema]);
     const role = privileges.rows?.[0];
-    if (privileges.rows?.length !== 1 || role?.schema_create !== false ||
+    if (privileges.rows?.length !== 1 || role?.same_session_role !== true || role.alternate_role !== false ||
+        role.schema_create !== false ||
         role.database_create !== false || role.privileged_role !== false) {
       throw new Error("Runtime role has excessive database privileges");
     }
     const trigger = await client.query(
 `
       SELECT t.tgenabled, t.tgtype::int AS trigger_type, p.proname, fn.nspname AS function_schema,
-        t.tgqual IS NULL AS unconditional, t.tgnargs = 0 AS no_arguments
+        t.tgqual IS NULL AS unconditional, t.tgnargs = 0 AS no_arguments,
+        p.prosrc AS function_body, p.prosecdef, p.prokind, p.provolatile,
+        p.pronargs AS function_arguments, p.proconfig, l.lanname,
+        p.prorettype = 'pg_catalog.trigger'::regtype AS trigger_result,
+        pg_catalog.pg_has_role(current_user,p.proowner,'MEMBER') AS function_owned
       FROM pg_catalog.pg_trigger t
       JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
       JOIN pg_catalog.pg_namespace fn ON fn.oid = p.pronamespace
+      JOIN pg_catalog.pg_language l ON l.oid = p.prolang
       WHERE n.nspname = $1 AND c.relname = 'scheduled_posts'
         AND t.tgname = 'trg_scheduled_post_history' AND NOT t.tgisinternal
     `, [schema]);
     const row = trigger.rows?.[0];
     if (trigger.rows?.length !== 1 || !["O","A"].includes(row?.tgenabled) ||
         row.trigger_type !== 21 || row.proname !== "profino_log_scheduled_post_history" ||
-        row.function_schema !== schema || row.unconditional !== true || row.no_arguments !== true) {
+        row.function_schema !== schema || row.unconditional !== true || row.no_arguments !== true ||
+        typeof row.function_body !== "string" || row.function_body.trim() !== postHistoryTriggerBody.trim() ||
+        row.prosecdef !== false || row.prokind !== "f" || row.provolatile !== "v" || row.function_arguments !== 0 ||
+        row.proconfig !== null || row.lanname !== "plpgsql" || row.trigger_result !== true || row.function_owned !== false) {
       throw new Error("Required post history trigger missing or incompatible");
     }
     await verifyActiveOwnerLock(client, schema);
