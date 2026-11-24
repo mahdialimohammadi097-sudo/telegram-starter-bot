@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Verify diagnostic source and test syntax
         run: |
           node --check src/database-diagnostics.js
@@ -65,7 +65,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Audit production dependencies
         if: matrix.node-version == 22
         run: npm audit --omit=dev --audit-level=high

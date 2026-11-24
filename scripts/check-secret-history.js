@@ -5,7 +5,9 @@ import { detectSecretKinds } from "./check-secret-patterns.js";
 // Exact reviewed blobs of synthetic diagnostics and disposable CI fixtures.
 // Only its database-url classification is excluded; no file or path is globally exempt.
 // Historical version of health-report.test.js contains the same reviewed synthetic redaction fixture.
-const reviewedFixtures = new Set(["c8a61100ee20e7f89e1b6c4d017f1c19aba4118f","601880bad18f3787b771778846a67be7b240cdfb","19385375fcfd398a49af2e17054ec0a63b9c5e67","832a6cc04728d65f11417716887ebd8439adb67d","3162bc0ee3c1653a22207d09847002c1eee4c6db","64cc3858851e4c8edfbd89c9607c6d39a648ac01"]);
+const reviewedFixtures = new Set(["c8a61100ee20e7f89e1b6c4d017f1c19aba4118f","601880bad18f3787b771778846a67be7b240cdfb","19385375fcfd398a49af2e17054ec0a63b9c5e67","832a6cc04728d65f11417716887ebd8439adb67d","3162bc0ee3c1653a22207d09847002c1eee4c6db","64cc3858851e4c8edfbd89c9607c6d39a648ac01",
+  // Reviewed CI hardening revision: all five URL matches are identical to the previous disposable localhost catalog fixture.
+  "c89ff6e48dda4d0f13390241ab72109cd5cc049e"]);
 const maxBuffer = 32 * 1024 * 1024;
 
 export function scanHistory(cwd = process.cwd()) {
