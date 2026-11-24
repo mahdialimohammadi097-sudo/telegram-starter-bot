@@ -16,7 +16,7 @@ test("reads chain, receipt, canonical block and head before accepting deposit ev
  const {inspect,calls}=reader();const evidence = await inspect(tx,"0x0",policy);
  assert.equal(evidence.eventKey,"bsc:56:"+tx+":0");
  assert.equal(evidence.ledgerAmount,"1.00000000");
- assert.deepEqual(calls,["eth_chainId","eth_getTransactionReceipt","eth_getBlockByNumber","eth_blockNumber","eth_getTransactionReceipt"]);
+ assert.deepEqual(calls,["eth_chainId","eth_getTransactionReceipt","eth_getBlockByNumber","eth_blockNumber","eth_getTransactionReceipt","eth_getBlockByNumber"]);
 });
 test("rejects wrong chain and inconsistent canonical block",async()=>{
  await assert.rejects(reader({eth_chainId:"0x1"}).inspect(tx,"0x0",policy));
@@ -42,4 +42,30 @@ test("rejects receipt reorganization during RPC inspection",async()=>{
 test("rejects BSC receipt amounts that cannot be posted without rounding",async()=>{
  const dustReceipt={...receipt,logs:[{...receipt.logs[0],data:"0x"+(10n**18n+1n).toString(16).padStart(64,"0")}]};
  await assert.rejects(reader({eth_getTransactionReceipt:dustReceipt}).inspect(tx,"0x0",policy),/manual review required/);
+});
+
+test("rejects changed canonical block after the second receipt",async()=>{
+ let blocks=0;
+ const values={eth_chainId:"0x38",eth_getTransactionReceipt:receipt,eth_blockNumber:"0x78"};
+ const inspect=createBscDepositEvidenceReader({rpcUrl:"https://rpc.example.org",fetchImpl:async(_url,options)=>{
+  const q=JSON.parse(options.body);
+  const result=q.method==="eth_getBlockByNumber"?{hash:++blocks===1?bh:tx,number:"0x6d"}:values[q.method];
+  return {ok:true,json:async()=>({jsonrpc:"2.0",id:q.id,result})};
+ }});
+ await assert.rejects(inspect(tx,"0x0",policy),/Canonical block changed/);
+});
+test("snapshots trusted configuration before asynchronous RPC",async()=>{
+ const mutable={...policy};
+ const values={eth_chainId:"0x38",eth_getTransactionReceipt:receipt,eth_getBlockByNumber:{hash:bh,number:"0x6d"},eth_blockNumber:"0x78"};
+ const inspect=createBscDepositEvidenceReader({rpcUrl:"https://rpc.example.org",fetchImpl:async(_url,options)=>{
+  const q=JSON.parse(options.body);
+  mutable.depositAddress=c;
+  return {ok:true,json:async()=>({jsonrpc:"2.0",id:q.id,result:values[q.method]})};
+ }});
+ assert.equal((await inspect(tx,"0x0",mutable)).depositAddress,b);
+});
+test("does not expose transport or parser errors and rejects oversized index",async()=>{
+ const inspect=createBscDepositEvidenceReader({rpcUrl:"https://rpc.example.org",fetchImpl:async()=>{throw Error("synthetic private endpoint detail")}});
+ await assert.rejects(inspect(tx,"0x0",policy),{message:"BSC RPC request failed"});
+ await assert.rejects(inspect(tx,"0x"+"f".repeat(65),policy),/Invalid log index/);
 });
