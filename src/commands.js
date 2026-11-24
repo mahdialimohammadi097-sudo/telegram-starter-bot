@@ -83,7 +83,7 @@ function isAdmin(ctx) {
 }
 
 function isPrivateChat(ctx) {
-  return ctx.chat?.type === "private";
+  return isPrivateSimulationChat(ctx);
 }
 
 
@@ -141,7 +141,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
   bot.use(async (ctx, next) => {
     if (!ctx.from) return;
 
-    if (ctx.chat?.type !== "private") {
+    if (!isPrivateSimulationChat(ctx)) {
       if (ctx.callbackQuery) {
         return ctx.answerCallbackQuery({
           text: "Please use the bot in a private chat.",
