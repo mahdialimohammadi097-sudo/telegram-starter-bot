@@ -30,6 +30,10 @@ test("restricted role verifies runtime inventory without schema creation rights"
    CREATE TABLE ledger_entries(id bigint,transaction_id bigint,account_id bigint,entry_type text,amount numeric,currency text);
    CREATE TABLE scheduled_posts(id bigserial PRIMARY KEY,title text,content text,status text,scheduled_at timestamptz,updated_at timestamptz,created_at timestamptz,preview_message_id bigint,preview_chat_id bigint,approved_by bigint,published_message_id bigint,published_at timestamptz,cancelled_at timestamptz,cancellation_reason text,edit_version int,last_edited_at timestamptz);
    CREATE TABLE scheduled_post_history(id bigserial PRIMARY KEY,post_id bigint,event_type text,old_status text,new_status text,details jsonb,changed_at timestamptz);
+   CREATE TABLE deposit_requests(id bigint, status text);
+   CREATE TABLE withdrawal_requests(id bigint, status text);
+   CREATE TABLE future_financial_object(id bigint, amount numeric);
+   CREATE VIEW future_financial_view AS SELECT id,amount FROM future_financial_object;
    CREATE TABLE admin_users(user_id bigint,role text,status text);
    CREATE TABLE admin_preferences(user_id bigint PRIMARY KEY,language text,updated_at timestamptz);
    CREATE TABLE admin_audit_logs(id bigserial PRIMARY KEY,admin_user_id bigint,actor_telegram_id bigint,action text,target_user_id bigint,currency text,metadata jsonb,details jsonb,created_at timestamptz DEFAULT now());
@@ -190,6 +194,26 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive database privileges/);
   await q("RESET SESSION AUTHORIZATION");
   await q("REVOKE "+alternate+" FROM "+role);
+  for (const [grant,revoke] of [
+   ["GRANT INSERT(status) ON deposit_requests","REVOKE INSERT(status) ON deposit_requests"],
+   ["GRANT DELETE ON withdrawal_requests","REVOKE DELETE ON withdrawal_requests"],
+   ["GRANT UPDATE(amount) ON future_financial_object","REVOKE UPDATE(amount) ON future_financial_object"],
+   ["GRANT UPDATE ON future_financial_view","REVOKE UPDATE ON future_financial_view"]
+  ]) {
+   await q(grant+" TO "+role);
+   await q("SET SESSION AUTHORIZATION "+role);
+   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/unreviewed application object access/);
+   await q("RESET SESSION AUTHORIZATION");
+   await q(revoke+" FROM "+role);
+  }
+  await q("CREATE FUNCTION "+schema+".unreviewed_privileged_fixture() RETURNS integer LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'");
+  await q("SET SESSION AUTHORIZATION "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/unreviewed application object access/);
+  await q("RESET SESSION AUTHORIZATION");
+  await q("REVOKE ALL ON FUNCTION "+schema+".unreviewed_privileged_fixture() FROM PUBLIC");
+  await q("SET SESSION AUTHORIZATION "+role);
+  assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
+  await q("RESET SESSION AUTHORIZATION");
   await q("GRANT UPDATE(telegram_id) ON users TO "+role);
   await q("SET SESSION AUTHORIZATION "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive operational or ledger access/);
