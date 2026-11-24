@@ -40,3 +40,26 @@ test('merged TLS configuration accepts equivalent names and rejects contradictor
     assert.throws(() => resolveDatabaseTls({ PROFINO_DATABASE_TLS: legacy, PROFINO_DB_TLS_MODE: mode }), /Conflicting/);
   }
 });
+
+test("explicit TLS policy rejects additional SSL and libpq compatibility parameters", () => {
+  for (const mode of ["disable", "verify-full"]) {
+    for (const parameter of ["ssl=false", "ssl=0", "ssl=true", "sslnegotiation=direct",
+      "uselibpqcompat=true", "SSLMode=disable", "%73slmode=no-verify", "sslmode=verify-full&sslmode=disable"]) {
+      assert.throws(() => resolveDatabaseTls({
+        PROFINO_DB_TLS_MODE: mode,
+        DATABASE_URL: "postgresql://localhost/profino?" + parameter
+      }), /TLS parameters conflict/);
+    }
+  }
+});
+
+test("invalid database connection syntax fails without exposing the input", () => {
+  const fixture = "synthetic-sensitive-input";
+  assert.throws(() => resolveDatabaseTls({ DATABASE_URL: fixture }), error => {
+    assert.equal(error.message, "Invalid DATABASE_URL configuration");
+    assert.equal(error.cause, undefined);
+    assert.equal(error.input, undefined);
+    return true;
+  });
+  assert.throws(() => resolveDatabaseTls({ DATABASE_URL: "https://localhost/db" }), /Invalid DATABASE_URL protocol/);
+});
