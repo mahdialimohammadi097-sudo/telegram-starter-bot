@@ -117,3 +117,61 @@ test("uncertain scheduler claim sessions are discarded without sending a preview
     } finally { await scheduler.stop(); connect.mock.restore(); }
   }
 });
+
+test("scheduler shutdown drains both an in-flight claim and admitted callback, rejects new work", {timeout: 5000}, async t => {
+  const {startScheduler}=await import("./scheduler.js?shutdown-drain");
+  function gate(){let resolve;const promise=new Promise(done=>{resolve=done});return {promise,resolve};}
+  const batchStarted=gate(),batchFinish=gate(),actionStarted=gate(),actionFinish=gate();
+  let callback,sessions=0,claims=0,updates=0,edits=0;
+  const released=[];
+  t.mock.method(pool,"connect",async()=>{
+    const session=++sessions;
+    return Object.assign(new EventEmitter(),{
+      async query(sql){
+        if(sql.includes("AS unlocked"))return {rows:[{unlocked:true}]};
+        if(sql.includes("SKIP LOCKED")){
+          claims++;batchStarted.resolve();await batchFinish.promise;
+          return {rows:[]};
+        }
+        return {command:sql.split(" ")[0],rows:[]};
+      },
+      release(discard){released.push({session,discard});}
+    });
+  });
+  t.mock.method(pool,"query",async sql=>{
+    if(sql.includes("SELECT ap.language"))return {rows:[{language:"en"}]};
+    assert.match(sql,/SET status = 'rejected'/);
+    updates++;actionStarted.resolve();await actionFinish.promise;
+    return {rowCount:1};
+  });
+  const scheduler=startScheduler({callbackQuery(_pattern,fn){callback=fn;}});
+  const admin=8810232463;
+  const ctx={from:{id:admin},callbackQuery:{data:"post_reject:42",message:{message_id:9,chat:{id:admin,type:"private"}}},
+    async answerCallbackQuery(){},async editMessageText(){edits++;}};
+  let action,stopping;
+  try{
+    assert.equal(await scheduler.ready,true);
+    await batchStarted.promise;
+    action=callback(ctx);
+    await actionStarted.promise;
+    let drained=false;
+    stopping=scheduler.stop().then(()=>{drained=true;});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(drained,false);
+    await callback(ctx);
+    assert.equal(updates,1);
+    assert.equal(claims,1);
+    batchFinish.resolve();
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(drained,false);
+    assert.deepEqual(released,[{session:1,discard:false},{session:2,discard:false}]);
+    actionFinish.resolve();
+    await Promise.all([action,stopping]);
+    assert.equal(drained,true);
+    assert.equal(edits,1);
+    assert.equal(sessions,2);
+  }finally{
+    batchFinish.resolve();actionFinish.resolve();
+    await Promise.allSettled([action,stopping,scheduler.stop()]);
+  }
+});
