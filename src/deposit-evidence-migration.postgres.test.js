@@ -7,7 +7,7 @@ const url=process.env.CATALOG_REHEARSAL_URL;
 function safeTarget() {
   return isDisposablePostgresTarget(url, "catalog_rehearsal");
 }
-test("staged evidence migration creates constrained table and is idempotent",async()=>{
+test("staged evidence migration creates constrained table and refuses existing relations",async()=>{
  assert.equal(safeTarget(),true,"Explicit disposable local PostgreSQL target is required");
  const pool=new pg.Pool({connectionString:url});
  const client=await pool.connect();
@@ -20,8 +20,20 @@ test("staged evidence migration creates constrained table and is idempotent",asy
   const check=await client.query("SELECT to_regclass('public.verified_deposit_evidence') AS name");
   assert.equal(check.rows[0].name,null,"CI database must not already contain production evidence table");
   const ddl=migration.replace(/^BEGIN;|^COMMIT;/gm,"");
+  // An incompatible preexisting table must not be silently accepted or changed.
+  await client.query("SAVEPOINT existing_incompatible");
+  await client.query("CREATE TABLE public.verified_deposit_evidence (sentinel text)");
+  await client.query("INSERT INTO public.verified_deposit_evidence VALUES ('preserve')");
+  await client.query("SAVEPOINT create_conflict");
+  await assert.rejects(client.query(ddl), error=>error.code==="42P07");
+  await client.query("ROLLBACK TO SAVEPOINT create_conflict");
+  assert.deepEqual((await client.query("SELECT sentinel FROM public.verified_deposit_evidence")).rows,[{sentinel:"preserve"}]);
+  await client.query("ROLLBACK TO SAVEPOINT existing_incompatible");
   await client.query(ddl);
-  await client.query(ddl);
+  // A repeated invocation is a deliberate failure, even for a matching table.
+  await client.query("SAVEPOINT repeated_create");
+  await assert.rejects(client.query(ddl), error=>error.code==="42P07");
+  await client.query("ROLLBACK TO SAVEPOINT repeated_create");
   const result=await client.query("SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='verified_deposit_evidence'");
   assert.ok(result.rows.some(r=>r.indexdef.includes("(event_key)")&&r.indexdef.includes("UNIQUE")));
   await client.query(`INSERT INTO public.verified_deposit_evidence

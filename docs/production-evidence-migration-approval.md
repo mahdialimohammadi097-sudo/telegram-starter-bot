@@ -19,7 +19,7 @@ Status: PREPARATION ONLY. No production DDL authorization. No live deposit activ
 6. Obtain explicit separate owner approval for applying the exact candidate migration to production after steps 1–5. The approval for preparation is not approval to execute.
 
 ## Production execution — NOT AUTHORIZED
-Only after explicit approval, in an authorized private-network SQL execution session, execute the reviewed migration once with bounded lock and statement timeouts. Do not use automated deployment or bot startup to apply DDL.
+Only after explicit approval, in an authorized private-network SQL execution session, execute the reviewed create-only migration once with bounded lock and statement timeouts. If the relation already exists or execution outcome is uncertain, stop and inspect the catalog read-only; do not retry or drop the existing relation. Do not use automated deployment or bot startup to apply DDL.
 
 ## Post-execution verification (read-only; only after separately approved execution)
 - Re-run `node scripts/fadehost-schema-audit.js` as a one-off private-network command, not a recurring schedule.

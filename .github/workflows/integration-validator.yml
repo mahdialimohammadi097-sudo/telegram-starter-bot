@@ -81,7 +81,7 @@ jobs:
           grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-tests.tap"
           # Some gated suites intentionally skip without their dedicated rehearsal target.
           # Require the deposit evidence migration test itself to run and pass.
-          grep -Eq '^ok [0-9]+ - staged evidence migration creates constrained table and is idempotent$' "$RUNNER_TEMP/profino-tests.tap"
+          grep -Eq '^ok [0-9]+ - staged evidence migration creates constrained table and refuses existing relations$' "$RUNNER_TEMP/profino-tests.tap"
       - name: Reset isolated catalog rehearsal database before focused tests
         env:
           PGPASSWORD: postgres
