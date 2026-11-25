@@ -1,3 +1,4 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
@@ -5,12 +6,7 @@ import {readFile} from "node:fs/promises";
 import {persistVerifiedDepositEvidence} from "./verified-deposit-evidence-store.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
 function safeDisposableTarget() {
- if (!url || process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes") return false;
- try {
-  const target = new URL(url);
-  return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) &&
-   target.pathname === "/catalog_rehearsal";
- } catch { return false; }
+  return isDisposablePostgresTarget(url, "catalog_rehearsal");
 }
 test("durable receipt evidence is replay-safe and conflicts fail closed", {skip:!safeDisposableTarget()},async()=>{
  const parsed=new URL(url);

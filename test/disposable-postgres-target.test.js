@@ -24,6 +24,11 @@ test("database test opt-in requires an explicitly named local disposable service
     "postgresql://localhost/profino_test?",
     "postgresql://localhost/profino_test#fragment",
     "postgresql://localhost/profino_test/extra",
+    "postgresql://localhost/other/../profino_test",
+    "postgresql://localhost/other/%2e%2e/profino_test",
+    "postgresql://%6cocalhost/profino_test",
+    "postgresql://127.1/profino_test",
+    "postgresql://localhost:5432/profino_test?options=-c%20search_path=public",
     " postgresql://localhost/profino_test",
     "postgresql://localhost/profino_test\n"
   ]) assert.equal(isDisposablePostgresTarget(url, "profino_test", env), false);

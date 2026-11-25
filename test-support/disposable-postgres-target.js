@@ -6,6 +6,10 @@ export function isDisposablePostgresTarget(url, database, env = process.env) {
       typeof url !== "string" ||
       !["profino_test", "catalog_rehearsal"].includes(database) ||
       /[?#\s]/.test(url)) return false;
+  // Accept literal loopback authorities and database names only. URL parsers
+  // can normalize dot segments or escaped host names differently.
+  const literal = /^postgres(?:ql)?:\/\/(?:[^/@?#\\\s]+@)?(?:localhost|127\.0\.0\.1)(?::[0-9]+)?\/(profino_test|catalog_rehearsal)$/;
+  if (literal.exec(url)?.[1] !== database) return false;
   try {
     const target = new URL(url);
     return ["postgres:", "postgresql:"].includes(target.protocol) &&

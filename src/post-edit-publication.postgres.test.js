@@ -1,3 +1,4 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
@@ -7,11 +8,7 @@ import pg from "pg";
 
 // This test creates and drops PostgreSQL schemas; require a disposable local DB.
 function isDisposableDatabase() {
-  if (process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes" || !process.env.DATABASE_URL) return false;
-  try {
-    const target = new URL(process.env.DATABASE_URL);
-    return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) && target.pathname === "/profino_test";
-  } catch { return false; }
+  return isDisposablePostgresTarget(process.env.DATABASE_URL, "profino_test");
 }
 
 test("only the replacement preview can publish the saved post after an edit", {

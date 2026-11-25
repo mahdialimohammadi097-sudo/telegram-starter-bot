@@ -1,3 +1,4 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
@@ -5,12 +6,7 @@ import { inspectDatabaseAccess } from "./database-access-audit.js";
 import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 const url = process.env.CATALOG_REHEARSAL_URL;
 function safeTarget() {
-  if (!url || process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes") return false;
-  try {
-    const target = new URL(url);
-    return ["localhost","127.0.0.1","[::1]"].includes(target.hostname) &&
-      target.pathname === "/catalog_rehearsal";
-  } catch { return false; }
+  return isDisposablePostgresTarget(url, "catalog_rehearsal");
 }
 test("PostgreSQL 17 returns bounded current-role evidence inside read-only snapshot", {skip:!safeTarget()}, async () => {
   const pool = new pg.Pool({connectionString:url,max:1});

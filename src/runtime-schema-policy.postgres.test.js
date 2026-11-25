@@ -1,3 +1,4 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
@@ -7,9 +8,8 @@ import {verifyRuntimeSchema} from "./runtime-schema-policy.js";
 import {activeOwnerLockBody} from "./restricted-owner-lock.js";
 import {postHistoryTriggerBody} from "./post-history-trigger-body.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
-function safeTarget(){
- if(!url || process.env.PROFINO_DISPOSABLE_POSTGRES!=="yes")return false;
- try {const u=new URL(url);return ["postgres:","postgresql:"].includes(u.protocol) && ["localhost","127.0.0.1","[::1]"].includes(u.hostname) && u.pathname==="/catalog_rehearsal" && !u.search && !u.hash;}catch{return false;}
+function safeTarget() {
+  return isDisposablePostgresTarget(url, "catalog_rehearsal");
 }
 test("restricted role verifies runtime inventory without schema creation rights",{skip:!safeTarget(),timeout:30000},async t=>{
  const nonce=randomUUID().replaceAll("-","");

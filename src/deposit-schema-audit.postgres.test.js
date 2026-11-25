@@ -1,3 +1,4 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
@@ -8,12 +9,7 @@ const url=process.env.CATALOG_REHEARSAL_URL;
 // These tests CREATE and DROP schemas. Never run them against shared or
 // production databases, even if CATALOG_REHEARSAL_URL is set by mistake.
 function safeDisposableTarget() {
- if (!url || process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes") return false;
- try {
-  const target = new URL(url);
-  return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) &&
-   target.pathname === "/catalog_rehearsal";
- } catch { return false; }
+  return isDisposablePostgresTarget(url, "catalog_rehearsal");
 }
 const skipUnsafeTarget = !safeDisposableTarget();
 test("read-only audit queries real PostgreSQL catalog and fails closed on incomplete schema",{skip:skipUnsafeTarget},async()=>{
