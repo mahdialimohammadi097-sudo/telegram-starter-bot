@@ -2881,3 +2881,46 @@ test("suppressed simulated deposit approval rolls back wallet credit and termina
   }finally{await pool.query("DELETE FROM deposit_requests WHERE id=$1",[fake.id]);}
   assert.equal((await approve()).transactionId,journal.transactionId);
 });
+
+test("concurrent investment and withdrawal cannot spend the same available funds", {skip:!enabled},async()=>{
+  const {openSimulatedInvestment}=await import("../test-support/simulated-investment.js");
+  const {reserveWithdrawal,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  // Race both operations against one independently funded customer wallet.
+  // Repeat with both dispatch orders; the winner is deliberately not prescribed.
+  for(const [id,reverse] of [[19510,false],[19511,true],[19512,false],[19513,true]]){
+    const owner=await createSimulationWallet(id);
+    const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+    await seedAvailableBalance(available.id,"25");
+    const open=()=>openSimulatedInvestment(pool,owner,"cross-workflow-open","SMART 25");
+    const withdraw=()=>reserveWithdrawal(pool,owner,"cross-workflow-withdraw","25");
+    const calls=reverse?[withdraw,open]:[open,withdraw];
+    const results=await Promise.allSettled(calls.map(call=>call()));
+    assert.equal(results.filter(x=>x.status==="fulfilled").length,1);
+    assert.match(results.find(x=>x.status==="rejected").reason.message,/Insufficient available balance/);
+    const {rows:[state]}=await pool.query(`
+      SELECT (SELECT count(*)::int FROM simulation_investments WHERE user_id=$1) AS investments,
+             (SELECT count(*)::int FROM simulation_withdrawals WHERE user_id=$1) AS withdrawals`,[owner]);
+    assert.equal(state.investments+state.withdrawals,1);
+    const balances=await getWalletBalances(pool,owner);
+    assert.equal(formatUsdt(balances.AVAILABLE),"0.00000000");
+    assert.equal(formatUsdt(balances.INVESTED??"0"),state.investments?"25.00000000":"0.00000000");
+    assert.equal(formatUsdt(balances.WITHDRAWAL_HOLD??"0"),state.withdrawals?"25.00000000":"0.00000000");
+    if(state.investments){
+      const {rows:[i]}=await pool.query("SELECT id FROM simulation_investments WHERE user_id=$1",[owner]);
+      assert.equal(await open(),i.id);
+      await assert.rejects(withdraw(),/Insufficient available balance/);
+      assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["simulated-investment-open:"+i.id])).rowCount,1);
+    }else{
+      const {rows:[w]}=await pool.query("SELECT id FROM simulation_withdrawals WHERE user_id=$1",[owner]);
+      assert.equal((await withdraw()).id,w.id);
+      await assert.rejects(open(),/Insufficient available balance/);
+      assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-reserve:"+w.id])).rowCount,1);
+      await cancelWithdrawal(pool,owner,w.id);
+      assert.equal(formatUsdt((await getWalletBalances(pool,owner)).AVAILABLE),"25.00000000");
+      // The originally failed investment may now be retried once, after release.
+      const investment=await open();
+      assert.equal(await open(),investment);
+      assert.equal(formatUsdt((await getWalletBalances(pool,owner)).AVAILABLE),"0.00000000");
+    }
+  }
+});
