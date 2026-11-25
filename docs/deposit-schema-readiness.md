@@ -2,24 +2,31 @@
 
 **Read-only audit only. Not permission to enable real deposits.**
 
-Run this only from an authorized environment that can reach FadeHost private PostgreSQL, using a database account with SELECT/catalog permissions and no write privileges.
+Use the reviewed integration revision in an authorized private-network-capable environment. Provision a deliberately separate SELECT/catalog-only PostgreSQL role. Supply DATABASE_URL privately through the environment; never type a credential-bearing URL into shell history, logs, CI output or repository files. Review the database TLS policy before execution. Do not substitute the production bot's write-capable credentials.
 
-```bash
-DATABASE_URL='<private read-only connection string>' node scripts/audit-deposit-schema.js
+## Commands and result contracts
+
+With the reviewed dependencies already installed and the private environment configured:
+
+```sh
+npm run audit:deposit-schema
+npm run audit:deposit-schema -- --include-legacy-assignments
 ```
 
-The command enforces a read-only transaction, sets a statement timeout, emits JSON containing `ready`, `missing`, and `incompatible`, and exits nonzero for missing prerequisites. **Never paste credentials or raw connection strings into chat, tickets, logs or CI output.** Do not place the private connection string in GitHub repository files.
+The first command checks the deposit catalog. The second checks the catalog and legacy active deposit wallet assignments in one bounded repeatable-read, read-only transaction. For the combined result require both catalog.ready and assignments.ready, conflictingActiveDepositWallets equal to the string "0", activeDepositWalletUniquenessEnforced true, and realDepositsEnabled false. It does not prove distinct physical addresses, historical provenance, on-chain proof or posting readiness. Row-security filtering must fail closed rather than hide assignment conflicts.
 
-A passing schema audit is necessary but not sufficient. Review actual constraints, triggers, access controls, ownership history, network configuration, backup/recovery and ledger reconciliation separately. The `verified_deposit_evidence` table is currently only a disposable CI fixture; its absence in production is an expected blocker until a reviewed migration exists. Do not run the fixture against production.
+Exit status 0 means the selected limited checks passed; 2 means prerequisites are missing or incompatible; 3 means execution failed. The combined JSON uses nested catalog and assignments objects. Share only sanitized diagnostic JSON, not raw errors or user records.
 
-Keep real deposits, withdrawals, settlement and user balances disabled until independent security/accounting checks and explicit final owner authorization.
+## Migration boundaries
 
-## FadeHost operator checklist
+A reviewed evidence-table candidate exists at migrations/20261121_verified_deposit_evidence.sql. This is not evidence that the migration was applied to production. Historical ownership candidate PR #197 is separate, draft and review-only. Do not apply either candidate automatically. Independent provenance, actual schema and privileges, operational backup and isolated restoration, and separate migration authorization remain mandatory. Never infer historical ownership from current assignments.
 
-1. Open the **existing** PROFINO bot service in FadeHost; do not create a new bot or expose PostgreSQL publicly.
-2. Run a one-off command from a private-network-capable service shell or one-off job using the reviewed branch and a **read-only** PostgreSQL role. Do not modify the production startup command or bot token.
-3. Set `DATABASE_URL` privately in the execution environment (never paste it into chat or a repository). Run `npm run audit:deposit-schema`.
-4. A successful inspection returns a single JSON line containing `audit`, `ready`, `missing`, and `incompatible`. Exit status 2 means missing/incompatible prerequisites; exit status 3 means inspection failed. The script must not run migrations.
-5. Share **only** the sanitized JSON result, not environment variables, console history, secrets, connection URLs, or database contents.
+## Current operational evidence (2026-11-25)
 
-If FadeHost does not provide a shell or one-off job, **stop** and request a supported private-network execution method. GitHub-hosted runners cannot reach the private-only PostgreSQL endpoint. Do not enable public database access as a workaround.
+PR #56, GitHub Actions job 139062589258: authenticated FadeHost MCP connection, existing bot running, HTTP root and health endpoints 200, database connected, Telegram API connected, receiver active and ready=true. This is point-in-time health, not a catalog audit or restore proof. Direct database and private-network tools were not advertised. The existing command-execution tool declares a paid-plan restriction; no command was issued. The schedule inventory returned zero entries. Do not buy or upgrade a service or use an alternate route to evade plan restrictions.
+
+## Remaining operator gates
+
+Use a supported free private-network execution method only if its availability, authorization and isolation are confirmed. If none is available, record the production audit as blocked. Never expose the database publicly, change startup commands, or deploy unreviewed code to obtain audit access. GitHub-hosted disposable PostgreSQL tests do not validate the live database.
+
+Keep real deposits, withdrawals, settlement and production financial posting disabled until independent security/accounting checks, live catalog and backup/restore verification, operational readiness and explicit separate final owner authorization are all satisfied.
