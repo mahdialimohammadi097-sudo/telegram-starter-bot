@@ -1,4 +1,4 @@
-import { requireUniqueDepositOwner, isValidDepositDatabaseId } from "./deposit-owner-guard.js";
+import { requireUniqueDepositOwner, isValidDepositDatabaseId, isCanonicalDepositEventKey } from "./deposit-owner-guard.js";
 import { bep20BaseUnitsToLedgerAmount } from "./bep20-ledger-precision.js";
 import { withLedgerTransaction, postJournalInTransaction } from "./ledger-posting.js";
 
@@ -20,8 +20,7 @@ export async function postConfirmedDeposit({ pool, evidence, clearingAccountId,
   if (bep20BaseUnitsToLedgerAmount(verified.amountBaseUnits) !== verified.ledgerAmount) {
     throw new Error("Deposit amount does not match blockchain evidence");
   }
-  if (typeof verified.eventKey !== "string" ||
-      !/^bsc:56:0x[0-9a-f]{64}:(?:0|[1-9][0-9]*)$/.test(verified.eventKey)) {
+  if (!isCanonicalDepositEventKey(verified.eventKey)) {
     throw new Error("Deposit event key must be canonical");
   }
   if (!isValidDepositDatabaseId(clearingAccountId)) throw new Error("Invalid clearing account");
