@@ -5,7 +5,8 @@ import { resolveDatabaseTls } from "../src/database-tls-policy.js";
 import { runReadOnlyDepositAudit } from "../src/read-only-deposit-audit.js";
 import { safeDiagnosticCode } from "../src/diagnostic-safety.js";
 let report;
-const output = value => { report = value; };
+let idleConnectionFailed=false;
+const output = value => { report = {...value,financialActivationReady:false,realDepositsEnabled:false}; };
 if (!process.env.DATABASE_URL) {
  output({audit:"fadehost-schema",ready:false,error:"DATABASE_URL_NOT_CONFIGURED"});
  process.exitCode=3;
@@ -15,7 +16,7 @@ if (!process.env.DATABASE_URL) {
   pool = new pg.Pool({connectionString:process.env.DATABASE_URL,max:1,
    ssl:resolveDatabaseTls(),connectionTimeoutMillis:8000,
    options:"-c default_transaction_read_only=on -c statement_timeout=8000 -c lock_timeout=3000"});
-  pool.on("error",()=>{});
+  pool.on("error",()=>{idleConnectionFailed=true;});
   const result=await runReadOnlyDepositAudit(pool);
    // Keep the existing unique:... missing markers for operators consuming the
    // old schedule output, while exposing the complete reviewed audit findings.
@@ -38,5 +39,9 @@ if (!process.env.DATABASE_URL) {
  }
 }
 
-// Emit exactly one report, including any cleanup failure.
+if(idleConnectionFailed){
+ output({audit:"fadehost-schema",ready:false,error:"AUDIT_IDLE_CONNECTION_FAILED"});
+ process.exitCode=3;
+}
+// Emit exactly one report, including any cleanup or idle connection failure.
 process.stdout.write(JSON.stringify(report)+"\n");
