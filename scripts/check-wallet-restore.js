@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import { postLedgerTransaction } from "../src/ledger-posting.js";
 import { formatUsdt } from "../src/ledger-safety.js";
 import { getSimulationReceipt, getWalletBalances } from "../src/wallet-balances.js";
@@ -11,8 +12,8 @@ import { createSimulationWithdrawalTables } from "../test-support/withdrawal-sch
 const mode = process.argv[2];
 assert.ok(["seed", "verify"].includes(mode));
 const database = mode === "seed" ? "wallet_drill_source" : "wallet_drill_restored";
+assert.ok(isDisposablePostgresTarget(process.env.DATABASE_URL, "profino_test"), "Explicit disposable PostgreSQL target required");
 const url = new URL(process.env.DATABASE_URL);
-assert.equal(url.hostname, "localhost");
 url.pathname = "/" + database;
 const pool = new pg.Pool({ connectionString: url.href });
 try {
