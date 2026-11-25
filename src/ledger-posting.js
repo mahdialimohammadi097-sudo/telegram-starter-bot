@@ -217,7 +217,10 @@ export async function postJournalInTransaction(client, {
 
   for (const [accountId, movement] of byAccount) {
     const account = accounts.get(accountId);
-    if (String(account.account_type).toUpperCase() !== "AVAILABLE") continue;
+    const accountType = String(account.account_type).toUpperCase();
+    // An investment settlement or withdrawal release must not spend a
+    // principal/hold that no longer exists, even with a distinct request key.
+    if (!["AVAILABLE", "INVESTED", "WITHDRAWAL_HOLD"].includes(accountType)) continue;
 
     const balanceResult = await client.query(
       `SELECT trim_scale(COALESCE(
@@ -234,7 +237,7 @@ export async function postJournalInTransaction(client, {
     );
     const currentBalance = toUsdtUnitsExact(balanceResult.rows[0].balance);
     if (currentBalance + movement.credit - movement.debit < 0n) {
-      throw new Error("Insufficient available balance");
+      throw new Error(accountType === "AVAILABLE" ? "Insufficient available balance" : "Insufficient reserved ledger balance");
     }
   }
 

@@ -1810,6 +1810,15 @@ test("transfer receipts reject a balanced release journal that debits another us
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // Fund the wrong user's hold so this fault fixture isolates the receipt
+    // ownership check rather than depending on a negative held balance.
+    await postJournalInTransaction(client, {
+      transactionType: "test-opening", idempotencyKey: "wrong-hold-fixture-funded",
+      entries: [
+        { account_id: simulationClearing, entry_type: "debit", amount: "10", currency: "USDT" },
+        { account_id: wrongHold.id, entry_type: "credit", amount: "10", currency: "USDT" }
+      ]
+    });
     const journal = await postJournalInTransaction(client, {
       transactionType: "sim-withdraw-release", referenceId: "674", idempotencyKey: "receipt-wrong-source",
       entries: [
@@ -2539,3 +2548,29 @@ test("posted journal header cannot be edited deleted or relabelled as reversed",
   ]) await assert.rejects(pool.query(sql,[originalId]),/Posted transactions are immutable/);
   assert.deepEqual((await pool.query("SELECT * FROM ledger_transactions WHERE id=$1",[originalId])).rows,before.rows);
 });
+
+for (const accountType of ["INVESTED","WITHDRAWAL_HOLD"]) {
+  test(`distinct-key concurrent debits cannot overdraw ${accountType}`, {skip:!enabled}, async()=>{
+    const account=await createAccount(accountType);
+    const clearing=await createAccount("CLEARING");
+    const opening=await postLedgerTransaction({pool,transactionType:"test-opening",
+      idempotencyKey:"reserved-opening:"+account,entries:[
+        {account_id:clearing,entry_type:"debit",amount:"10.00000001",currency:"USDT"},
+        {account_id:account,entry_type:"credit",amount:"10.00000001",currency:"USDT"}
+      ]});
+    assert.equal(opening.posted,true);
+    const debit=key=>postLedgerTransaction({pool,transactionType:"test-reserved-debit",idempotencyKey:key,
+      entries:[{account_id:account,entry_type:"debit",amount:"7",currency:"USDT"},
+               {account_id:clearing,entry_type:"credit",amount:"7",currency:"USDT"}]});
+    const keys=["reserved-debit-a:"+account,"reserved-debit-b:"+account];
+    const outcomes=await Promise.allSettled(keys.map(debit));
+    assert.equal(outcomes.filter(x=>x.status==="fulfilled").length,1);
+    assert.match(outcomes.find(x=>x.status==="rejected").reason.message,/Insufficient reserved ledger balance/);
+    assert.equal(await readAdjustmentBalance(account),"3.00000001");
+    const {rows}=await pool.query("SELECT count(*)::int AS n FROM ledger_transactions WHERE idempotency_key=ANY($1::text[])",[keys]);
+    assert.equal(rows[0].n,1);
+    const winner=keys[outcomes.findIndex(x=>x.status==="fulfilled")];
+    assert.equal((await debit(winner)).idempotent,true);
+    assert.equal(await readAdjustmentBalance(account),"3.00000001");
+  });
+}
