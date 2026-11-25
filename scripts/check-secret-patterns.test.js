@@ -52,3 +52,14 @@ test("reviewed disposable credentials are exempt only in the exact workflow path
   assert.deepEqual(detectSecretKinds(url + "\n" + prefix + "postgres:rehearsal@remote.invalid:5432/catalog_rehearsal", workflow), ["database-url"]);
   assert.deepEqual(detectSecretKinds(prefix + "postgres:other-secret@localhost:5432/catalog_rehearsal", workflow), ["database-url"]);
 });
+
+
+test("standalone security rehearsal exemption is restricted to exact fixture and path",()=>{
+ const prefix="postgresql://";
+ const local=prefix+"postgres:postgres@localhost:5432/profino_security_rehearsal";
+ const workflow=".github/workflows/standalone-security-postgres.yml";
+ assert.deepEqual(detectSecretKinds(local,workflow),[]);
+ assert.deepEqual(detectSecretKinds(local,"src/production.js"),["database-url"]);
+ assert.deepEqual(detectSecretKinds(prefix+"postgres:postgres@remote.invalid:5432/profino_security_rehearsal",workflow),["database-url"]);
+ assert.deepEqual(detectSecretKinds(prefix+"postgres:other-secret@localhost:5432/profino_security_rehearsal",workflow),["database-url"]);
+});
