@@ -56,9 +56,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   if(col && col.is_nullable!=='NO') incompatible.push(name+':not_null');
  }
  const numericContract={
-  "ledger_entries.amount":{precision:36,scale:18},
-  "verified_deposit_evidence.amount_base_units":{precision:78,scale:0},
-  "verified_deposit_evidence.block_number":{precision:78,scale:0}
+  "ledger_entries.amount":{precision:36,scale:18}
  };
  for(const [name,expected] of Object.entries({
    "wallets.is_platform_controlled":"boolean",
@@ -72,10 +70,10 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
    if(col && (col.data_type!==expected ||
      (numericContract[name] && (
        Number(col.numeric_scale)!==numericContract[name].scale ||
-       (name.startsWith("verified_deposit_evidence.")
-         ? Number(col.numeric_precision)!==numericContract[name].precision
-         : Number(col.numeric_precision)<numericContract[name].precision) ||
-       col.numeric_precision==null))))
+       Number(col.numeric_precision)<numericContract[name].precision ||
+       col.numeric_precision==null)) ||
+     (name.startsWith("verified_deposit_evidence.") && expected==="numeric" &&
+       (col.numeric_precision!==null || col.numeric_scale!==null))))
      incompatible.push(name);
  }
  // A unique index on the event key and the ledger idempotency key is mandatory.
@@ -145,9 +143,12 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
    incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  }
  // Named or unnamed numeric checks must have the exact reviewed expression.
- // A precision-78 numeric can represent NaN and values outside uint256.
+ // Unconstrained numeric preserves input scale; typmods round before CHECK.
+ // Numeric can represent NaN and values outside uint256.
  // A finite upper bound excludes both; positive-only CHECK does not.
  const numericChecks={
+  block_number_integer:"(scale(block_number) = 0)",
+  amount_integer:"(scale(amount_base_units) = 0)",
   block_number_nonnegative:"(block_number >= (0)::numeric)",
   amount_positive:"(amount_base_units > (0)::numeric)",
   block_number_uint256:"(block_number <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric)",
