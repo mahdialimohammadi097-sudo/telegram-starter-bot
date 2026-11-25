@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { assertBalancedLedgerEntries, toUsdtUnitsExact } from "./ledger-safety.js";
 import { rollbackTransaction } from "./transaction-safety.js";
 
@@ -113,8 +114,38 @@ export async function postLedgerTransaction({ pool, ...journal }) {
   return withLedgerTransaction(pool, client => postJournalInTransaction(client, journal));
 }
 
-// The caller owns BEGIN, COMMIT, and ROLLBACK.
-export async function postJournalInTransaction(client, {
+// The caller owns BEGIN, COMMIT, and ROLLBACK. A savepoint requires an
+// explicit PostgreSQL transaction and prevents partial journals surviving a
+// caught posting error. The surrounding business operation must still roll
+// back its own domain changes on failure. No parallel work on one client.
+export async function postJournalInTransaction(client, journal) {
+  const savepoint = "profino_journal_" + randomUUID().replaceAll("-", "");
+  const started = await client.query("SAVEPOINT " + savepoint);
+  if (started?.command !== "SAVEPOINT") throw new Error("Ledger savepoint start unconfirmed");
+  try {
+    const result = await postJournalWithinSavepoint(client, journal);
+    const released = await client.query("RELEASE SAVEPOINT " + savepoint);
+    if (released?.command !== "RELEASE") throw new Error("Ledger savepoint release unconfirmed");
+    return result;
+  } catch (error) {
+    try {
+      const rolledBack = await client.query("ROLLBACK TO SAVEPOINT " + savepoint);
+      if (rolledBack?.command !== "ROLLBACK") throw new Error("Ledger savepoint rollback unconfirmed");
+      const released = await client.query("RELEASE SAVEPOINT " + savepoint);
+      if (released?.command !== "RELEASE") throw new Error("Ledger savepoint release unconfirmed");
+    } catch (cleanupError) {
+      // The outer transaction must abort if savepoint cleanup is uncertain.
+      // Preserve the original failure for diagnosis.
+      if (error && typeof error === "object") {
+        try { error.savepointError = cleanupError; } catch {}
+      }
+      throw new Error("Ledger savepoint cleanup failed; outer transaction must roll back", { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function postJournalWithinSavepoint(client, {
   transactionType,
   referenceId = null,
   idempotencyKey,

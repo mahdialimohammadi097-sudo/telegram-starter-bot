@@ -56,6 +56,9 @@ function makePostingPool({ balance = "10.00000000", statusUpdateRowCount = 1, en
       if (normalized === "BEGIN" || normalized === "COMMIT" || normalized === "ROLLBACK") {
         return { command: normalized, rowCount: 0, rows: [] };
       }
+      if (normalized.startsWith("SAVEPOINT ")) return { command: "SAVEPOINT" };
+      if (normalized.startsWith("ROLLBACK TO SAVEPOINT ")) return { command: "ROLLBACK" };
+      if (normalized.startsWith("RELEASE SAVEPOINT ")) return { command: "RELEASE" };
       if (normalized.includes("pg_advisory_xact_lock")) {
         return { rowCount: 1, rows: [] };
       }
@@ -155,6 +158,9 @@ function makeExistingPostingPool({ transaction = {}, priorEntries = [] } = {}) {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(normalized)) {
         return { command: normalized, rowCount: 0, rows: [] };
       }
+      if (normalized.startsWith("SAVEPOINT ")) return { command: "SAVEPOINT" };
+      if (normalized.startsWith("ROLLBACK TO SAVEPOINT ")) return { command: "ROLLBACK" };
+      if (normalized.startsWith("RELEASE SAVEPOINT ")) return { command: "RELEASE" };
       if (normalized.includes("pg_advisory_xact_lock")) {
         return { rowCount: 1, rows: [] };
       }
@@ -392,6 +398,9 @@ test("rejects unsupported transaction isolation before any journal reads or writ
   const client = {
     async query(sql, params) {
       calls.push({ sql, params });
+      if (sql.startsWith("SAVEPOINT ")) return { command: "SAVEPOINT" };
+      if (sql.startsWith("ROLLBACK TO SAVEPOINT ")) return { command: "ROLLBACK" };
+      if (sql.startsWith("RELEASE SAVEPOINT ")) return { command: "RELEASE" };
       return { rowCount: 0, rows: [] };
     }
   };
@@ -403,7 +412,16 @@ test("rejects unsupported transaction isolation before any journal reads or writ
       { account_id: "2", entry_type: "credit", amount: "1", currency: "USDT" }
     ]
   }), /requires READ COMMITTED/);
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].sql, /current_setting\('transaction_isolation'\) = 'read committed'/);
-  assert.deepEqual(calls[0].params, ["unsupported-isolation"]);
+  assert.equal(calls.length, 4);
+  assert.match(calls[1].sql, /current_setting\('transaction_isolation'\) = 'read committed'/);
+  assert.deepEqual(calls[1].params, ["unsupported-isolation"]);
+});
+
+test("journal refuses to read or write when an explicit transaction is absent", async () => {
+  const { postJournalInTransaction } = await import("./ledger-posting.js");
+  const calls = [];
+  const error = Object.assign(new Error("SAVEPOINT can only be used in transaction blocks"), {code:"25P01"});
+  await assert.rejects(postJournalInTransaction({query:async sql=>{calls.push(sql);throw error;}},{}),e=>e===error);
+  assert.equal(calls.length,1);
+  assert.match(calls[0],/^SAVEPOINT profino_journal_[0-9a-f]{32}$/);
 });

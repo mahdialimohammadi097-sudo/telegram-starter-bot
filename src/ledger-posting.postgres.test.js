@@ -2574,3 +2574,44 @@ for (const accountType of ["INVESTED","WITHDRAWAL_HOLD"]) {
     assert.equal(await readAdjustmentBalance(account),"3.00000001");
   });
 }
+
+test("direct journal call outside BEGIN cannot leave pending or posted records", {skip:!enabled}, async()=>{
+  const available=await createAccount("AVAILABLE"), clearing=await createAccount("CLEARING");
+  const key="no-explicit-transaction:"+available;
+  const journal={transactionType:"test-opening",idempotencyKey:key,entries:[
+    {account_id:clearing,entry_type:"debit",amount:"5",currency:"USDT"},
+    {account_id:available,entry_type:"credit",amount:"5",currency:"USDT"}
+  ]};
+  const client=await pool.connect();
+  try{
+    await assert.rejects(postJournalInTransaction(client,journal),e=>e.code==="25P01");
+    const {rows}=await client.query("SELECT count(*)::int AS n FROM ledger_transactions WHERE idempotency_key=$1",[key]);
+    assert.equal(rows[0].n,0);
+    assert.equal(await readAdjustmentBalance(available),"0");
+  }finally{client.release();}
+});
+test("caught mid-journal failure cannot commit a partial financial record", {skip:!enabled}, async()=>{
+  const available=await createAccount("AVAILABLE"), clearing=await createAccount("CLEARING");
+  const key="caught-posting-failure:"+available, goodKey="after-caught-failure:"+available;
+  const journal={transactionType:"test-opening",idempotencyKey:key,entries:[
+    {account_id:clearing,entry_type:"debit",amount:"5",currency:"USDT"},
+    {account_id:available,entry_type:"credit",amount:"5",currency:"USDT"}
+  ]};
+  const client=await pool.connect();
+  try{
+    await client.query("BEGIN");
+    await client.query(`CREATE FUNCTION fail_second_ledger_line() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.entry_type='credit' THEN RAISE EXCEPTION 'injected second line failure'; END IF;
+      RETURN NEW; END $$;
+      CREATE TRIGGER test_fail_second_line BEFORE INSERT ON ledger_entries FOR EACH ROW EXECUTE FUNCTION fail_second_ledger_line()`);
+    await assert.rejects(postJournalInTransaction(client,journal),/injected second line failure/);
+    const pending=await client.query("SELECT count(*)::int AS n FROM ledger_transactions WHERE idempotency_key=$1",[key]);
+    assert.equal(pending.rows[0].n,0);
+    await client.query("DROP TRIGGER test_fail_second_line ON ledger_entries; DROP FUNCTION fail_second_ledger_line()");
+    await postJournalInTransaction(client,{...journal,idempotencyKey:goodKey});
+    assert.equal((await client.query("COMMIT")).command,"COMMIT");
+  }catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
+  const {rows}=await pool.query("SELECT idempotency_key,status FROM ledger_transactions WHERE idempotency_key=ANY($1::text[])",[[key,goodKey]]);
+  assert.deepEqual(rows,[{idempotency_key:goodKey,status:"posted"}]);
+  assert.equal(await readAdjustmentBalance(available),"5");
+});
