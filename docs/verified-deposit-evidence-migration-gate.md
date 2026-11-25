@@ -9,14 +9,14 @@ in the limited audit; this does not establish overall deposit readiness.
 ## Required before production execution
 1. Keep real deposits, withdrawals, settlement and credits disabled.
 2. Review candidate `migrations/20261121_verified_deposit_evidence.sql` on PR #80; verify the chain-specific event-key contract and data retention/security policy.
-3. Rehearse against an isolated PostgreSQL 17 database with a matching schema. Test first execution, repeated execution, concurrent execution, unique event keys, invalid event keys, zero/negative amounts, and rollback on failure.
+3. Rehearse against an isolated PostgreSQL 17 database with a matching schema. Test first execution, rejection of repeated execution or unexpected existing relations, concurrent execution, unique event keys, invalid event keys, zero/negative amounts, and rollback on failure.
 4. Capture a verified restorable backup and recovery point before any production DDL.
 5. Obtain separate explicit owner approval **for the production migration**; approval to deploy read-only diagnostics does not authorize DDL.
 6. Use a private-network execution path and least-privilege migration role; do not expose the database publicly or paste credentials.
 7. Run full read-only `npm run audit:deposit-schema` afterwards, check constraints and reconciliation, and retain audit results without secrets.
 
 ## Important limitations
-`CREATE TABLE IF NOT EXISTS` does not repair an incompatible preexisting table.
+The create-only candidate intentionally rejects any existing relation, including a compatible table. Do not retry blindly after an uncertain outcome; inspect the catalog read-only and require a separate reviewed change if repair is needed.
 This migration creates evidence storage only. It does not install a blockchain
 observer, prove receipt ownership, credit balances or enable financial activity.
 Do not merge PR #80 merely to apply the migration.
