@@ -53,7 +53,7 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   await assert.rejects(insert(1,11,address,"300","400"),
    error=>["23505","23P01"].includes(error.code));
   await assert.rejects(insert(3,11,address,"1","2"),/identity mismatch/);
-  for(const [start,end] of [["NaN","2"],[beyond,max],["-1","2"],["1","NaN"],["1",beyond],["1","1"]]){
+  for(const [start,end] of [["NaN","2"],[beyond,max],["-1","2"],["1","NaN"],["1",beyond],["1","1"],["1.2","3"],["1","3.4"],["-0.1","2"],["1.0","3"],["1","3.0"]]){
    await assert.rejects(insert(3,11,other,start,end),{code:"23514"});
   }
   await insert(3,11,other,(BigInt(max)-1n).toString(),max);
