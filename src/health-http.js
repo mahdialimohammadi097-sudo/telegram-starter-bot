@@ -4,6 +4,7 @@ export function startHealthHttpServer({
   port,
   runtimeHealth,
   getBotUsername = () => "PROFINO",
+  webhookPath = "/telegram",
   getWebhookHandler = () => null
 }) {
   const server = http.createServer((req, res) => {
@@ -32,11 +33,20 @@ export function startHealthHttpServer({
       return res.end("alive");
     }
 
-    if (req.method === "POST" && pathname === "/telegram") {
-      const handler = getWebhookHandler();
-      if (handler) return handler(req, res);
-      res.writeHead(503, { "cache-control": "no-store" });
-      return res.end("webhook not configured");
+    if (req.method === "POST" && (pathname === webhookPath || pathname === "/telegram")) {
+      void Promise.resolve().then(async () => {
+        const handler = getWebhookHandler();
+        if (handler) return await handler(req, res);
+        res.writeHead(503, { "cache-control": "no-store" });
+        res.end("webhook not configured");
+      }).catch(() => {
+        console.error("[health] webhook handler failed");
+        if (res.writableEnded || res.destroyed) return;
+        if (res.headersSent) return res.destroy();
+        res.writeHead(500, { "cache-control": "no-store", "content-type": "text/plain; charset=utf-8" });
+        res.end("webhook processing failed");
+      });
+      return;
     }
 
     if (req.method === "GET" && pathname === "/") {

@@ -1,6 +1,7 @@
 
 import { mainKeyboard, backKeyboard, canonicalMenuChoice, menuLanguage, menuTitle, sectionText } from "./owner-menu-language.js";
 import { randomBytes } from "node:crypto";
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { pool } from "./database.js";
 import { formatUsdt } from "./ledger-safety.js";
 import { clearPostManagementSession, registerPostManagement } from "./post-management.js";
@@ -15,7 +16,7 @@ const ADMIN_TIME_ZONE = "UTC";
 const adminDrafts = new Map();
 
 async function getOwnerMenuLanguage(ctx) {
-  if (ctx.from?.id !== ADMIN_ID) return "en";
+  if (!isAdmin(ctx)) return "en";
   try {
     const result = await pool.query(
       `SELECT ap.language FROM users u
@@ -100,11 +101,11 @@ async function getWalletBalances(userId) {
 }
 
 function isAdmin(ctx) {
-  return ctx.from?.id === ADMIN_ID;
+  return ctx.from?.id === ADMIN_ID && isPrivateChat(ctx);
 }
 
 function isPrivateChat(ctx) {
-  return ctx.chat?.type === "private";
+  return ctx.chat?.type === "private" && ctx.chat.id === ctx.from?.id;
 }
 
 function parseUtcDateTime(value) {
@@ -172,7 +173,7 @@ export function registerCommands(bot) {
   bot.use(async (ctx, next) => {
     if (!ctx.from) return;
 
-    if (ctx.chat?.type !== "private") {
+    if (!isPrivateChat(ctx)) {
       if (ctx.callbackQuery) {
         return ctx.answerCallbackQuery({
           text: "Please use the bot in a private chat.",
@@ -216,7 +217,7 @@ export function registerCommands(bot) {
         return ctx.reply(message);
       }
     } catch (error) {
-      console.error("[access-control] status check failed:", error.message);
+      console.error("[access-control] status check failed:", safeDiagnosticCode(error));
       const message = "We cannot verify your account right now. Please try again later.";
       if (ctx.callbackQuery) {
         return ctx.answerCallbackQuery({ text: message, show_alert: true });
@@ -248,7 +249,7 @@ export function registerCommands(bot) {
         { reply_markup: mainKeyboard(language) }
       );
     } catch (error) {
-      console.error("[registration] Failed:", error.message);
+      console.error("[registration] Failed:", safeDiagnosticCode(error));
 
       await ctx.reply(
         "Unable to load your account. Please try again later."
@@ -315,7 +316,7 @@ export function registerCommands(bot) {
         "Connection test successful."
       );
     } catch (error) {
-      console.error("[channel] Check failed:", error.message);
+      console.error("[channel] Check failed:", safeDiagnosticCode(error));
 
       return ctx.reply(
         "Channel connection failed. Please check the bot permissions."
@@ -373,7 +374,7 @@ export function registerCommands(bot) {
     try {
       await showScheduledPosts(ctx);
     } catch (error) {
-      console.error("[scheduled-posts] Failed:", error);
+      console.error("[scheduled-posts] Failed:", safeDiagnosticCode(error));
 
       await ctx.reply(
         "Unable to retrieve scheduled posts. Please try again."
@@ -481,7 +482,7 @@ export function registerCommands(bot) {
             "Nothing will be published until you approve it."
           );
         } catch (error) {
-          console.error("[newpost] Database error:", error);
+          console.error("[newpost] Database error:", safeDiagnosticCode(error));
 
           return ctx.reply(
             "Unable to save the post.\n" +
@@ -527,7 +528,7 @@ export function registerCommands(bot) {
           { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
-        console.error("[account] Failed:", error.message);
+        console.error("[account] Failed:", safeDiagnosticCode(error));
 
         return ctx.reply(
           "Unable to load account information. Please try again later."
@@ -563,7 +564,7 @@ export function registerCommands(bot) {
           { reply_markup: backKeyboard(language) }
         );
       } catch (error) {
-        console.error("[wallet] Failed:", error.message);
+        console.error("[wallet] Failed:", safeDiagnosticCode(error));
 
         return ctx.reply(
           "Unable to load wallet balances. Please try again later.",

@@ -1,3 +1,4 @@
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 // Read-only, one-shot structural diagnostic for the existing production database.
 // No user rows, wallet addresses, balances or secrets are queried or returned.
 export async function inspectDepositSchemaReadOnly(pool) {
@@ -68,9 +69,7 @@ export async function deliverAdminSchemaAudit({pool,sendMessage,adminId,logCode=
   await sendMessage(adminId,"PROFINO read-only deposit schema audit\n"+JSON.stringify(audit));
   return true;
  } catch(error) {
-  const code=typeof error?.code==="string" && /^[A-Z0-9]{2,8}$/.test(error.code)
-   ? error.code : "UNKNOWN";
-  logCode(code);
+  try { logCode(safeDiagnosticCode(error)); } catch { /* Diagnostic logger cannot block startup. */ }
   return false;
  }
 }

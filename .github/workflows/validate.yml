@@ -9,13 +9,19 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   syntax:
     name: JavaScript syntax check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -24,6 +30,8 @@ jobs:
         run: |
           find . -path ./node_modules -prune -o -name "*.js" -print0 | xargs -0 -n1 node --check
       - name: Install dependencies for unit tests
-        run: npm ci
+        run: npm ci --ignore-scripts
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
       - name: Run unit tests
         run: npm test

@@ -1,3 +1,4 @@
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
@@ -138,7 +139,7 @@ async function sendPreview(bot, post) {
   } catch (error) {
     console.error(
       `[scheduler] preview result uncertain for post ${post.id}:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     try {
@@ -152,7 +153,7 @@ async function sendPreview(bot, post) {
     } catch (databaseError) {
       console.error(
         `[scheduler] could not record preview uncertainty for post ${post.id}:`,
-        databaseError
+        safeDiagnosticCode(databaseError)
       );
     }
   }
@@ -170,7 +171,7 @@ async function processScheduledPosts(bot) {
       await sendPreview(bot, post);
     }
   } catch (error) {
-    console.error("[scheduler] processing error:", error);
+    console.error("[scheduler] processing error:", safeDiagnosticCode(error));
   } finally {
     isRunning = false;
   }
@@ -180,22 +181,21 @@ async function updateAdminMessage(ctx, text) {
   try {
     await ctx.editMessageText(text, { reply_markup: { inline_keyboard: [] } });
   } catch (error) {
-    console.error("[scheduler] could not update admin message:", error);
+    console.error("[scheduler] could not update admin message:", safeDiagnosticCode(error));
   }
 }
 
 async function handlePostAction(ctx) {
-  const language = await getAdminLanguage(ctx);
   if (
     ctx.from?.id !== ADMIN_ID ||
-    ctx.callbackQuery.message?.chat?.id !== ADMIN_ID
+    ctx.chat?.type !== "private" || ctx.chat.id !== ADMIN_ID ||
+    ctx.callbackQuery?.message?.chat?.type !== "private" ||
+    ctx.callbackQuery.message.chat.id !== ADMIN_ID
   ) {
-    await ctx.answerCallbackQuery({
-      text: adminText(language, "Unauthorized.", "دسترسی غیرمجاز است."),
-      show_alert: true
-    });
+    await ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     return;
   }
+  const language = await getAdminLanguage(ctx);
 
   const match = ctx.callbackQuery.data.match(
     /^post_(approve|reject):(\d+)$/
@@ -241,7 +241,7 @@ async function handlePostAction(ctx) {
         adminText(language, "PROFINO — Post " + postId + " rejected.", "پروفینو — پست " + postId + " رد شد.")
       );
     } catch (error) {
-      console.error("[scheduler] rejection error:", error);
+      console.error("[scheduler] rejection error:", safeDiagnosticCode(error));
 
       await ctx.answerCallbackQuery({
         text: adminText(language, "Database error. Please try again.", "خطای پایگاه داده. دوباره تلاش کنید."),
@@ -277,7 +277,7 @@ async function handlePostAction(ctx) {
 
     post = result.rows[0];
   } catch (error) {
-    console.error("[scheduler] approval database error:", error);
+    console.error("[scheduler] approval database error:", safeDiagnosticCode(error));
 
     await ctx.answerCallbackQuery({
       text: adminText(language, "Database error. Nothing was published.", "خطای پایگاه داده؛ هیچ چیزی منتشر نشد."),
@@ -301,7 +301,7 @@ async function handlePostAction(ctx) {
   } catch (error) {
     console.error(
       `[scheduler] publication result uncertain for post ${postId}:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     try {
@@ -315,7 +315,7 @@ async function handlePostAction(ctx) {
     } catch (databaseError) {
       console.error(
         "[scheduler] could not record publication uncertainty:",
-        databaseError
+        safeDiagnosticCode(databaseError)
       );
     }
 
@@ -348,7 +348,7 @@ async function handlePostAction(ctx) {
   } catch (error) {
     console.error(
       `[scheduler] post ${postId} was sent, but database confirmation failed:`,
-      error
+      safeDiagnosticCode(error)
     );
 
     await updateAdminMessage(
@@ -390,7 +390,7 @@ export function startScheduler(bot) {
     .catch((error) => {
       console.error(
         "[scheduler] startup recovery failed. Scheduler remains disabled:",
-        error
+        safeDiagnosticCode(error)
       );
       return false;
     });
