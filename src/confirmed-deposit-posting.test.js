@@ -11,7 +11,7 @@ test('missing ownership adapter and amount mismatch fail before database access'
     resolveAndLockAssignments() {} }), /does not match/);
 });
 test('noncanonical event identities cannot bypass idempotency', async () => {
-  for (const eventKey of [evidence.eventKey.toUpperCase(), evidence.eventKey + '0']) {
+  for (const eventKey of [evidence.eventKey.toUpperCase(), evidence.eventKey + '0', evidence.eventKey.slice(0,-1)+(1n<<256n).toString(), evidence.eventKey.slice(0,-1)+'9'.repeat(100)]) {
     await assert.rejects(postConfirmedDeposit({ pool, persistVerifiedEvidence, evidence: { ...evidence, eventKey },
       resolveAndLockAssignments() {} }), /canonical/);
   }

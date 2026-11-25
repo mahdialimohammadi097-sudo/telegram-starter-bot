@@ -11,6 +11,14 @@ const CHANNEL_USERNAME = "@PROFINO1";
 const CHECK_INTERVAL_MS = 15000;
 const BATCH_SIZE = 5;
 
+// The callback message is authoritative, but reject contradictory chat context.
+function isAdminSchedulerCallback(ctx) {
+  return ctx.from?.id === ADMIN_ID &&
+    (ctx.chat == null || (ctx.chat.type === "private" && ctx.chat.id === ADMIN_ID)) &&
+    ctx.callbackQuery?.message?.chat?.type === "private" &&
+    ctx.callbackQuery?.message?.chat?.id === ADMIN_ID;
+}
+
 let activeBatch = null;
 let isStarted = false;
 let schedulerStopped = false;
@@ -215,11 +223,7 @@ async function updateAdminMessage(ctx, text) {
 }
 
 async function handlePostAction(ctx) {
-  if (
-    ctx.from?.id !== ADMIN_ID ||
-    ctx.callbackQuery?.message?.chat?.type !== "private" ||
-    ctx.callbackQuery?.message?.chat?.id !== ADMIN_ID
-  ) {
+  if (!isAdminSchedulerCallback(ctx)) {
     await ctx.answerCallbackQuery({
       text: "Unauthorized.",
       show_alert: true
@@ -433,9 +437,7 @@ export function startScheduler(bot, { recoveryRetryMs = CHECK_INTERVAL_MS } = {}
   bot.callbackQuery(/^post_(approve|reject):\d+$/, async ctx => {
     if (schedulerStopped) return;
     if (!recovered) {
-      const authorized = ctx.from?.id === ADMIN_ID &&
-        ctx.callbackQuery?.message?.chat?.type === "private" &&
-        ctx.callbackQuery.message.chat.id === ADMIN_ID;
+      const authorized = isAdminSchedulerCallback(ctx);
       try {
         await ctx.answerCallbackQuery({ text: authorized ? "Scheduler is recovering. Please try again." : "Unauthorized.", show_alert: true });
       } catch (error) {

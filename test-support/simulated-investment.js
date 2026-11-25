@@ -1,6 +1,53 @@
 import { previewSettlement, settlementAmounts } from "../src/plan-preview.js";
 import { withLedgerTransaction, postJournalInTransaction } from "../src/ledger-posting.js";
 
+// A request record alone cannot certify that the opening journal committed.
+async function verifyOpeningJournal(client, userId, investmentId, amount, replay) {
+  const type = "simulated-investment-open";
+  const key = type + ":" + investmentId;
+  const prior = await client.query(
+    `SELECT id, transaction_type, reference_id, idempotency_key, status
+     FROM ledger_transactions WHERE idempotency_key = $1 OR (transaction_type = $2 AND reference_id = $3)
+     ORDER BY id FOR UPDATE`, [key, type, String(investmentId)]
+  );
+  if (replay) {
+    const j = prior.rows[0];
+    if (prior.rowCount !== 1 || j.status !== "posted" || j.transaction_type !== type ||
+        j.reference_id !== String(investmentId) || j.idempotency_key !== key) {
+      throw new Error("Investment opening journal mismatch; reconciliation required");
+    }
+  } else if (prior.rowCount !== 0) {
+    throw new Error("Detached investment opening journal; reconciliation required");
+  }
+    const { rows } = await client.query(
+      `SELECT account_type, id FROM ledger_accounts WHERE user_id = $1
+       AND currency = 'USDT' AND account_type IN ('AVAILABLE','INVESTED')`, [userId]
+    );
+    const accounts = new Map(rows.map(row => [row.account_type, row.id]));
+    if (accounts.size !== 2) throw new Error("Incomplete investment wallet");
+    const journal = await postJournalInTransaction(client, {
+      transactionType: "simulated-investment-open", referenceId: investmentId,
+      idempotencyKey: "simulated-investment-open:" + investmentId,
+      entries: [
+        { account_id: accounts.get("AVAILABLE"), entry_type: "debit", amount: amount, currency: "USDT" },
+        { account_id: accounts.get("INVESTED"), entry_type: "credit", amount: amount, currency: "USDT" }
+      ]
+    });
+    if (journal.idempotent !== replay || (replay && journal.transactionId !== String(prior.rows[0].id))) {
+      throw new Error("Investment opening replay mismatch; reconciliation required");
+    }
+
+}
+
+// Fixed v1 rehearsal catalogue only; production must bind immutable versioned terms.
+function requireReviewedTerms(investment) {
+  const plan = previewSettlement(investment.plan + " " + String(investment.principal));
+  if (!plan || investment.profit_percent !== plan.profitPercent || investment.fee_percent !== plan.feePercent) {
+    throw new Error("Investment terms differ from reviewed plan; reconciliation required");
+  }
+  return plan;
+}
+
 export async function openSimulatedInvestment(pool, userId, requestId, selection) {
   const plan = previewSettlement(selection);
   if (!plan) throw new Error("Unsupported plan or amount");
@@ -9,7 +56,7 @@ export async function openSimulatedInvestment(pool, userId, requestId, selection
     const user = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!user.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
-      "SELECT id, plan, principal::text FROM simulation_investments WHERE user_id = $1 AND request_id = $2",
+      "SELECT id, plan, principal::text, profit_percent, fee_percent FROM simulation_investments WHERE user_id = $1 AND request_id = $2 FOR UPDATE",
       [userId, requestId]
     );
     if (prior.rowCount) {
@@ -17,6 +64,8 @@ export async function openSimulatedInvestment(pool, userId, requestId, selection
       if (investment.plan !== plan.name || investment.principal !== plan.amount) {
         throw new Error("Request already used for a different investment");
       }
+      requireReviewedTerms(investment);
+      await verifyOpeningJournal(client, userId, investment.id, plan.amount, true);
       return investment.id;
     }
     const active = await client.query(
@@ -30,20 +79,7 @@ export async function openSimulatedInvestment(pool, userId, requestId, selection
        VALUES ($1, $2, $3, $4, $5, $6, now() + $7::int * interval '24 hours') RETURNING id`,
       [userId, requestId, plan.name, plan.amount, plan.profitPercent, plan.feePercent, plan.days]
     );
-    const { rows } = await client.query(
-      `SELECT account_type, id FROM ledger_accounts WHERE user_id = $1
-       AND currency = 'USDT' AND account_type IN ('AVAILABLE','INVESTED')`, [userId]
-    );
-    const accounts = new Map(rows.map(row => [row.account_type, row.id]));
-    if (accounts.size !== 2) throw new Error("Incomplete investment wallet");
-    await postJournalInTransaction(client, {
-      transactionType: "simulated-investment-open", referenceId: investment.id,
-      idempotencyKey: "simulated-investment-open:" + investment.id,
-      entries: [
-        { account_id: accounts.get("AVAILABLE"), entry_type: "debit", amount: plan.amount, currency: "USDT" },
-        { account_id: accounts.get("INVESTED"), entry_type: "credit", amount: plan.amount, currency: "USDT" }
-      ]
-    });
+    await verifyOpeningJournal(client, userId, investment.id, plan.amount, false);
     return investment.id;
   });
 }
@@ -76,12 +112,33 @@ export async function settleNextDueSimulation(pool, reserveId, feeId) {
 
 async function settleLockedInvestment(client, userId, investmentId, reserveId, feeId) {
   const { rows: [investment] } = await client.query(
-    `SELECT status, settlement_id, principal, profit_percent, fee_percent, matures_at <= now() AS mature
+    `SELECT status, settlement_id, plan, principal, profit_percent, fee_percent, matures_at <= now() AS mature
      FROM simulation_investments WHERE id = $1 AND user_id = $2 FOR UPDATE`, [investmentId, userId]
   );
   if (!investment) throw new Error("Unknown investment");
-  if (investment.status === "settled") return investment.settlement_id;
-  if (investment.status !== "active" || !investment.mature) throw new Error("Investment is not due");
+  const replay = investment.status === "settled";
+  if (!replay && (investment.status !== "active" || !investment.mature)) throw new Error("Investment is not due");
+  requireReviewedTerms(investment);
+  await verifyOpeningJournal(client, userId, investmentId, String(investment.principal), true);
+  const key = "simulated-investment-settle:" + investmentId;
+  // Never silently repair a detached journal or certify a corrupted terminal state.
+  const prior = await client.query(
+    `SELECT id, status, transaction_type, reference_id, idempotency_key
+     FROM ledger_transactions
+     WHERE idempotency_key = $1 OR (transaction_type = 'simulated-investment-settle' AND reference_id = $2)
+     ORDER BY id FOR UPDATE`, [key, String(investmentId)]
+  );
+  if (replay) {
+    const j = prior.rows[0];
+    if (!investment.mature || investment.settlement_id == null || prior.rowCount !== 1 ||
+        j.status !== "posted" || j.transaction_type !== "simulated-investment-settle" ||
+        j.reference_id !== String(investmentId) || j.idempotency_key !== key ||
+        String(j.id) !== String(investment.settlement_id)) {
+      throw new Error("Investment settlement journal mismatch; reconciliation required");
+    }
+  } else if (investment.settlement_id != null || prior.rowCount !== 0) {
+    throw new Error("Detached investment settlement journal; reconciliation required");
+  }
   const { rows } = await client.query(
     `SELECT account_type, id FROM ledger_accounts WHERE user_id = $1 AND currency = 'USDT'
      AND account_type IN ('AVAILABLE', 'INVESTED')`, [userId]
@@ -96,7 +153,7 @@ async function settleLockedInvestment(client, userId, investmentId, reserveId, f
   if (sources.rowCount !== 2) throw new Error("Invalid simulation settlement accounts");
   const journal = await postJournalInTransaction(client, {
     transactionType: "simulated-investment-settle", referenceId: investmentId,
-    idempotencyKey: "simulated-investment-settle:" + investmentId,
+    idempotencyKey: key,
     entries: [
       { account_id: accounts.get("INVESTED"), entry_type: "debit", amount: String(investment.principal), currency: "USDT" },
       { account_id: reserveId, entry_type: "debit", amount: profit, currency: "USDT" },
@@ -104,10 +161,18 @@ async function settleLockedInvestment(client, userId, investmentId, reserveId, f
       { account_id: feeId, entry_type: "credit", amount: fee, currency: "USDT" }
     ]
   });
-  await client.query(
-    "UPDATE simulation_investments SET status = 'settled', settlement_id = $2 WHERE id = $1",
+  if (replay) {
+    if (!journal.idempotent || journal.transactionId !== String(investment.settlement_id)) {
+      throw new Error("Investment settlement replay mismatch; reconciliation required");
+    }
+    return journal.transactionId;
+  }
+  if (journal.idempotent) throw new Error("Detached investment settlement journal; reconciliation required");
+  const updated = await client.query(
+    "UPDATE simulation_investments SET status = 'settled', settlement_id = $2 WHERE id = $1 AND status = 'active' AND settlement_id IS NULL",
     [investmentId, journal.transactionId]
   );
+  if (updated.rowCount !== 1) throw new Error("Investment settlement transition unconfirmed");
   return journal.transactionId;
 }
 

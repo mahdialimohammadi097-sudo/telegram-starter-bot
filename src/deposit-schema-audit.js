@@ -143,14 +143,17 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  // Require the reviewed PostgreSQL expression, not merely a trusted-looking name.
  // Semantically equivalent but differently rendered constraints need manual review.
  const expectedChecks={
-  verified_deposit_evidence_event_key_format:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'::text)",
+  verified_deposit_evidence_event_key_format:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]{0,77})$'::text)",
   verified_deposit_evidence_block_hash_format:"(block_hash ~ '^0x[0-9a-f]{64}$'::text)",
   verified_deposit_evidence_token_format:"(token_contract ~ '^0x[0-9a-f]{40}$'::text)",
-  verified_deposit_evidence_address_format:"(deposit_address ~ '^0x[0-9a-f]{40}$'::text)"
+  verified_deposit_evidence_address_format:"(deposit_address ~ '^0x[0-9a-f]{40}$'::text)",
+  verified_deposit_evidence_token_nonzero:"(token_contract <> '0x0000000000000000000000000000000000000000'::text)",
+  verified_deposit_evidence_address_nonzero:"(deposit_address <> '0x0000000000000000000000000000000000000000'::text)",
+  verified_deposit_evidence_log_index_uint256:"CASE WHEN (split_part(event_key, ':'::text, 4) ~ '^(0|[1-9][0-9]{0,77})$'::text) THEN ((split_part(event_key, ':'::text, 4))::numeric <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric) ELSE false END"
  };
  for(const [name,expression] of Object.entries(expectedChecks)) {
   const matching=checks.rows.filter(r=>r.conname===name);
-  if(matching.length!==1 || matching[0].validated!==true || matching[0].expression!==expression)
+  if(matching.length!==1 || matching[0].validated!==true || typeof matching[0].expression!=="string" || matching[0].expression.replace(/\s+/g," ").trim()!==expression)
    incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  }
  // Named or unnamed numeric checks must have the exact reviewed expression.
@@ -169,6 +172,48 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   if(!checks.rows.some(r=>r.validated===true && r.expression===expression))
    incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  }
+ // Check the exact reviewed statement-level mutation guard, not its name alone.
+ // This is catalog evidence only: privileged owners and role grants still need review.
+ const guardBody="\nBEGIN\n RAISE EXCEPTION 'Verified deposit evidence is immutable' USING ERRCODE='55000';\nEND\n";
+ const guards=await client.query(`
+ SELECT tg.tgname,
+        (tg.tgenabled='A' AND tg.tgtype=58 AND tg.tgconstraint=0
+         AND tg.tgqual IS NULL AND tg.tgnargs=0 AND tg.tgattr::text=''
+         AND p.proname='reject_verified_deposit_evidence_mutation'
+         AND fn.nspname=$1 AND p.prokind='f' AND p.pronargs=0
+         AND p.prorettype='pg_catalog.trigger'::pg_catalog.regtype
+         AND lang.lanname='plpgsql' AND NOT p.prosecdef
+         AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
+         AND p.prosrc=$2) AS reviewed_guard,
+        NOT EXISTS (
+          SELECT 1 FROM pg_catalog.aclexplode(COALESCE(t.relacl,pg_catalog.acldefault('r',t.relowner))) acl
+          WHERE acl.grantee=0
+        ) AND NOT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_attribute col
+          CROSS JOIN LATERAL pg_catalog.aclexplode(col.attacl) acl
+          WHERE col.attrelid=t.oid AND col.attnum>0 AND NOT col.attisdropped
+            AND acl.grantee=0
+        ) AS no_public_table_access,
+        NOT EXISTS (
+          SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
+          WHERE acl.grantee=0
+        ) AS no_public_function_access,
+        NOT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_rewrite rule
+          WHERE rule.ev_class=t.oid
+        ) AS no_rewrite_rules
+ FROM pg_catalog.pg_trigger tg
+ JOIN pg_catalog.pg_class t ON t.oid=tg.tgrelid
+ JOIN pg_catalog.pg_namespace ns ON ns.oid=t.relnamespace
+ JOIN pg_catalog.pg_proc p ON p.oid=tg.tgfoid
+ JOIN pg_catalog.pg_namespace fn ON fn.oid=p.pronamespace
+ JOIN pg_catalog.pg_language lang ON lang.oid=p.prolang
+ WHERE ns.nspname=$1 AND t.relname='verified_deposit_evidence' AND NOT tg.tgisinternal
+ `,[schema,guardBody]);
+ if(guards.rows.length!==1 || guards.rows[0].tgname!=="verified_deposit_evidence_immutable" ||
+    guards.rows[0].reviewed_guard!==true || guards.rows[0].no_public_table_access!==true ||
+    guards.rows[0].no_public_function_access!==true || guards.rows[0].no_rewrite_rules!==true)
+   incompatible.push("verified_deposit_evidence:immutable_guard");
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
    missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
 }

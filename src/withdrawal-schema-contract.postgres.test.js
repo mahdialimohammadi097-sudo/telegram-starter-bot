@@ -53,3 +53,56 @@ test("PostgreSQL enforces four-state withdrawal and payout consistency", { skip:
   assert.match(allIndexes, /\(submitted_hash\)/);
   assert.match(allIndexes, /\(payout_event\)/);
 });
+
+test("withdrawal schema rejects invalid state combinations and duplicate identities in PostgreSQL",{skip:!enabled},async()=>{
+  const client=await pool.connect();
+  try{
+    await client.query("BEGIN");
+    await client.query("INSERT INTO users(id) VALUES(1),(2)");
+    const {rows:accounts}=await client.query(`INSERT INTO ledger_accounts(user_id,account_code,account_type) VALUES
+      (1,'schema-contract-available','AVAILABLE'),(1,'schema-contract-held','WITHDRAWAL_HOLD'),
+      (NULL,'schema-contract-clearing','CLEARING') RETURNING id,account_type`);
+    const a=Object.fromEntries(accounts.map(x=>[x.account_type,x.id]));
+    const {rows:[journal]}=await client.query("INSERT INTO ledger_transactions(transaction_type,idempotency_key) VALUES('test-contract','schema-contract-journal') RETURNING id");
+    let sequence=0;
+    const insert=(status,hash,event,payout,clearing,key="case-"+(++sequence),amount="1")=>client.query(
+      `INSERT INTO simulation_withdrawals(user_id,request_key,amount,available_id,held_id,status,submitted_hash,payout_event,payout_id,clearing_id)
+       VALUES(1,$1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [key,amount,a.AVAILABLE,a.WITHDRAWAL_HOLD,status,hash,event,payout,clearing]);
+    async function rejects(code,fn){
+      await client.query("SAVEPOINT invalid_case");
+      try{await assert.rejects(fn(),e=>e.code===code);}
+      finally{await client.query("ROLLBACK TO SAVEPOINT invalid_case");await client.query("RELEASE SAVEPOINT invalid_case");}
+    }
+    const hash="0x"+"1".repeat(64),event="97:"+hash+":0";
+    for(const args of [
+      ["unknown",null,null,null,null],
+      ["reserved",hash,null,null,null],
+      ["cancelled",hash,null,null,null],
+      ["pending_receipt",null,null,null,null],
+      ["pending_receipt",hash,event,null,null],
+      ["paid",null,event,journal.id,a.CLEARING],
+      ["paid",hash,null,journal.id,a.CLEARING],
+      ["paid",hash,event,null,a.CLEARING],
+      ["paid",hash,event,journal.id,null],
+      ["reserved",null,null,journal.id,null],
+      ["cancelled",null,null,null,a.CLEARING]
+    ]) await rejects("23514",()=>insert(...args));
+    await rejects("23514",()=>insert("reserved",null,null,null,null,"zero","0"));
+    await rejects("23514",()=>insert("reserved",null,null,null,null,"negative","-1"));
+    await insert("reserved",null,null,null,null,"reserved");
+    await insert("cancelled",null,null,null,null,"cancelled");
+    await insert("pending_receipt","0x"+"2".repeat(64),null,null,null,"pending");
+    await insert("paid",hash,event,journal.id,a.CLEARING,"paid");
+    await rejects("23505",()=>insert("reserved",null,null,null,null,"reserved"));
+    await rejects("23505",()=>insert("pending_receipt",hash,null,null,null,"duplicate-hash"));
+    const {rows:[second]}=await client.query("INSERT INTO ledger_transactions(transaction_type,idempotency_key) VALUES('test-contract','schema-contract-second') RETURNING id");
+    await rejects("23505",()=>insert("paid","0x"+"3".repeat(64),event,second.id,a.CLEARING));
+    await rejects("23505",()=>insert("paid","0x"+"4".repeat(64),"97:other:0",journal.id,a.CLEARING));
+    await rejects("23503",()=>insert("paid","0x"+"5".repeat(64),"97:missing:0","9223372036854775807",a.CLEARING));
+    const {rows:[total]}=await client.query("SELECT count(*)::int AS n FROM simulation_withdrawals");
+    assert.equal(total.n,4);
+    // Base fixture constraints are structural only; state-history, owner links,
+    // payload and posted journal identity need the separately reviewed guards.
+  }finally{await client.query("ROLLBACK");client.release();}
+});
