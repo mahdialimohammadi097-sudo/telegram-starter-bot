@@ -2307,3 +2307,88 @@ test("real PostgreSQL aborted transaction cannot report successful commit", { sk
   const health = await pool.query("SELECT 1 AS value");
   assert.equal(health.rows[0].value, 1);
 });
+
+test("blocked synthetic customer cannot create or replay investment and withdrawal requests", { skip: !enabled }, async () => {
+  const { openSimulatedInvestment } = await import("../test-support/simulated-investment.js");
+  const { reserveWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const owner = await createSimulationWallet(19001);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  await seedAvailableBalance(available.id, "50");
+  const investment = await openSimulatedInvestment(pool, owner, "before-block-regression", "SMART 25");
+  const destination = "0x" + "a".repeat(40);
+  const withdrawal = await reserveWithdrawal(pool, owner, "before-block-regression", "5", destination);
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [owner]);
+  const before = await displayedBalances(owner);
+  assert.equal(before[0], "20.00000000");
+  assert.equal(before[1], "25.00000000");
+  for (const key of ["before-block-regression", "new-after-block-regression"]) {
+    await assert.rejects(openSimulatedInvestment(pool, owner, key, "SMART 25"), /Unknown user/);
+    await assert.rejects(reserveWithdrawal(pool, owner, key, "5", destination), /Unknown user/);
+  }
+  assert.deepEqual(await displayedBalances(owner), before);
+  assert.deepEqual((await pool.query("SELECT id FROM simulation_investments WHERE user_id = $1", [owner])).rows, [{ id: investment }]);
+  assert.deepEqual((await pool.query("SELECT id,status FROM simulation_withdrawals WHERE user_id = $1", [owner])).rows,
+    [{ id: withdrawal.id, status: "reserved" }]);
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+test("blocked synthetic customer can cancel one existing hold without duplicate release", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelWithdrawal } = await import("../test-support/simulated-withdrawal.js");
+  const owner = await createSimulationWallet(19002);
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [owner]
+  );
+  await seedAvailableBalance(available.id, "20");
+  const request = await reserveWithdrawal(pool, owner, "blocked-cancel-regression", "7", "0x" + "b".repeat(40));
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [owner]);
+  const results = await Promise.all(Array.from({ length: 8 }, () => cancelWithdrawal(pool, owner, request.id)));
+  assert.equal(new Set(results.map(String)).size, 1);
+  const { rows: [state] } = await pool.query(
+    "SELECT status,release_id,cancelled_by_reviewer FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.deepEqual(state, { status: "cancelled", release_id: results[0], cancelled_by_reviewer: null });
+  const balances = await getWalletBalances(pool, owner);
+  assert.equal(formatUsdt(balances.AVAILABLE), "20.00000000");
+  assert.equal(formatUsdt(balances.WITHDRAWAL_HOLD), "0.00000000");
+  const { rows: [posted] } = await pool.query(
+    "SELECT count(*)::int AS count FROM ledger_transactions WHERE transaction_type = 'sim-withdraw-release' AND reference_id = $1 AND status = 'posted'", [String(request.id)]
+  );
+  assert.equal(posted.count, 1);
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
+
+test("two authorized synthetic reviewers release a blocked customer's hold exactly once", { skip: !enabled }, async () => {
+  const { reserveWithdrawal, cancelAsSimulationReviewer } = await import("../test-support/simulated-withdrawal.js");
+  const customer = await createSimulationWallet(19003);
+  const reviewers = [await createSimulationWallet(19004), await createSimulationWallet(19005)];
+  const { rows: [available] } = await pool.query(
+    "SELECT id FROM ledger_accounts WHERE user_id = $1 AND account_type = 'AVAILABLE'", [customer]
+  );
+  await seedAvailableBalance(available.id, "20");
+  const request = await reserveWithdrawal(pool, customer, "dual-review-regression", "8", "0x" + "c".repeat(40));
+  await pool.query("INSERT INTO simulation_reviewers (user_id,active) VALUES ($1,true),($2,true)", reviewers);
+  await pool.query("UPDATE users SET status = 'blocked' WHERE id = $1", [customer]);
+  const results = await Promise.all(reviewers.map(id => cancelAsSimulationReviewer(pool, id, request.id)));
+  assert.equal(String(results[0]), String(results[1]));
+  const { rows: [state] } = await pool.query(
+    "SELECT status,release_id,cancelled_by_reviewer FROM simulation_withdrawals WHERE id = $1", [request.id]
+  );
+  assert.equal(state.status, "cancelled");
+  assert.equal(String(state.release_id), String(results[0]));
+  assert.ok(reviewers.map(String).includes(String(state.cancelled_by_reviewer)));
+  await pool.query("UPDATE simulation_reviewers SET active = false WHERE user_id = $1", [state.cancelled_by_reviewer]);
+  await assert.rejects(cancelAsSimulationReviewer(pool, state.cancelled_by_reviewer, request.id), /Unauthorized simulation reviewer/);
+  assert.deepEqual((await pool.query(
+    "SELECT status,release_id,cancelled_by_reviewer FROM simulation_withdrawals WHERE id = $1", [request.id]
+  )).rows, [state]);
+  const balances = await getWalletBalances(pool, customer);
+  assert.equal(formatUsdt(balances.AVAILABLE), "20.00000000");
+  assert.equal(formatUsdt(balances.WITHDRAWAL_HOLD), "0.00000000");
+  const { rows: [posted] } = await pool.query(
+    "SELECT count(*)::int AS count FROM ledger_transactions WHERE transaction_type = 'sim-withdraw-release' AND reference_id = $1 AND status = 'posted'", [String(request.id)]
+  );
+  assert.equal(posted.count, 1);
+  assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
+});
