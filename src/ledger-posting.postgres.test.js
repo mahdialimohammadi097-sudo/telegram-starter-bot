@@ -2658,3 +2658,41 @@ test("a suppressed simulated withdrawal release cannot detach a journal from req
   assert.equal(await cancelWithdrawal(pool,owner,request.id),released);
   assert.equal((await displayedBalances(owner))[0],"25.00000000");
 });
+
+test("suppressed payout confirmation rolls back the journal and retains the original pending receipt", {skip:!enabled},async()=>{
+  const {reserveWithdrawal,submitSimulatedWithdrawal,confirmTestnetWithdrawal,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const {createHash}=await import("node:crypto");
+  const sample=JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json",import.meta.url),"utf8"));
+  const owner=await createSimulationWallet(19503);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"1");
+  const request=await reserveWithdrawal(pool,owner,"payout-transition-fault","1",sample.expected.recipient);
+  const payload=Buffer.from("synthetic-payout-transition-fault:"+request.id);
+  const hash="0x"+createHash("sha256").update(payload).digest("hex");
+  sample.expected.txHash=hash;
+  sample.observation.receipt.transactionHash=hash;
+  for(const log of sample.observation.receipt.logs)log.transactionHash=hash;
+  let sends=0;
+  await submitSimulatedWithdrawal(pool,request.id,hash,async()=>{sends++;},payload);
+  const treasury={sender:"0x03e37a3686a553735dd9737a060e4a2c6c018ace",accountId:simulationClearing};
+  const confirm=()=>confirmTestnetWithdrawal(pool,request.id,sample.observation,sample.expected,treasury);
+  const readState=async()=>(await pool.query("SELECT status, submitted_hash, payout_id, payout_event, simulation_payload FROM simulation_withdrawals WHERE id=$1",[request.id])).rows[0];
+  const before=await readState();
+  assert.equal(before.status,"pending_receipt");
+  assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"1.00000000");
+  await pool.query(`CREATE FUNCTION test_skip_payout() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+    CREATE TRIGGER test_skip_payout BEFORE UPDATE ON simulation_withdrawals FOR EACH ROW
+    WHEN (NEW.status='paid') EXECUTE FUNCTION test_skip_payout()`);
+  try{
+    await assert.rejects(confirm(),/payout transition unconfirmed/);
+    assert.deepEqual(await readState(),before);
+    assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-payout:"+request.id])).rowCount,0);
+    assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"1.00000000");
+    await assert.rejects(cancelWithdrawal(pool,owner,request.id),/cannot be cancelled/);
+  }finally{await pool.query("DROP TRIGGER test_skip_payout ON simulation_withdrawals; DROP FUNCTION test_skip_payout()");}
+  const journal=await confirm();
+  assert.equal(await confirm(),journal);
+  assert.equal((await readState()).status,"paid");
+  assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"0.00000000");
+  assert.equal(sends,1);
+});
