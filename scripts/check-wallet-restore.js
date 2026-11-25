@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { createHash } from "node:crypto";
+import { auditLedgerIntegrity } from "../src/ledger-integrity-audit.js";
+import { reconcileSimulatedLiabilities } from "../test-support/reconcile-simulated-liabilities.js";
+import { findSettlementDiscrepancies } from "../test-support/reconcile-simulated-settlements.js";
 import { openSimulatedInvestment, settleSimulatedInvestment } from "../test-support/simulated-investment.js";
 import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import { postLedgerTransaction } from "../src/ledger-posting.js";
@@ -18,7 +21,41 @@ assert.ok(isDisposablePostgresTarget(process.env.DATABASE_URL, "profino_test"), 
 const url = new URL(process.env.DATABASE_URL);
 url.pathname = "/" + database;
 const pool = new pg.Pool({ connectionString: url.href });
+async function verifyAccounting() {
+  const integrity=await auditLedgerIntegrity(pool);
+  assert.equal(integrity.clean,true,JSON.stringify(integrity.counts));
+  const liabilities=await reconcileSimulatedLiabilities(pool);
+  assert.equal(liabilities.clean,true,JSON.stringify(liabilities.counts));
+  const {rows}=await pool.query("SELECT id,account_code FROM ledger_accounts WHERE account_code IN ('drill-reserve','drill-fee')");
+  const accounts=Object.fromEntries(rows.map(row=>[row.account_code,row.id]));
+  assert.equal(rows.length,2);
+  assert.deepEqual(await findSettlementDiscrepancies(pool,accounts["drill-reserve"],accounts["drill-fee"]),[]);
+  return {integrity:integrity.counts,liabilities:liabilities.counts};
+}
+// All five known fixture sequences must remain attached to their original
+// columns, and their next generated values must not collide with restored IDs.
+async function sequenceSnapshot() {
+  const result={};
+  for(const table of ["ledger_accounts","ledger_transactions","ledger_entries","simulation_investments","simulation_withdrawals"]){
+    const expected=table+"_id_seq";
+    const {rows:[binding]}=await pool.query("SELECT pg_get_serial_sequence($1,'id') AS name",["public."+table]);
+    assert.equal(binding.name,"public."+expected);
+    const {rows:[state]}=await pool.query("SELECT last_value::text AS last_value,is_called FROM public."+expected);
+    const {rows:[max]}=await pool.query("SELECT max(id)::text AS maximum FROM public."+table);
+    assert.equal(state.is_called,true);
+    assert.ok(BigInt(state.last_value)>=BigInt(max.maximum));
+    const {rows:[config]}=await pool.query(
+      "SELECT increment_by::text,cycle FROM pg_catalog.pg_sequences WHERE schemaname='public' AND sequencename=$1",[expected]);
+    assert.deepEqual(config,{increment_by:"1",cycle:false});
+    result[table]={...state,...config};
+  }
+  return result;
+}
 try {
+  const {rows:[identity]}=await pool.query("SELECT current_database() AS name,current_schema() AS schema,current_setting('server_version_num') AS version");
+  assert.equal(identity.name,database);
+  assert.equal(identity.schema,"public");
+  assert.match(identity.version,/^17[0-9]{4}$/);
   if (mode === "seed") {
     await pool.query(await readFile(new URL("../test/fixtures/ledger-contract.sql", import.meta.url), "utf8"));
     await createSimulationWithdrawalTables(pool);
@@ -99,7 +136,9 @@ try {
     const {rows:[row]}=await pool.query("SELECT count(*)::text AS count, coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb)::text AS body FROM "+table+" t");
     snapshot[table]={count:row.count,sha256:createHash("sha256").update(row.body).digest("hex")};
   }
-  console.log(JSON.stringify({ requests, balances, receipt, second, snapshot }));
+  const accounting=await verifyAccounting();
+  const sequences=await sequenceSnapshot();
+  console.log(JSON.stringify({ requests, balances, receipt, second, snapshot, accounting, sequences }));
   if (mode === "verify") {
     const posted = "SELECT id FROM ledger_transactions WHERE idempotency_key = 'drill-deposit'";
     await assert.rejects(
@@ -155,7 +194,9 @@ try {
     assert.equal(formatUsdt(final.INVESTED),"0.00000000");
     assert.equal(formatUsdt(final.WITHDRAWAL_HOLD),"0.00000000");
     assert.deepEqual(await findWithdrawalDiscrepancies(pool),[]);
-    console.error("Restored active investment and pending synthetic payout replay verified.");
+    await verifyAccounting();
+    await sequenceSnapshot();
+    console.error("Restored active investment and pending synthetic payout replay verified; sequence and accounting checks passed.");
   }
 } finally {
   await pool.end();
