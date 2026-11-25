@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
+import {inspectHistoricalWalletSnapshot as inspect} from "./deposit-historical-wallet-db-inspection.js";
 import {isDisposablePostgresTarget} from "../test-support/disposable-postgres-target.js";
 
 const url=process.env.CATALOG_REHEARSAL_URL;
@@ -16,7 +17,7 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
  const prefix='"'+schema+'".';
  const table=prefix+"deposit_address_ownership_history";
  const address="0x"+"a".repeat(40),other="0x"+"b".repeat(40);
- const pool=new pg.Pool({connectionString:url,max:1,connectionTimeoutMillis:5000});
+ const pool=new pg.Pool({connectionString:url,max:2,connectionTimeoutMillis:5000});
  const client=await pool.connect();
  try{
   // Extension provisioning is test-only, separate from the reviewed migration.
@@ -57,6 +58,15 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   await assert.rejects(insert(1,12,address,"150","180"),{code:"23P01"});
   await insert(2,12,address,"200","300");
   await insert(2,12,address,"300","400");
+  // Exercise the real read-only inspector against the actual reviewed DDL,
+  // using a separately checked-out connection, not a hand-built mock table.
+  const input={schema,walletAddress:address,eventBlockNumber:"199",expectedUserId:"11"};
+  const expected={recordConsistent:true,independentHistoricalProof:false,financialActivationReady:false,realDepositsEnabled:false};
+  assert.deepEqual(await inspect(pool,input),expected);
+  assert.deepEqual(await inspect(pool,{...input,eventBlockNumber:"200",expectedUserId:"12"}),expected);
+  await assert.rejects(inspect(pool,{...input,eventBlockNumber:"200"}),/identity mismatch/);
+  await assert.rejects(inspect(pool,{...input,eventBlockNumber:"400"}),/Missing or ambiguous/);
+  await assert.rejects(inspect(pool,{...input,eventBlockNumber:"99"}),/Missing or ambiguous/);
   await assert.rejects(insert(2,12,address,"400",null),{code:"23502"});
   // Distinct start isolates the exclusion constraint from the unique start constraint.
   await assert.rejects(insert(1,11,address,"310","400"),{code:"23P01"});
