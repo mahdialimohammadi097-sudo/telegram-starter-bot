@@ -14,6 +14,29 @@ async function postMovement(client, request, operation, debit, credit) {
   });
 }
 
+// Only certify a terminal replay if its original immutable journal matches.
+// Never post a missing terminal journal or silently adopt a detached journal.
+async function verifyMovementIdentity(client, request, operation, pointer, replay) {
+  const type = "sim-withdraw-" + operation;
+  const key = type + ":" + request.id;
+  const prior = await client.query(
+    `SELECT id, status, transaction_type, reference_id, idempotency_key
+     FROM ledger_transactions
+     WHERE idempotency_key = $1 OR (transaction_type = $2 AND reference_id = $3)
+     ORDER BY id FOR UPDATE`, [key, type, String(request.id)]
+  );
+  if (replay) {
+    const j = prior.rows[0];
+    if (pointer == null || prior.rowCount !== 1 || j.status !== "posted" ||
+        j.transaction_type !== type || j.reference_id !== String(request.id) ||
+        j.idempotency_key !== key || String(j.id) !== String(pointer)) {
+      throw new Error("Withdrawal journal mismatch; reconciliation required");
+    }
+  } else if (pointer != null || prior.rowCount !== 0) {
+    throw new Error("Detached withdrawal journal; reconciliation required");
+  }
+}
+
 export async function reserveWithdrawal(pool, userId, key, amount, destination = null) {
   if (typeof key !== "string" || !key.trim()) throw new Error("Missing request key");
   if (toUsdtUnitsExact(amount) <= 0n) throw new Error("Withdrawal must be positive");
@@ -26,13 +49,22 @@ export async function reserveWithdrawal(pool, userId, key, amount, destination =
     const owner = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!owner.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
-      "SELECT id, amount, status, destination FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
+      "SELECT id, amount, status, destination, available_id, held_id FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2 FOR UPDATE", [userId, key]
     );
     if (prior.rowCount) {
       if (formatUsdt(prior.rows[0].amount) !== normalized) throw new Error("Request amount mismatch");
-      const { destination: saved, ...request } = prior.rows[0];
-      if (saved !== destination) throw new Error("Withdrawal destination mismatch");
-      return request;
+      const request = prior.rows[0];
+      if (request.destination !== destination) throw new Error("Withdrawal destination mismatch");
+      const type = "sim-withdraw-reserve";
+      const original = await client.query(
+        `SELECT id FROM ledger_transactions WHERE transaction_type = $1 AND reference_id = $2
+         AND idempotency_key = $3 AND status = 'posted' FOR UPDATE`,
+        [type, String(request.id), type + ":" + request.id]
+      );
+      await verifyMovementIdentity(client, request, "reserve", original.rows[0]?.id, true);
+      const journal = await postMovement(client, request, "reserve", request.available_id, request.held_id);
+      if (!journal.idempotent || journal.transactionId !== String(original.rows[0].id)) throw new Error("Withdrawal reservation replay mismatch");
+      return { id: request.id, amount: request.amount, status: request.status };
     }
     // First-use setup shares the reservation transaction so a failed hold leaves no account behind.
     await client.query(
@@ -49,7 +81,9 @@ export async function reserveWithdrawal(pool, userId, key, amount, destination =
     );
     if (!result.rowCount) throw new Error("Incomplete withdrawal wallet");
     const request = result.rows[0];
-    await postMovement(client, request, "reserve", request.available_id, request.held_id);
+    await verifyMovementIdentity(client, request, "reserve", null, false);
+    const journal = await postMovement(client, request, "reserve", request.available_id, request.held_id);
+    if (journal.idempotent) throw new Error("Detached withdrawal reservation; reconciliation required");
     return { id: request.id, amount: request.amount, status: request.status };
   });
 }
@@ -60,18 +94,25 @@ export async function cancelWithdrawal(pool, userId, id) {
       "SELECT * FROM simulation_withdrawals WHERE id = $1 AND user_id = $2 FOR UPDATE", [id, userId]
     );
     if (!request) throw new Error("Unknown withdrawal");
-    if (request.status === "cancelled") return request.release_id;
-    if (request.status !== "reserved") throw new Error("Withdrawal cannot be cancelled");
     return releaseReservation(client, request, null);
   });
 }
 
 async function releaseReservation(client, request, reviewerId) {
+  const replay = request.status === "cancelled";
+  if (!replay && request.status !== "reserved") throw new Error("Withdrawal cannot be cancelled");
+  await verifyMovementIdentity(client, request, "release", request.release_id, replay);
   const journal = await postMovement(client, request, "release", request.held_id, request.available_id);
-  await client.query(
-    "UPDATE simulation_withdrawals SET status = 'cancelled', release_id = $2, cancelled_by_reviewer = $3 WHERE id = $1",
+  if (replay) {
+    if (!journal.idempotent || journal.transactionId !== String(request.release_id)) throw new Error("Withdrawal release replay mismatch");
+    return journal.transactionId;
+  }
+  if (journal.idempotent) throw new Error("Detached withdrawal journal; reconciliation required");
+  const updated = await client.query(
+    "UPDATE simulation_withdrawals SET status = 'cancelled', release_id = $2, cancelled_by_reviewer = $3 WHERE id = $1 AND status = 'reserved' AND release_id IS NULL",
     [request.id, journal.transactionId, reviewerId]
   );
+  if (updated.rowCount !== 1) throw new Error("Withdrawal release transition unconfirmed");
   return journal.transactionId;
 }
 
@@ -91,8 +132,6 @@ async function releaseAsReviewer(client, reviewerId, id) {
     "SELECT * FROM simulation_withdrawals WHERE id = $1 FOR UPDATE", [id]
   );
   if (!request) throw new Error("Unknown withdrawal");
-  if (request.status === "cancelled") return request.release_id;
-  if (request.status !== "reserved") throw new Error("Withdrawal cannot be cancelled");
   return releaseReservation(client, request, reviewerId);
 }
 
@@ -219,20 +258,25 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
       sender: treasury.sender, recipient: request.destination, amount: request.amount
     });
     if (request.submitted_hash && request.submitted_hash !== expected.txHash.toLowerCase()) throw new Error("Withdrawal transaction mismatch");
-    if (request.status === "paid") {
-      if (request.payout_event !== event || request.clearing_id !== String(treasury.accountId)) throw new Error("Payout mismatch");
-      return request.payout_id;
-    }
+    const replay = request.status === "paid";
+    if (replay && (request.payout_event !== event || String(request.clearing_id) !== String(treasury.accountId))) throw new Error("Payout mismatch");
+    await verifyMovementIdentity(client, request, "payout", request.payout_id, replay);
     const clearing = await client.query(
       "SELECT id FROM ledger_accounts WHERE id = $1 AND account_type = 'CLEARING' AND currency = 'USDT' AND user_id IS NULL FOR SHARE",
       [treasury.accountId]
     );
     if (!clearing.rowCount) throw new Error("Invalid payout clearing account");
     const journal = await postMovement(client, request, "payout", request.held_id, treasury.accountId);
-    await client.query(
-      "UPDATE simulation_withdrawals SET status = 'paid', payout_event = $2, payout_id = $3, clearing_id = $4, submitted_hash = $5 WHERE id = $1",
+    if (replay) {
+      if (!journal.idempotent || journal.transactionId !== String(request.payout_id)) throw new Error("Withdrawal payout replay mismatch");
+      return journal.transactionId;
+    }
+    if (journal.idempotent) throw new Error("Detached withdrawal journal; reconciliation required");
+    const updated = await client.query(
+      "UPDATE simulation_withdrawals SET status = 'paid', payout_event = $2, payout_id = $3, clearing_id = $4, submitted_hash = $5 WHERE id = $1 AND status = 'pending_receipt' AND payout_id IS NULL AND submitted_hash = $5",
       [id, event, journal.transactionId, treasury.accountId, expected.txHash.toLowerCase()]
     );
+    if (updated.rowCount !== 1) throw new Error("Withdrawal payout transition unconfirmed");
     return journal.transactionId;
   });
 }

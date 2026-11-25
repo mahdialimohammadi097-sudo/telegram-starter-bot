@@ -7,11 +7,18 @@ const depositAddress = "0x" + "b".repeat(40);
 const evidence = { tokenContract, depositAddress, chainId: "56",
   eventKey: "bsc:56:0x" + "c".repeat(64) + ":0", ledgerAmount: "10.00000000" };
 const row = { user_id: "123", wallet_address: depositAddress, active: true };
-function mock(rows) {
+function mock(rows, overrides = {}) {
   const calls = [];
   return { calls, async query(sql, params) {
     calls.push({sql, params});
-    return { rows: sql.includes("current_setting(") ? [{marker:"active"}] : rows };
+    if (sql.startsWith("SET LOCAL")) return {command:"SET"};
+    if (sql.includes("deposit_owner_tx', true")) return {rows:[{marker:overrides.marker ?? "active"}]};
+    if (sql.includes("current_setting('row_security')")) return {rows:[{row_security:overrides.visibility ?? "off",lock_timeout:overrides.timeout ?? "2s"}]};
+    if (sql.startsWith("LOCK TABLE")) {
+      if(overrides.lockError) throw overrides.lockError;
+      return {command:overrides.lockCommand ?? "LOCK"};
+    }
+    return {rows,rowCount:overrides.rowCount ?? rows.length};
   }};
 }
 const resolve = createCatalogDepositOwnerResolver({tokenContract});
@@ -19,11 +26,11 @@ test("valid owner and lock before lookup", async () => {
   const client = mock([row]);
   const result = await resolve(client, evidence);
   assert.equal(requireUniqueDepositOwner(evidence, result).userId, "123");
-  assert.match(client.calls[3].sql, /SHARE ROW EXCLUSIVE/);
-  assert.deepEqual(client.calls[4].params, [depositAddress]);
+  assert.match(client.calls[5].sql, /SHARE ROW EXCLUSIVE/);
+  assert.deepEqual(client.calls[6].params, [depositAddress]);
 });
 test("reject unknown chain or token before database access", async () => {
-  for (const change of [{chainId:"1"}, {tokenContract:depositAddress}, {depositAddress:"bad"}]) {
+  for (const change of [{chainId:"1"}, {tokenContract:depositAddress}, {depositAddress:"bad"}, {depositAddress:"0x"+"0".repeat(40)}]) {
     const client = mock([]);
     await assert.rejects(resolve(client, {...evidence,...change}));
     assert.equal(client.calls.length, 0);
@@ -36,14 +43,13 @@ test("reject missing, ambiguous and inactive assignments", async () => {
   }
 });
 test("lock failure propagates without ownership lookup", async () => {
-  let count = 0;
-  const client = { async query(sql) { if (++count === 4) throw new Error("lock timeout"); return {rows: sql.includes("current_setting(") ? [{marker:"active"}] : []}; } };
+  const client = mock([], {lockError:new Error("lock timeout")});
   await assert.rejects(resolve(client,evidence), /lock timeout/);
-  assert.equal(count,4);
+  assert.equal(client.calls.length,6);
 });
 
 test("reject invalid trusted token configuration", () => {
-  for (const value of [undefined, "", "USDT", "0x123", null]) {
+  for (const value of [undefined, "", "USDT", "0x123", null, "0x"+"0".repeat(40)]) {
     assert.throws(() => createCatalogDepositOwnerResolver({tokenContract:value}), TypeError);
   }
 });
@@ -53,11 +59,25 @@ test("normalize address and contract case while retaining owner attribution", as
     tokenContract:tokenContract.toUpperCase().replace("0X","0x")};
   const owners = await resolve(client,upperEvidence);
   assert.equal(requireUniqueDepositOwner(upperEvidence,owners).userId,"123");
-  assert.deepEqual(client.calls[4].params,[depositAddress]);
+  assert.deepEqual(client.calls[6].params,[depositAddress]);
 });
 test("fail closed if transaction boundary is absent", async () => {
-  const calls=[];
-  const client={async query(sql){calls.push(sql);return {rows:sql.includes("current_setting(")?[{marker:""}]:[]};}};
+  const client=mock([], {marker:""});
   await assert.rejects(resolve(client,evidence), /Explicit database transaction required/);
-  assert.equal(calls.length,2);
+  assert.equal(client.calls.length,2);
+});
+
+
+test("refuse unconfirmed ownership visibility and lock limits before lookup",async()=>{
+ for(const overrides of [{visibility:"on"},{timeout:"0"}]){
+  const client=mock([row],overrides);
+  await assert.rejects(resolve(client,evidence),/visibility or lock limit unconfirmed/);
+  assert.equal(client.calls.length,5);
+ }
+ const client=mock([row],{lockCommand:"SELECT"});
+ await assert.rejects(resolve(client,evidence),/lock unconfirmed/);
+ assert.equal(client.calls.length,6);
+});
+test("refuse incomplete ownership row count",async()=>{
+ await assert.rejects(resolve(mock([row],{rowCount:2}),evidence),/Incomplete deposit ownership result/);
 });

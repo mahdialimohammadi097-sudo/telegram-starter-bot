@@ -1,5 +1,6 @@
 import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 import { auditDepositSchema } from "./deposit-schema-audit.js";
+import { inspectHistoricalGuardInventory } from "./admin-schema-audit.js";
 
 const predicates = new Set([
   "((status = 'active'::text) AND (assignment_type = 'deposit'::text))",
@@ -20,15 +21,17 @@ export async function auditLegacyDepositAssignments(pool, { schema = "public" } 
   return runReadOnlyDepositAudit(pool, client => inspectLegacyAssignments(client, schema));
 }
 
-// Both inspections share one bounded transaction; neither can report readiness alone.
+// All three inspections share one bounded read-only transaction.
 export async function auditCombinedDepositPreflight(pool, { schema = "public" } = {}) {
   validateSchema(schema);
   return runReadOnlyDepositAudit(pool, async client => {
     const assignments = await inspectLegacyAssignments(client, schema);
     const catalog = await auditDepositSchema(client, { schema });
+    const historicalBasicGuardsPresent = await inspectHistoricalGuardInventory(client, schema);
     return Object.freeze({
-      ready: catalog.ready === true && assignments.ready === true,
-      scope: "catalog-and-legacy-assignment-only",
+      ready: catalog.ready === true && assignments.ready === true && historicalBasicGuardsPresent,
+      scope: "catalog-legacy-assignment-and-basic-historical-guards-only",
+      historicalBasicGuardsPresent,
       catalog,
       assignments,
       realDepositsEnabled: false

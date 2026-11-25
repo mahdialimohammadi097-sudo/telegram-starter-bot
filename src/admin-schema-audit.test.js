@@ -25,6 +25,7 @@ test("read-only schema audit reports missing evidence without accessing user row
  },release:()=>{}};
  const result=await inspectDepositSchemaReadOnly({connect:async()=>withConfirmedControl(client)});
  assert.equal(result.structuralReady,false);
+ assert.equal(result.historicalBasicGuardsPresent,false);
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
  assert.ok(result.outstandingSecurityGates.includes("independent-historical-ownership-proof"));
@@ -68,7 +69,9 @@ test("legacy column and index inventory alone cannot certify structural readines
  assert.equal(result.structuralReady,false);
  assert.ok(result.missing.includes("users.status"));
  assert.ok(result.catalogIncompatible.includes("ledger_entries.account_id:foreign_key"));
- assert.equal(result.outstandingSecurityGates.length,4);
+ assert.equal(result.outstandingSecurityGates.length,5);
+ assert.equal(result.historicalBasicGuardsPresent,false);
+ assert.ok(result.outstandingSecurityGates.includes('historical-schema-definition-and-effective-privilege-review'));
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
 });
@@ -177,7 +180,7 @@ test("read-only type audit includes users table in catalog scope",async()=>{
  assert.equal(report.financialActivationReady,false);
 });
 
-test("read-only audit rejects bigint chain IDs against reviewed integer schema",async()=>{
+test("read-only audit accepts bigint chain IDs under reviewed migration contract",async()=>{
  const client={query:async(sql)=>{
   if(sql.includes("information_schema.columns"))return {rows:[
    {table_name:"users",column_name:"id",data_type:"bigint"},
@@ -189,8 +192,8 @@ test("read-only audit rejects bigint chain IDs against reviewed integer schema",
   return {rows:[]};
  },release:()=>{}};
  const result=await inspectDepositSchemaReadOnly({connect:async()=>withConfirmedControl(client)});
- assert.ok(result.incompatibleTypes.some(x=>x.column==="wallets.chain_id"&&x.expected==="integer"&&x.observed==="bigint"));
- assert.equal(result.migrationTypeCompatible,false);
+ assert.ok(!result.incompatibleTypes.some(x=>x.column==="wallets.chain_id"));
+ assert.equal(result.migrationTypeCompatible,true);
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
 });
@@ -277,6 +280,25 @@ for(const scenario of ["begin","set","read-only","isolation","statement-timeout"
   if(!["completion","failure-rollback"].includes(scenario))assert.ok(!queries.some(sql=>sql.includes("information_schema.columns")));
  });
 }
+
+test("read-only audit rejects noninteger chain ID types",async()=>{
+ for(const data_type of ["text","numeric","smallint",undefined]){
+  const client={query:async(sql)=>{
+   if(sql.includes("information_schema.columns"))return {rows:[
+    {table_name:"users",column_name:"id",data_type:"bigint"},
+    {table_name:"wallets",column_name:"id",data_type:"bigint"},
+    ...(data_type===undefined?[]:[{table_name:"wallets",column_name:"chain_id",data_type}]),
+    {table_name:"user_wallet_assignments",column_name:"user_id",data_type:"bigint"},
+    {table_name:"user_wallet_assignments",column_name:"wallet_id",data_type:"bigint"}
+   ]};
+   return {rows:[]};
+  },release:()=>{}};
+  const report=await inspectDepositSchemaReadOnly({connect:async()=>withConfirmedControl(client)});
+  assert.equal(report.migrationTypeCompatible,false);
+  assert.ok(report.incompatibleTypes.some(x=>x.column==="wallets.chain_id"&&x.expected==="integer or bigint"));
+  assert.equal(report.financialActivationReady,false);
+ }
+});
 
 
 test("startup schema report rejects non-SQLSTATE diagnostic text",async()=>{

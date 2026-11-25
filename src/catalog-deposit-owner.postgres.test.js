@@ -2,6 +2,7 @@ import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
+import {randomUUID} from "node:crypto";
 import { createCatalogDepositOwnerResolver } from "./catalog-deposit-owner.js";
 import { requireUniqueDepositOwner } from "./deposit-owner-guard.js";
 const url = process.env.CATALOG_REHEARSAL_URL;
@@ -10,6 +11,8 @@ test("catalog locks prevent concurrent assignment writes", {skip: !isDisposableP
   assert.ok(["localhost","127.0.0.1"].includes(parsed.hostname));
   assert.equal(parsed.pathname,"/catalog_rehearsal");
   const pool = new pg.Pool({connectionString:url});
+  const role = "catalog_visibility_"+randomUUID().replaceAll("-","");
+  let roleCreated=false;
   const a = await pool.connect();
   const b = await pool.connect();
   const address = "0x" + "b".repeat(40);
@@ -116,9 +119,32 @@ test("catalog locks prevent concurrent assignment writes", {skip: !isDisposableP
     const wrongNetwork = await resolve(a,evidence);
     assert.throws(() => requireUniqueDepositOwner(evidence,wrongNetwork));
     await a.query("ROLLBACK");
+    // A restricted role sees only one assignment without the resolver's RLS guard.
+    await a.query("UPDATE public.wallets SET network='BEP20' WHERE id=1");
+    await a.query("INSERT INTO public.user_wallet_assignments VALUES (2,2,1,'active',NULL,'deposit')");
+    await a.query('CREATE ROLE "'+role+'" NOLOGIN NOSUPERUSER NOBYPASSRLS');roleCreated=true;
+    await a.query('GRANT USAGE ON SCHEMA public TO "'+role+'"');
+    await a.query('GRANT SELECT, UPDATE ON public.users, public.wallets, public.user_wallet_assignments TO "'+role+'"');
+    await a.query("ALTER TABLE public.user_wallet_assignments ENABLE ROW LEVEL SECURITY");
+    await a.query('CREATE POLICY rehearsal_visible_owner ON public.user_wallet_assignments FOR SELECT TO "'+role+'" USING (user_id=1)');
+    await a.query('SET ROLE "'+role+'"');
+    assert.equal((await a.query("SELECT count(*)::int AS n FROM public.user_wallet_assignments")).rows[0].n,1);
+    await a.query("BEGIN");
+    await assert.rejects(resolve(a,evidence),{code:"42501"});
+    await a.query("ROLLBACK");
+    assert.equal((await a.query("SELECT current_setting('row_security') AS setting")).rows[0].setting,"on");
+    await a.query("RESET ROLE");
   } finally {
     await a.query("ROLLBACK").catch(()=>{});
     await b.query("ROLLBACK").catch(()=>{});
-    a.release(); b.release(); await pool.end();
+    try {
+      await a.query("RESET ROLE");
+      if(roleCreated){
+        await a.query("DROP POLICY IF EXISTS rehearsal_visible_owner ON public.user_wallet_assignments");
+        await a.query("ALTER TABLE public.user_wallet_assignments DISABLE ROW LEVEL SECURITY");
+        await a.query('DROP OWNED BY "'+role+'"');
+        await a.query('DROP ROLE "'+role+'"');
+      }
+    } finally {a.release(); b.release(); await pool.end();}
   }
 });

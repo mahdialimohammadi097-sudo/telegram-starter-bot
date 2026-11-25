@@ -70,3 +70,19 @@ test("deposit owner identity cannot be rounded or exceed PostgreSQL bigint", () 
   }
   assert.equal(requireUniqueDepositOwner(evidence, [{ ...owner, userId: "9223372036854775807" }]).userId, "9223372036854775807");
 });
+
+
+test("attribution rejects noncanonical event identity even with a matching owner",()=>{
+ const max=((1n<<256n)-1n).toString();
+ const prefix="bsc:56:0x"+"b".repeat(64)+":";
+ for(const eventKey of [prefix+"00",prefix+"01",prefix+"-1",prefix+"1.0",prefix+"1\n",prefix+(1n<<256n).toString(),prefix+"9".repeat(100),"bsc:56:0x"+"B".repeat(64)+":0"]){
+  assert.throws(()=>requireUniqueDepositOwner({...evidence,eventKey},[owner]),/Invalid deposit attribution evidence/);
+ }
+ for(const index of ["0","1",max]) assert.equal(requireUniqueDepositOwner({...evidence,eventKey:prefix+index},[owner]).eventKey,prefix+index);
+});
+
+test("zero destination and token addresses cannot establish ownership",()=>{
+ const zero="0x"+"0".repeat(40);
+ assert.throws(()=>requireUniqueDepositOwner({...evidence,depositAddress:zero},[{...owner,address:zero}]),/Invalid deposit attribution evidence/);
+ assert.throws(()=>requireUniqueDepositOwner({...evidence,tokenContract:zero},[{...owner,tokenContract:zero}]),/Invalid deposit attribution evidence/);
+});

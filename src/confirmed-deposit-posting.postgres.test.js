@@ -29,7 +29,9 @@ before(async () => {
   await admin.query(`CREATE SCHEMA "${schema}"`);
   pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, options: `-c search_path=${schema}` });
   await pool.query(await readFile(new URL('../test/fixtures/ledger-contract.sql', import.meta.url), 'utf8'));
-  await pool.query(await readFile(new URL('../test/fixtures/verified-deposit-evidence.sql', import.meta.url), 'utf8'));
+  // Exercise the reviewed append-only evidence migration rather than the older fixture.
+  const evidenceMigration = await readFile(new URL('../migrations/20261121_verified_deposit_evidence.sql', import.meta.url), 'utf8');
+  await pool.query(evidenceMigration.replaceAll('public.', `"${schema}".`));
   // Explicitly synthetic ownership contract; not a FadeHost schema claim.
   await pool.query(`INSERT INTO users VALUES (1), (2);
     INSERT INTO ledger_accounts (id, user_id, account_code, account_type) VALUES
@@ -61,8 +63,9 @@ test('concurrent confirmed receipts credit exactly once and replay after commit'
   assert.equal((await post(1)).idempotent, true);
   const balances = await pool.query(`SELECT account_id, sum(CASE WHEN entry_type='credit' THEN amount ELSE -amount END)::text AS balance
     FROM ledger_entries GROUP BY account_id ORDER BY account_id`);
-  assert.equal(Number(balances.rows[0].balance), -25);
-  assert.equal(Number(balances.rows[1].balance), 25);
+  assert.deepEqual(balances.rows.map(row=>row.balance), ['-25.000000000000000000','25.000000000000000000']);
+  const receiptRows=await pool.query('SELECT event_key,amount_base_units::text AS amount FROM verified_deposit_evidence');
+  assert.deepEqual(receiptRows.rows,[{event_key:evidence(1).eventKey,amount:evidence(1).amountBaseUnits}]);
   assert.equal(await count(), 1);
 });
 test('changed amount and reassigned owner cannot replay an already credited event', { skip: !enabled }, async () => {
@@ -311,4 +314,34 @@ test('missing evidence table prevents a journal even when ownership and receipt 
   }
   assert.equal((await rehearseVerifiedBep20Deposit(args)).idempotent,false);
   assert.equal(await count(),before+1);
+});
+
+test('posting blocks legacy alternate keys, conflicting references and duplicate event replays', {skip:!enabled}, async()=>{
+  // Event 1 already has two journals from the deliberate audit corruption fixture.
+  const beforeDuplicate=await count();
+  await assert.rejects(post(1),/Conflicting deposit journal identity/);
+  assert.equal(await count(),beforeDuplicate);
+  for(const [n, reference, key, type, status] of [
+    [201,evidence(201).eventKey,'legacy-alternate-201','confirmed-deposit','posted'],
+    [202,'wrong-reference','confirmed-deposit:'+evidence(202).eventKey,'confirmed-deposit','posted'],
+    [203,evidence(203).eventKey,'confirmed-deposit:'+evidence(203).eventKey,'other-credit','posted'],
+    [204,evidence(204).eventKey,'confirmed-deposit:'+evidence(204).eventKey,'confirmed-deposit','pending']
+  ]){
+    // Fault fixtures deliberately bypass the domain service; no external transfer.
+    if(status==='posted'){
+      await postLedgerTransaction({pool,transactionType:type,referenceId:reference,idempotencyKey:key,
+        entries:[{account_id:'1',entry_type:'debit',amount:'25',currency:'USDT'},
+                 {account_id:'2',entry_type:'credit',amount:'25',currency:'USDT'}]});
+    }else{
+      await pool.query("INSERT INTO ledger_transactions(transaction_type,reference_id,idempotency_key,status) VALUES ($1,$2,$3,$4)",[type,reference,key,status]);
+    }
+    const before=await count();
+    let touched=false;
+    await assert.rejects(post(n,{persistVerifiedEvidence:async()=>{touched=true;}}),/Conflicting deposit journal identity/);
+    assert.equal(touched,false);
+    assert.equal(await count(),before);
+  }
+  const fresh=await post(205);
+  assert.equal(fresh.idempotent,false);
+  assert.equal((await post(205)).transactionId,fresh.transactionId);
 });
