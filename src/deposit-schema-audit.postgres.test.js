@@ -57,8 +57,8 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
      entry_type text NOT NULL,amount numeric(36,18) NOT NULL,currency text NOT NULL);
    CREATE TABLE ${prefix}verified_deposit_evidence(
      event_key text PRIMARY KEY,block_hash text NOT NULL,
-     block_number numeric(78,0) NOT NULL,token_contract text NOT NULL,
-     deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL,
+     block_number numeric(78,0) NOT NULL CHECK (block_number >= 0) CHECK (block_number <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric),token_contract text NOT NULL,
+     deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL CHECK (amount_base_units > 0) CHECK (amount_base_units <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric),
      CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'),
      CONSTRAINT verified_deposit_evidence_block_hash_format CHECK (block_hash ~ '^0x[0-9a-f]{64}$'),
      CONSTRAINT verified_deposit_evidence_token_format CHECK (token_contract ~ '^0x[0-9a-f]{40}$'),
@@ -68,6 +68,17 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   assert.deepEqual(result.missing,[]);
   assert.deepEqual(result.incompatible,[]);
   assert.equal(result.ready,true);
+  // Removing an actual bound must make the read-only report fail closed.
+  const numericConstraints=await pool.query(`SELECT c.conname,pg_catalog.pg_get_expr(c.conbin,c.conrelid,false) AS expression
+    FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace
+    WHERE n.nspname=$1 AND t.relname='verified_deposit_evidence' AND c.contype='c'`,[schema]);
+  const upper=numericConstraints.rows.find(r=>r.expression.startsWith("(amount_base_units <="));
+  assert.ok(upper);
+  assert.match(upper.conname,/^[a-z_0-9]+$/);
+  await q('ALTER TABLE '+prefix+'verified_deposit_evidence DROP CONSTRAINT "'+upper.conname+'"');
+  const missingBound=await auditDepositSchema(pool,{schema});
+  assert.equal(missingBound.ready,false);
+  assert.ok(missingBound.incompatible.includes("verified_deposit_evidence.amount_uint256:check_constraint"));
   // A validated but ineffective constraint with the expected name is not evidence.
   await q('ALTER TABLE '+prefix+'verified_deposit_evidence DROP CONSTRAINT verified_deposit_evidence_event_key_format');
   await q('ALTER TABLE '+prefix+'verified_deposit_evidence ADD CONSTRAINT verified_deposit_evidence_event_key_format CHECK (true)');

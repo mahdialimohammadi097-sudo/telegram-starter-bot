@@ -72,3 +72,17 @@ test("schema audit refuses named but ineffective checks and nullable idempotency
  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
  assert.ok(report.incompatible.includes("ledger_transactions.idempotency_key:not_null"));
 });
+
+
+test("schema audit rejects missing or unvalidated finite numeric evidence bounds",async()=>{
+ const expressions=[
+  "(block_number >= (0)::numeric)",
+  "(amount_base_units > (0)::numeric)",
+  "(block_number <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric)",
+  "(amount_base_units <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric)"
+ ];
+ const report=await auditDepositSchema({query:async sql=>({rows:sql.includes("c.contype='c'")?
+  expressions.map((expression,i)=>({expression,validated:i!==3})):[]})});
+ assert.ok(report.incompatible.includes("verified_deposit_evidence.amount_uint256:check_constraint"));
+ assert.ok(!report.incompatible.includes("verified_deposit_evidence.block_number_uint256:check_constraint"));
+});

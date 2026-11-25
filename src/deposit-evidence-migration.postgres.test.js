@@ -74,6 +74,20 @@ test("staged evidence migration creates constrained table and is idempotent",asy
       VALUES (${values.join(",")})`), error=>error.code==="23514");
     await client.query("ROLLBACK TO SAVEPOINT " + label);
   }
+  // NaN compares greater than finite numerics in PostgreSQL. A lower bound
+  // alone is insufficient. Test both numeric fields and the uint256 ceiling.
+  for(const [block,amount] of [
+    ["NaN","1"],["1","NaN"],["115792089237316195423570985008687907853269984665640564039457584007913129639936","1"],
+    ["1","115792089237316195423570985008687907853269984665640564039457584007913129639936"],["1","-1"]
+  ]) {
+    await client.query("SAVEPOINT invalid_numeric");
+    await assert.rejects(client.query(`INSERT INTO public.verified_deposit_evidence
+     (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
+     VALUES ('bsc:56:0x' || repeat('f',64) || ':5','0x' || repeat('a',64),$1::numeric,
+       '0x' || repeat('b',40),'0x' || repeat('c',40),$2::numeric)`,[block,amount]),
+      error=>error.code==="23514");
+    await client.query("ROLLBACK TO SAVEPOINT invalid_numeric");
+  }
   // The production candidate must not modify ledger or user balances.
   const columns=await client.query(`SELECT column_name,data_type,numeric_precision,numeric_scale,is_nullable
     FROM information_schema.columns

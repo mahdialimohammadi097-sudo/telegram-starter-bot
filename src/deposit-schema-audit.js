@@ -72,7 +72,9 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
    if(col && (col.data_type!==expected ||
      (numericContract[name] && (
        Number(col.numeric_scale)!==numericContract[name].scale ||
-       Number(col.numeric_precision)<numericContract[name].precision ||
+       (name.startsWith("verified_deposit_evidence.")
+         ? Number(col.numeric_precision)!==numericContract[name].precision
+         : Number(col.numeric_precision)<numericContract[name].precision) ||
        col.numeric_precision==null))))
      incompatible.push(name);
  }
@@ -140,6 +142,19 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  for(const [name,expression] of Object.entries(expectedChecks)) {
   const matching=checks.rows.filter(r=>r.conname===name);
   if(matching.length!==1 || matching[0].validated!==true || matching[0].expression!==expression)
+   incompatible.push("verified_deposit_evidence."+name+":check_constraint");
+ }
+ // Named or unnamed numeric checks must have the exact reviewed expression.
+ // A precision-78 numeric can represent NaN and values outside uint256.
+ // A finite upper bound excludes both; positive-only CHECK does not.
+ const numericChecks={
+  block_number_nonnegative:"(block_number >= (0)::numeric)",
+  amount_positive:"(amount_base_units > (0)::numeric)",
+  block_number_uint256:"(block_number <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric)",
+  amount_uint256:"(amount_base_units <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric)"
+ };
+ for(const [name,expression] of Object.entries(numericChecks)) {
+  if(!checks.rows.some(r=>r.validated===true && r.expression===expression))
    incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  }
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,

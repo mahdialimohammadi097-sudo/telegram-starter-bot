@@ -20,3 +20,6 @@ in the limited audit; this does not establish overall deposit readiness.
 This migration creates evidence storage only. It does not install a blockchain
 observer, prove receipt ownership, credit balances or enable financial activity.
 Do not merge PR #80 merely to apply the migration.
+
+### Numeric catalog review
+The isolated candidate now requires exactly numeric(78,0) for both evidence numeric fields, validated lower bounds and validated uint256 upper bounds. PostgreSQL NaN passes ordinary positive checks but fails the finite upper bound. Existing tables are not repaired by this candidate; any missing or differently rendered constraint must be reviewed and separately migrated. No production DDL approval or financial activation is implied.
