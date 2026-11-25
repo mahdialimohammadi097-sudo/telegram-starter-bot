@@ -9,6 +9,7 @@ const sessions = new Map();
 
 function isAdminCallback(ctx) {
   return ctx.from?.id === ADMIN_ID &&
+    (ctx.chat == null || (ctx.chat.type === "private" && ctx.chat.id === ADMIN_ID)) &&
     ctx.callbackQuery?.message?.chat?.type === "private" &&
     ctx.callbackQuery?.message?.chat?.id === ADMIN_ID;
 }
