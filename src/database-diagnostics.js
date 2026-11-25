@@ -1,3 +1,5 @@
+import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
+
 const CORE_TABLES = [
   "admin_audit_logs",
   "admin_preferences",
@@ -27,84 +29,88 @@ const CORE_TABLES = [
 ];
 
 export async function inspectCoreSchema(pool) {
-  const [inventoryResult, tablesResult, columnsResult, constraintsResult, indexesResult, triggersResult, ledgerValidatorResult] = await Promise.all([
-    pool.query(
+  return runReadOnlyDepositAudit(pool, inspectCoreSchemaSnapshot);
+}
+
+async function inspectCoreSchemaSnapshot(client) {
+  const [inventoryResult, tablesResult, columnsResult, constraintsResult, indexesResult, triggersResult, ledgerValidatorResult] = [
+    await client.query(
       `SELECT table_name
        FROM information_schema.tables
-       WHERE table_schema = current_schema()
+       WHERE table_schema = pg_catalog.current_schema()
          AND table_type = 'BASE TABLE'
        ORDER BY table_name`
     ),
-    pool.query(
+    await client.query(
       `SELECT table_name
        FROM information_schema.tables
-       WHERE table_schema = current_schema()
+       WHERE table_schema = pg_catalog.current_schema()
          AND table_type = 'BASE TABLE'
          AND table_name = ANY($1::text[])
        ORDER BY table_name`,
       [CORE_TABLES]
     ),
-    pool.query(
+    await client.query(
       `SELECT table_name, column_name, data_type, udt_name,
               is_nullable, column_default, numeric_precision, numeric_scale,
               is_identity, identity_generation, is_generated, generation_expression
        FROM information_schema.columns
-       WHERE table_schema = current_schema()
+       WHERE table_schema = pg_catalog.current_schema()
          AND table_name = ANY($1::text[])
        ORDER BY table_name, ordinal_position`,
       [CORE_TABLES]
     ),
-    pool.query(
+    await client.query(
       `SELECT c.relname AS table_name, con.conname AS constraint_name,
               con.contype AS constraint_type,
               con.condeferrable AS is_deferrable,
               con.condeferred AS initially_deferred,
               con.convalidated AS is_validated,
               con.connoinherit AS no_inherit,
-              pg_get_constraintdef(con.oid) AS definition
-       FROM pg_constraint con
-       JOIN pg_class c ON c.oid = con.conrelid
-       JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE n.nspname = current_schema()
+              pg_catalog.pg_get_constraintdef(con.oid) AS definition
+       FROM pg_catalog.pg_constraint con
+       JOIN pg_catalog.pg_class c ON c.oid = con.conrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = pg_catalog.current_schema()
          AND c.relname = ANY($1::text[])
        ORDER BY c.relname, con.conname`,
       [CORE_TABLES]
     ),
-    pool.query(
+    await client.query(
       `SELECT tablename AS table_name, indexname, indexdef
-       FROM pg_indexes
-       WHERE schemaname = current_schema()
+       FROM pg_catalog.pg_indexes
+       WHERE schemaname = pg_catalog.current_schema()
        ORDER BY tablename, indexname`
     ),
-    pool.query(
+    await client.query(
       `SELECT c.relname AS table_name,
               t.tgname AS trigger_name,
               t.tgenabled AS enabled_state,
               t.tgdeferrable AS is_deferrable,
               t.tginitdeferred AS initially_deferred,
-              pg_get_triggerdef(t.oid, true) AS trigger_definition,
+              pg_catalog.pg_get_triggerdef(t.oid, true) AS trigger_definition,
               p.proname AS function_name,
-              pg_get_functiondef(p.oid) AS function_definition
-       FROM pg_trigger t
-       JOIN pg_class c ON c.oid = t.tgrelid
-       JOIN pg_namespace n ON n.oid = c.relnamespace
-       JOIN pg_proc p ON p.oid = t.tgfoid
-       WHERE n.nspname = current_schema()
+              pg_catalog.pg_get_functiondef(p.oid) AS function_definition
+       FROM pg_catalog.pg_trigger t
+       JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
+       WHERE n.nspname = pg_catalog.current_schema()
          AND NOT t.tgisinternal
        ORDER BY c.relname, t.tgname`
     ),
-    pool.query(
+    await client.query(
       `SELECT p.proname AS function_name,
-              pg_get_function_identity_arguments(p.oid) AS arguments,
-              pg_get_functiondef(p.oid) AS function_definition
-       FROM pg_proc p
-       JOIN pg_namespace n ON n.oid = p.pronamespace
-       WHERE n.nspname = current_schema()
+              pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
+              pg_catalog.pg_get_functiondef(p.oid) AS function_definition
+       FROM pg_catalog.pg_proc p
+       JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = pg_catalog.current_schema()
          AND p.proname = 'validate_posted_transaction'
          AND p.prokind = 'f'
        ORDER BY p.oid`
     )
-  ]);
+  ];
 
   return {
     expectedTables: CORE_TABLES,
