@@ -1,3 +1,4 @@
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { auditDepositSchema } from "./deposit-schema-audit.js";
 import { rollbackTransaction } from "./transaction-safety.js";
 // Basic historical guard inventory, not proof of function bodies, interval semantics,
@@ -135,9 +136,7 @@ export async function deliverAdminSchemaAudit({pool,sendMessage,adminId,logCode=
   await sendMessage(adminId,"PROFINO read-only deposit schema audit\n"+JSON.stringify(audit));
   return true;
  } catch(error) {
-  const code=typeof error?.code==="string" && /^[A-Z0-9]{2,8}$/.test(error.code)
-   ? error.code : "UNKNOWN";
-  try { logCode(code); } catch {}
+  try { logCode(safeDiagnosticCode(error)); } catch {}
   return false;
  }
 }
