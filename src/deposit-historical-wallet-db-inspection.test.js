@@ -35,7 +35,9 @@ test("snapshot rejects missing, ambiguous, orphaned and mismatched history",asyn
 test("invalid inputs cannot access the database",async()=>{
  const pool={connect:async()=>assert.fail("unexpected connection")};
  for(const patch of [{schema:"public;DROP TABLE wallets"},{walletAddress:"0x"+"0".repeat(40)},
-  {expectedUserId:"9223372036854775808"},{eventBlockNumber:"1".repeat(79)}]){
+  {expectedUserId:"9223372036854775808"},{eventBlockNumber:"1".repeat(79)},
+  {eventBlockNumber:(1n<<256n).toString()},{eventBlockNumber:"01"},{eventBlockNumber:"-1"},
+  {eventBlockNumber:"1.5"},{eventBlockNumber:150},{eventBlockNumber:"NaN"}]){
   await assert.rejects(inspect(pool,{...input,...patch}),/Invalid/);
  }
 });
