@@ -91,6 +91,15 @@ BEGIN
 END
 $guard$`);
   assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
+  // Unreviewed rewrite rules can suppress writes before the mutation guard runs.
+  await q(`CREATE RULE suppress_evidence_insert AS ON INSERT TO ${prefix}verified_deposit_evidence DO INSTEAD NOTHING`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
+  await q(`DROP RULE suppress_evidence_insert ON ${prefix}verified_deposit_evidence`);
+  assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
+  await q(`CREATE RULE suppress_evidence_update AS ON UPDATE TO ${prefix}verified_deposit_evidence DO INSTEAD NOTHING`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
+  await q(`DROP RULE suppress_evidence_update ON ${prefix}verified_deposit_evidence`);
+  assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
   const withoutIndex=await auditCombinedDepositPreflight(pool,{schema});
   assert.equal(withoutIndex.catalog.ready,true);
   assert.equal(withoutIndex.assignments.ready,false);
