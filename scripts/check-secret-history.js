@@ -12,7 +12,9 @@ const reviewedFixtures = new Set(["f04a8f81da0db05769ceef9698eecfcf008f1f6a","c8
   // PR #182: reviewed diagnostic test blob; its sole synthetic database URL is unchanged from 832a6cc0.
   "1fe4f4a88d2e04d1b7da6871d8a611d56a3f8b1f",
   // PR #185: historical catalog CI blob has exactly two reviewed localhost disposable DSNs.
-  "8ea44466ed4b9db07f9a12baea16b814f612d0c8"]);
+  "8ea44466ed4b9db07f9a12baea16b814f612d0c8",
+  // Exact reviewed standalone CI workflow blob; sole database URL points to its ephemeral localhost service.
+  "b26955a6da747ee12d9c2d05058faac58a19fc75"]);
 const maxBuffer = 32 * 1024 * 1024;
 
 export function scanHistory(cwd = process.cwd()) {
