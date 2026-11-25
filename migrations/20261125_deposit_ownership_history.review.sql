@@ -88,9 +88,15 @@ BEGIN
     OR wallet_record.is_platform_controlled IS DISTINCT FROM true THEN
   RAISE EXCEPTION 'Historical deposit wallet identity mismatch';
  END IF;
+ -- Internal FK triggers can be suppressed in replica mode. Check the user
+ -- in the ALWAYS identity trigger as well, without bypassing row security.
+ PERFORM 1 FROM public.users WHERE id=NEW.user_id FOR KEY SHARE;
+ IF NOT FOUND THEN
+  RAISE EXCEPTION 'Historical deposit user identity mismatch' USING ERRCODE='23503';
+ END IF;
  RETURN NEW;
 END
-$$;
+$;
 CREATE TRIGGER deposit_ownership_wallet_identity
 BEFORE INSERT ON public.deposit_address_ownership_history
 FOR EACH ROW EXECUTE FUNCTION public.validate_deposit_ownership_wallet_identity();
