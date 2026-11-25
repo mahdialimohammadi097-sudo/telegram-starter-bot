@@ -13,7 +13,7 @@ CREATE TABLE public.deposit_address_ownership_history (
  chain_id integer NOT NULL CHECK (chain_id = 56),
  wallet_address text NOT NULL CHECK (wallet_address ~ '^0x[0-9a-f]{40}$' AND wallet_address <> '0x' || repeat('0',40)),
  start_block numeric(78,0) NOT NULL CHECK (start_block >= 0 AND start_block <= 115792089237316195423570985008687907853269984665640564039457584007913129639935::numeric),
- end_block numeric(78,0) CHECK (end_block IS NULL OR (end_block > start_block AND end_block <= 115792089237316195423570985008687907853269984665640564039457584007913129639935::numeric)),
+ end_block numeric(78,0) NOT NULL CHECK (end_block > start_block AND end_block <= 115792089237316195423570985008687907853269984665640564039457584007913129639935::numeric),
  recorded_at timestamptz NOT NULL DEFAULT now(),
  verified_source text NOT NULL CHECK (length(trim(verified_source)) >= 8),
  CONSTRAINT ownership_wallet_unique_start UNIQUE (wallet_id,start_block),
@@ -64,5 +64,7 @@ ALTER TABLE public.deposit_address_ownership_history ENABLE ALWAYS TRIGGER depos
 ALTER TABLE public.deposit_address_ownership_history ENABLE ALWAYS TRIGGER deposit_ownership_history_immutable;
 ALTER TABLE public.deposit_address_ownership_history ENABLE ALWAYS TRIGGER deposit_ownership_history_no_truncate;
 COMMIT;
--- Open-ended immutable intervals cannot later be closed by UPDATE.
--- Lifecycle, independently verified provenance and privileged bypass remain review gates.
+-- Only finite, independently established historical intervals are candidates for insertion.
+-- Consecutive verified intervals can be appended without editing earlier history.
+-- Never infer coverage beyond an observed boundary or from a current assignment.
+-- This is not an active-assignment lifecycle; provenance, privileges and live integration remain gates.
