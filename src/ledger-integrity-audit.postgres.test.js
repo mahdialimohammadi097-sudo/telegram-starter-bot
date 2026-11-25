@@ -35,6 +35,8 @@ test("PostgreSQL integrity audit detects internal anomalies even when posted jou
         (3,1,'credit',1,'USDC'),(3,2,'debit',1,'USDC'),
         (4,1,'debit',0.000000001,'USDT'),(4,2,'credit',0.000000001,'USDT');
       UPDATE ledger_transactions SET status='posted' WHERE id IN (2,3,4);
+    `);
+    await fixture.query(`
       ALTER TABLE ledger_transactions DISABLE TRIGGER ledger_transactions_balance_check;
       INSERT INTO ledger_transactions(id,transaction_type,idempotency_key,status)
         VALUES (6,'empty','empty-key','posted');
