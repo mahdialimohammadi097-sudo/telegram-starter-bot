@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanHistory } from "./check-secret-history.js";
@@ -43,4 +43,33 @@ test("history scan rejects shallow repositories rather than claiming complete co
   git(origin, "commit", "--allow-empty", "-m", "second");
   git(root, "clone", "--depth=1", "file://" + origin, shallow);
   assert.throws(() => scanHistory(shallow), /Full history required/);
+});
+
+
+test("reviewed historical CI blob does not exempt modified credentials", t => {
+  const cwd=mkdtempSync(join(tmpdir(),"profino-reviewed-history-"));
+  t.after(()=>rmSync(cwd,{recursive:true,force:true}));
+  const git=(...args)=>execFileSync("git",args,{cwd,stdio:"pipe"});
+  git("init");
+  git("config","user.name","Fixture");
+  git("config","user.email","fixture@example.invalid");
+  const original=readFileSync(new URL("../.github/workflows/standalone-security-postgres.yml",import.meta.url),"utf8");
+  const filename=join(cwd,"fixture.yml");
+  writeFileSync(filename,original);
+  git("add",".");
+  git("commit","-m","reviewed local CI fixture");
+  assert.equal(git("rev-parse","HEAD:fixture.yml").toString().trim(),"b26955a6da747ee12d9c2d05058faac58a19fc75");
+  const reviewed=scanHistory(cwd);
+  assert.equal(reviewed.findings.size,0);
+  assert.equal(reviewed.reviewed,1);
+  const modified=original.replace("@localhost:5432/profino_security_rehearsal","@remote.invalid:5432/profino_security_rehearsal");
+  assert.notEqual(modified,original);
+  writeFileSync(filename,modified);
+  git("add",".");
+  git("commit","-m","unreviewed synthetic remote fixture");
+  const result=scanHistory(cwd);
+  assert.equal(result.reviewed,1);
+  assert.equal(result.findings.get("database-url"),1);
+  assert.equal(result.findingObjects.length,1);
+  assert.notEqual(result.findingObjects[0].oid,"b26955a6da747ee12d9c2d05058faac58a19fc75");
 });
