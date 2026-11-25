@@ -33,15 +33,43 @@ async function countOpeningDiscrepancies(client){
 }
 export async function auditSimulatedWorkflow(pool,{schema,clearingId,reserveId,feeId}){
   if(typeof schema!=="string" || !/^workflow_review_[a-f0-9]{32}$/.test(schema)) throw new Error("Disposable workflow review schema required");
+  const ids=[clearingId,reserveId,feeId].map(value=>{
+    if(typeof value==="number"&&!Number.isSafeInteger(value)) throw new Error("Invalid workflow reference account");
+    const id=String(value??"");
+    if(!/^[1-9][0-9]{0,18}$/.test(id)||BigInt(id)>9223372036854775807n) throw new Error("Invalid workflow reference account");
+    return id;
+  });
+  if(new Set(ids).size!==3) throw new Error("Distinct workflow reference accounts required");
   return runReadOnlyDepositAudit(pool,async client=>{
     const security=await client.query("SET LOCAL row_security=off");
     const path=await client.query('SET LOCAL search_path=pg_catalog,"'+schema+'",pg_temp');
     if(security.command!=="SET"||path.command!=="SET") throw new Error("Workflow audit settings unconfirmed");
     const {rows:[state]}=await client.query("SELECT current_setting('row_security') AS security,current_schemas(false) AS schemas");
     if(state.security!=="off" || !state.schemas.includes(schema)) throw new Error("Workflow audit schema unavailable");
-    const deposit=await findSimulationDiscrepancies(client,clearingId);
+    // Refuse missing relations, views, or fallback relations in pg_temp.
+    // The read-only helpers deliberately resolve unqualified names in this fixture.
+    const tables=["ledger_accounts","ledger_transactions","ledger_entries",
+      "deposit_requests","simulation_investments","simulation_withdrawals"];
+    const relations=await client.query(`
+      SELECT x.name,n.nspname,c.relkind
+      FROM unnest($1::text[]) x(name)
+      LEFT JOIN pg_catalog.pg_class c ON c.oid=pg_catalog.to_regclass(x.name)
+      LEFT JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+    `,[tables]);
+    if(relations.rows?.length!==tables.length || relations.rows.some(row=>row.nspname!==schema||row.relkind!=="r")) {
+      throw new Error("Workflow audit requires complete fixture tables in the selected schema");
+    }
+    const accounts=await client.query(`
+      SELECT id::text AS id,account_type FROM ledger_accounts
+      WHERE id=ANY($1::bigint[]) AND currency='USDT' AND user_id IS NULL
+    `,[ids]);
+    const types=new Map(accounts.rows.map(row=>[row.id,row.account_type]));
+    if(accounts.rowCount!==3||types.get(ids[0])!=="CLEARING"||types.get(ids[1])!=="AVAILABLE"||types.get(ids[2])!=="CLEARING") {
+      throw new Error("Invalid workflow reference accounts");
+    }
+    const deposit=await findSimulationDiscrepancies(client,ids[0]);
     const opening=await countOpeningDiscrepancies(client);
-    const settlement=await findSettlementDiscrepancies(client,reserveId,feeId);
+    const settlement=await findSettlementDiscrepancies(client,ids[1],ids[2]);
     const withdrawal=await findWithdrawalDiscrepancies(client);
     const liabilities=await reconcileSimulatedLiabilities(client);
     const counts={deposits:String(deposit.length),openings:opening,settlements:String(settlement.length),

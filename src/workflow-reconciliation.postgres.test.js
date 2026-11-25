@@ -19,7 +19,7 @@ test("one read-only snapshot reconciles simulated deposit, investment and withdr
   let pool;
   try{
     await admin.query(`CREATE SCHEMA "${schema}"`);
-    pool=new pg.Pool({connectionString:process.env.DATABASE_URL,options:`-c search_path=${schema}`});
+    pool=new pg.Pool({connectionString:process.env.DATABASE_URL,options:`-c search_path=${schema}`,max:1});
     await pool.query(await readFile(new URL("../test/fixtures/ledger-contract.sql",import.meta.url),"utf8"));
     await pool.query(`ALTER TABLE users ADD COLUMN status text;
       INSERT INTO users(id,status) VALUES(1,'active');
@@ -86,6 +86,19 @@ test("one read-only snapshot reconciles simulated deposit, investment and withdr
     await pool.query("UPDATE simulation_withdrawals SET release_id=NULL WHERE id=$1",[w.id]);
     assert.equal((await inspect()).counts.withdrawals,"1");
     await pool.query("UPDATE simulation_withdrawals SET release_id=$2 WHERE id=$1",[w.id,release]);
+    await clean();
+    for(const overrides of [{reserveId:a.available},{feeId:a.clearing},{clearingId:"9223372036854775807"}]){
+      await assert.rejects(auditSimulatedWorkflow(pool,{schema,clearingId:a.clearing,reserveId:a.reserve,feeId:a.fee,...overrides}),/workflow reference account/i);
+    }
+    // A missing fixture table must not resolve to an empty temporary shadow.
+    await pool.query('CREATE TEMP TABLE deposit_requests (LIKE "'+schema+'".deposit_requests)');
+    await pool.query('ALTER TABLE "'+schema+'".deposit_requests RENAME TO hidden_deposit_requests');
+    try{
+      await assert.rejects(inspect(),/complete fixture tables/);
+    }finally{
+      await pool.query('ALTER TABLE "'+schema+'".hidden_deposit_requests RENAME TO deposit_requests');
+      await pool.query("DROP TABLE pg_temp.deposit_requests");
+    }
     await clean();
   }finally{
     if(pool)await pool.end();
