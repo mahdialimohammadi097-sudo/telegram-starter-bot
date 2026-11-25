@@ -1,4 +1,5 @@
 import pg from "pg";
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 
 const { Pool } = pg;
 
@@ -18,8 +19,7 @@ export const pool = new Pool({
 // the failed client automatically; handle the pool event to avoid a process crash.
 // Do not log raw error messages: they may include connection details.
 pool.on("error", (error) => {
-  const code = typeof error?.code === "string" && /^[A-Z0-9]{2,8}$/.test(error.code)
-    ? error.code : "UNKNOWN";
+  const code = safeDiagnosticCode(error);
   console.error("[database] idle PostgreSQL client disconnected", { code });
 });
 
