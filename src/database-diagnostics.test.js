@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatCoreSchema } from "./database-diagnostics.js";
+import { formatCoreSchema, inspectCoreSchema } from "./database-diagnostics.js";
+
+function diagnosticPool(query, calls=[], releases=[]){
+  return {async connect(){return {async query(sql,params){
+    calls.push(sql);
+    if(sql.startsWith("BEGIN "))return {command:"BEGIN"};
+    if(sql.startsWith("SET LOCAL "))return {command:"SET"};
+    if(sql.includes("pg_catalog.current_setting('transaction_read_only')")){
+      return {rows:[{read_only:"on",isolation:"repeatable read",statement_timeout:"10s",lock_timeout:"3s"}]};
+    }
+    if(sql==="COMMIT"||sql==="ROLLBACK")return {command:sql};
+    return query(sql,params);
+  },release(error){releases.push(error);}};}};
+}
 
 test("formats existing core tables with columns and constraints", () => {
   const messages = formatCoreSchema({
@@ -101,26 +114,48 @@ test("reports numeric precision, deferred constraints, and trigger enabled state
 });
 
 test("inspection includes the delegated ledger validator without executing it", async () => {
-  const { inspectCoreSchema } = await import("./database-diagnostics.js");
   const definition = "CREATE FUNCTION validate_posted_transaction(bigint) RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END; $$";
   const statements = [];
-  const snapshot = await inspectCoreSchema({
-    async query(sql) {
-      statements.push(sql);
+  const snapshot = await inspectCoreSchema(diagnosticPool(async sql => {
       if (sql.includes("p.proname = 'validate_posted_transaction'")) {
         return { rows: [{ function_name: "validate_posted_transaction", arguments: "p_transaction_id bigint", function_definition: definition }] };
       }
       return { rows: [] };
-    }
-  });
-  assert.ok(statements.every(sql => /^SELECT\b/.test(sql.trim())));
+  }, statements));
+  assert.match(statements[0], /BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY/);
+  assert.equal(statements.at(-1), "COMMIT");
+  assert.ok(statements.slice(3,-1).every(sql => /^SELECT\b/.test(sql.trim())));
   assert.ok(formatCoreSchema(snapshot).some(section =>
     section.includes("LEDGER VALIDATION FUNCTIONS") && section.includes(definition)));
 });
 
 test("reports a missing delegated validator explicitly", async () => {
-  const { inspectCoreSchema } = await import("./database-diagnostics.js");
-  const snapshot = await inspectCoreSchema({ async query() { return { rows: [] }; } });
+  const snapshot = await inspectCoreSchema(diagnosticPool(async()=>({rows:[]})));
   assert.ok(formatCoreSchema(snapshot).some(section =>
     section.includes("validate_posted_transaction: NOT FOUND")));
+});
+
+test("core diagnostics rollback and release after an inspection failure",async()=>{
+  const calls=[],releases=[];
+  const original=new Error("synthetic catalog error");
+  await assert.rejects(inspectCoreSchema(diagnosticPool(async()=>{throw original;},calls,releases)),error=>error===original);
+  assert.equal(calls.at(-1),"ROLLBACK");
+  assert.deepEqual(releases,[undefined]);
+  assert.ok(!calls.includes("COMMIT"));
+});
+
+test("core diagnostics never query metadata without confirmed read-only state",async()=>{
+  let released=false;
+  const calls=[];
+  const pool={async connect(){return {async query(sql){
+    calls.push(sql);
+    if(sql.startsWith("BEGIN "))return {command:"BEGIN"};
+    if(sql.startsWith("SET LOCAL "))return {command:"SET"};
+    if(sql.includes("current_setting"))return {rows:[{read_only:"off",isolation:"repeatable read",statement_timeout:"10s",lock_timeout:"3s"}]};
+    if(sql==="ROLLBACK")return {command:"ROLLBACK"};
+    assert.fail("unexpected catalog query");
+  },release(){released=true;}};}};
+  await assert.rejects(inspectCoreSchema(pool),/settings incompatible/);
+  assert.equal(calls.at(-1),"ROLLBACK");
+  assert.equal(released,true);
 });
