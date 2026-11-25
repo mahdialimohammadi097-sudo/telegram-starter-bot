@@ -81,10 +81,11 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import json, urllib.request
+          import json, urllib.request, urllib.error
           try:
               with urllib.request.urlopen("https://telegram-bot-d23e.fadehost.app/healthz",timeout=20) as response:
                   status=response.status
+                  print("Health HTTP status:",status)
                   state=json.loads(response.read(65536))
               expected={"database":"connected","telegram":"connected","telegramApi":"connected","telegramReceiver":"active"}
               for key,value in expected.items():
@@ -92,6 +93,11 @@ jobs:
               if status!=200 or state.get("ready") is not True or not all(state.get(k)==v for k,v in expected.items()):
                   raise ValueError()
               print("PASS: public readiness")
-          except Exception:
-              raise SystemExit("FAIL: public readiness not confirmed")
+          except urllib.error.HTTPError as error:
+              print("Health HTTP status:",error.code)
+              raise SystemExit("FAIL: public health HTTP error; body withheld")
+          except urllib.error.URLError:
+              raise SystemExit("FAIL: public health transport error; details withheld")
+          except (ValueError,TypeError,AttributeError):
+              raise SystemExit("FAIL: public readiness contract not satisfied; body withheld")
           PY
