@@ -1,3 +1,4 @@
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { InlineKeyboard } from "grammy";
 import { pool } from "./database.js";
 import { getAdminLanguage, adminText } from "./admin-language.js";
@@ -7,7 +8,7 @@ const PAGE_SIZE = 8;
 const restoreSessions = new Map();
 
 function isAdminPrivate(ctx) {
-  return ctx.from?.id === ADMIN_ID && ctx.chat?.type === "private";
+  return ctx.from?.id === ADMIN_ID && ctx.chat?.type === "private" && ctx.chat.id === ADMIN_ID;
 }
 
 function parseUtcDateTime(value) {
@@ -200,8 +201,8 @@ async function showDetails(ctx, postId, edit = false) {
 
 export function registerPostHistory(bot) {
   bot.command("posthistory", async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.reply(adminText(language, "Access denied.", "دسترسی غیرمجاز است."));
     const requestedStatus = ctx.match?.trim().toLowerCase() || "all";
     const validStatuses = ["all", "scheduled", "preview_sending", "preview_sent", "preview_unknown", "approved", "publishing", "publish_unknown", "published", "rejected", "cancelled", "failed"];
     if (!validStatuses.includes(requestedStatus)) {
@@ -209,54 +210,54 @@ export function registerPostHistory(bot) {
     }
     try { await showHistory(ctx, 0, requestedStatus); }
     catch (error) {
-      console.error("[post-history] list failed:", error);
+      console.error("[post-history] list failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load post history. Please try again.", "بارگذاری تاریخچه پست‌ها ممکن نشد. دوباره تلاش کنید."));
     }
   });
 
   bot.command("postdetails", async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.reply("Access denied.");
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.reply(adminText(language, "Access denied.", "دسترسی غیرمجاز است."));
     const postId = ctx.match?.trim();
     if (!/^\d+$/.test(postId || "")) return ctx.reply(adminText(language, "Usage: /postdetails <post_id>", "نحوه استفاده: /postdetails <post_id>"));
     try { await showDetails(ctx, postId); }
     catch (error) {
-      console.error("[post-history] details failed:", error);
+      console.error("[post-history] details failed:", safeDiagnosticCode(error));
       await ctx.reply(adminText(language, "Unable to load post details. Please try again.", "بارگذاری جزئیات پست ممکن نشد. دوباره تلاش کنید."));
     }
   });
 
   bot.callbackQuery(/^posthist_filter:(all|scheduled|preview_sent|published|rejected|cancelled)$/, async (ctx) => {
+    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
     const language = await getAdminLanguage(ctx);
-    if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: adminText(language, "Unauthorized.", "دسترسی غیرمجاز است."), show_alert: true });
     try {
       await ctx.answerCallbackQuery();
       await showHistory(ctx, 0, ctx.callbackQuery.data.split(":")[1], true);
     } catch (error) {
-      console.error("[post-history] filter failed:", error);
+      console.error("[post-history] filter failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to apply this filter.", "اعمال این فیلتر ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^posthist_page:(all|scheduled|preview_sent|published|rejected|cancelled):\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     const [, status, pageText] = ctx.callbackQuery.data.split(":");
     try {
       await ctx.answerCallbackQuery();
       await showHistory(ctx, Number(pageText), status, true);
     } catch (error) {
-      console.error("[post-history] pagination failed:", error);
+      console.error("[post-history] pagination failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load this page.", "بارگذاری این صفحه ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^posthist_detail:\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     try { await showDetails(ctx, ctx.callbackQuery.data.split(":")[1], true); }
     catch (error) {
-      console.error("[post-history] detail callback failed:", error);
+      console.error("[post-history] detail callback failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to load post details.", "بارگذاری جزئیات پست ممکن نشد."), show_alert: true });
     }
   });
@@ -277,8 +278,8 @@ export function registerPostHistory(bot) {
   });
 
   bot.callbackQuery(/^posthist_restore_confirm:\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     const postId = ctx.callbackQuery.data.split(":")[1];
     const session = restoreSessions.get(ADMIN_ID);
     if (!session || session.postId !== postId || !session.scheduledAt) {
@@ -296,14 +297,14 @@ export function registerPostHistory(bot) {
         adminText(language, "PROFINO — POST RESTORED\n\nPost: #" + postId + "\nTitle: " + result.rows[0].title + "\nNew schedule: " + formatUtc(result.rows[0].scheduled_at) + "\nStatus: SCHEDULED\n\nA new private preview will be sent at the scheduled time. Publication still requires your approval.", "پروفینو — پست بازگردانی شد\n\nپست: شماره " + postId + "\nعنوان: " + result.rows[0].title + "\nزمان جدید: " + formatUtc(result.rows[0].scheduled_at, language) + "\nوضعیت: زمان‌بندی‌شده\n\nدر زمان مقرر پیش‌نمایش خصوصی جدید ارسال می‌شود. انتشار همچنان به تأیید شما نیاز دارد.")
       );
     } catch (error) {
-      console.error("[post-history] restore failed:", error);
+      console.error("[post-history] restore failed:", safeDiagnosticCode(error));
       await ctx.answerCallbackQuery({ text: adminText(language, "Unable to restore post.", "بازگردانی پست ممکن نشد."), show_alert: true });
     }
   });
 
   bot.callbackQuery(/^posthist_restore_cancel:\d+$/, async (ctx) => {
-    const language = await getAdminLanguage(ctx);
     if (!isAdminPrivate(ctx)) return ctx.answerCallbackQuery({ text: "Unauthorized.", show_alert: true });
+    const language = await getAdminLanguage(ctx);
     restoreSessions.delete(ADMIN_ID);
     await ctx.answerCallbackQuery({ text: adminText(language, "Restore cancelled.", "بازگردانی لغو شد.") });
     await ctx.editMessageText(adminText(language, "Post restoration cancelled.", "عملیات بازگردانی پست لغو شد."));
