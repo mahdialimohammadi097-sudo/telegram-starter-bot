@@ -37,6 +37,17 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   await client.query("ROLLBACK");
   assert.equal((await client.query("SELECT pg_catalog.to_regclass($1) AS relation",[table])).rows[0].relation,null);
   await client.query("ALTER TABLE "+prefix+"wallets ALTER COLUMN chain_id TYPE bigint USING chain_id::bigint");
+  // Non-durable source tables and inherited rows are not a reviewed ownership source.
+  await client.query("ALTER TABLE "+prefix+"wallets SET UNLOGGED");
+  await assert.rejects(client.query(rehearsal),/source column prerequisites not confirmed/);
+  await client.query("ROLLBACK");
+  assert.equal((await client.query("SELECT pg_catalog.to_regclass($1) AS relation",[table])).rows[0].relation,null);
+  await client.query("ALTER TABLE "+prefix+"wallets SET LOGGED");
+  await client.query("CREATE TABLE "+prefix+"wallet_children () INHERITS ("+prefix+"wallets)");
+  await assert.rejects(client.query(rehearsal),/source column prerequisites not confirmed/);
+  await client.query("ROLLBACK");
+  assert.equal((await client.query("SELECT pg_catalog.to_regclass($1) AS relation",[table])).rows[0].relation,null);
+  await client.query("DROP TABLE "+prefix+"wallet_children");
   await client.query(rehearsal);
   const insert=(wallet,user,addr,start,end)=>client.query(
    "INSERT INTO "+table+"(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source) VALUES ($1,$2,56,$3,$4,$5,'disposable-review')",
