@@ -21,6 +21,8 @@ function placeholderDatabaseUrl(value) {
 // Exact values reviewed in these synthetic diagnostic tests and disposable CI only.
 // Neither a whole file nor a remote host is exempt from credential scanning.
 const reviewedFixtures = Object.freeze({
+  // Exact local ephemeral service in the standalone security matrix (reviewed blob b26955a).
+  ".github/workflows/standalone-security-postgres.yml": ["postgresql://" + "postgres:postgres@localhost:5432/profino_security_rehearsal"],
   // Existing test intentionally uses an unreachable localhost endpoint.
   "scripts/fadehost-schema-audit.test.js": ["postgresql://" + "secretuser:secretpass@127.0.0.1:1/private"],
   "src/admin-diagnostic-backport.test.js": ["postgresql://" + "fixture:fixture@127.0.0.1:1/diagnostic_fixture"],
