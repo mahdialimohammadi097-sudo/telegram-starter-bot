@@ -1,4 +1,5 @@
 import test from "node:test";
+import {inspectHistoricalGuardInventory} from "./admin-schema-audit.js";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import {readFile} from "node:fs/promises";
@@ -77,6 +78,17 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   await client.query(receiptSql,[eventKey,"0x"+"d".repeat(64),other,address]);
   await assert.rejects(client.query(receiptSql,[eventKey,"0x"+"d".repeat(64),other,address]),{code:"23505"});
   await assert.rejects(client.query("UPDATE "+evidenceTable+" SET block_number=200"),{code:"55000"});
+  // Basic catalog readiness must detect missing/disabled guards, even if all columns exist.
+  assert.equal(await inspectHistoricalGuardInventory(client,schema),true);
+  await client.query("ALTER TABLE "+table+" DISABLE TRIGGER deposit_ownership_history_immutable");
+  assert.equal(await inspectHistoricalGuardInventory(client,schema),false);
+  await client.query("ALTER TABLE "+table+" ENABLE ALWAYS TRIGGER deposit_ownership_history_immutable");
+  await client.query("BEGIN");
+  try {
+   await client.query("ALTER TABLE "+table+" DROP CONSTRAINT ownership_interval_no_overlap");
+   assert.equal(await inspectHistoricalGuardInventory(client,schema),false);
+  } finally { await client.query("ROLLBACK"); }
+  assert.equal(await inspectHistoricalGuardInventory(client,schema),true);
   const insert=(wallet,user,addr,start,end)=>client.query(
    "INSERT INTO "+table+"(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source) VALUES ($1,$2,56,$3,$4,$5,'disposable-review')",
    [wallet,user,addr,start,end]);
