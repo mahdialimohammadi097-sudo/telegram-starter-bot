@@ -7,6 +7,7 @@ import {resolveDatabaseTls} from "../src/database-tls-policy.js";
 import {safeDiagnosticCode} from "../src/diagnostic-safety.js";
 
 let pool;
+let idleConnectionFailed=false;
 let audit="deposit-schema";
 try {
  const args=process.argv.slice(2);
@@ -16,16 +17,18 @@ try {
  pool = new pg.Pool({connectionString:process.env.DATABASE_URL,max:1,
    connectionTimeoutMillis:10000,ssl:resolveDatabaseTls(),
    options:"-c default_transaction_read_only=on -c statement_timeout=10000"});
+ pool.on("error",()=>{idleConnectionFailed=true;});
  const result=audit==="combined-deposit-preflight"
    ? await auditCombinedDepositPreflight(pool)
    : await runReadOnlyDepositAudit(pool);
  // Do not publish a successful report before connection cleanup succeeds.
  await pool.end();
  pool=undefined;
- process.stdout.write(JSON.stringify({audit,...result})+"\n");
+ if(idleConnectionFailed) throw new Error("Audit idle connection failed");
+ process.stdout.write(JSON.stringify({audit,...result,financialActivationReady:false,realDepositsEnabled:false})+"\n");
  if(!result.ready) process.exitCode=2;
 } catch(error) {
- process.stderr.write(JSON.stringify({audit,ready:false,...(audit==="combined-deposit-preflight"?{realDepositsEnabled:false}:{}) ,
+ process.stderr.write(JSON.stringify({audit,ready:false,financialActivationReady:false,realDepositsEnabled:false,
    error:"Audit execution failed; inspect private server logs without sharing secrets",
    code:safeDiagnosticCode(error)})+"\n");
  process.exitCode=3;

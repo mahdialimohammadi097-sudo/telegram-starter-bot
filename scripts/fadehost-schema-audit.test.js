@@ -9,7 +9,8 @@ test("missing database connection fails safely without disclosing credentials",(
  assert.equal(result.status,3);
  assert.equal(result.stderr,"");
  assert.deepEqual(JSON.parse(result.stdout),{
-  audit:"fadehost-schema",ready:false,error:"DATABASE_URL_NOT_CONFIGURED"
+  audit:"fadehost-schema",ready:false,error:"DATABASE_URL_NOT_CONFIGURED",
+  financialActivationReady:false,realDepositsEnabled:false
  });
 });
 test("invalid private database endpoint emits sanitized failure only",()=>{
@@ -21,6 +22,8 @@ test("invalid private database endpoint emits sanitized failure only",()=>{
  const output=JSON.parse(result.stdout);
  assert.equal(output.ready,false);
  assert.equal(output.error,"READ_ONLY_AUDIT_FAILED");
+ assert.equal(output.financialActivationReady,false);
+ assert.equal(output.realDepositsEnabled,false);
 });
 
 test("conflicting TLS options fail closed and do not disclose the connection URL",()=>{
@@ -52,7 +55,7 @@ test("FadeHost schedule uses the full reviewed read-only catalog audit",()=>{
     throw new Error("Unexpected query");
    },release(){}
   });
-  pg.Pool.prototype.end=async()=>{};
+  pg.Pool.prototype.end=async function(){if(process.env.TEST_IDLE_FAILURE==="1")this.emit("error",new Error("synthetic-private-detail"));};
  `;
  const env={...process.env,DATABASE_URL:"postgresql://localhost/profino_test",PROFINO_DB_TLS_MODE:"disable"};
  delete env.PROFINO_DATABASE_TLS;
@@ -65,4 +68,9 @@ test("FadeHost schedule uses the full reviewed read-only catalog audit",()=>{
  assert.ok(output.missing.includes("unique:ledger_transactions.idempotency_key"));
  assert.ok(output.incompatible.includes("ledger_entries.account_id:foreign_key"));
  assert.ok(output.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_event_key_format:check_constraint"));
+ const failed=spawnSync(process.execPath,["--import","data:text/javascript,"+encodeURIComponent(preload),script.pathname],{env:{...env,TEST_IDLE_FAILURE:"1"},encoding:"utf8",timeout:10000});
+ assert.equal(failed.status,3);
+ assert.equal(failed.stderr,"");
+ assert.doesNotMatch(failed.stdout,/synthetic-private-detail/);
+ assert.deepEqual(JSON.parse(failed.stdout),{audit:"fadehost-schema",ready:false,error:"AUDIT_IDLE_CONNECTION_FAILED",financialActivationReady:false,realDepositsEnabled:false});
 });
