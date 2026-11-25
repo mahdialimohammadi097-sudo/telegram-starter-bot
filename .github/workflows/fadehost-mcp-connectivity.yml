@@ -75,6 +75,30 @@ jobs:
           if len(matches)!=1: raise SystemExit("FAIL: target service not uniquely identified")
           print("PASS: existing bot identified")
           print("Bot running:",matches[0].get("status")=="running")
+          bot_id=matches[0].get("id")
+          if not isinstance(bot_id,str) or not bot_id.startswith("bot_"):
+              raise SystemExit("FAIL: service identifier unavailable")
+          for method in ("list_app_deployments","list_app_schedules"):
+              if method not in names:
+                  print("Read-only access",method+": unavailable")
+                  continue
+              result=rpc("tools/call",{"name":method,"arguments":{"app":bot_id}},4 if method=="list_app_deployments" else 5)
+              print("Read-only access",method+": confirmed")
+              value=result.get("structuredContent")
+              if value is None:
+                  for item in result.get("content",[]):
+                      if isinstance(item,dict) and item.get("type")=="text":
+                          try: value=json.loads(item.get("text",""));break
+                          except (ValueError,TypeError): pass
+              if isinstance(value,dict):
+                  key="deployments" if method=="list_app_deployments" else "schedules"
+                  value=value.get(key)
+              if isinstance(value,list):
+                  print("Inventory count",method+":",len(value))
+                  if method=="list_app_schedules":
+                      print("Schema audit schedule present:",any(isinstance(v,dict) and v.get("command")=="node scripts/fadehost-schema-audit.js" for v in value))
+              else:
+                  print("Inventory structure",method+": unconfirmed")
           PY
       - name: Public readiness without raw response or credentials
         if: always()
