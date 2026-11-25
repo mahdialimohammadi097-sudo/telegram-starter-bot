@@ -136,6 +136,24 @@ test("staged evidence migration creates constrained table and refuses existing r
    amountBaseUnits:"1000000000000000000"};
   assert.deepEqual(await persistVerifiedDepositEvidence(client,evidence),{inserted:false,eventKey:evidence.eventKey});
   await assert.rejects(persistVerifiedDepositEvidence(client,{...evidence,blockHash:"0x"+"e".repeat(64)}),/Conflicting verified deposit evidence/);
+  // The evidence writer needs only INSERT/SELECT; do not require UPDATE
+  // permission simply to compare an already committed receipt.
+  const writer="evidence_writer_"+(await import("node:crypto")).randomUUID().replaceAll("-","");
+  await client.query("SAVEPOINT restricted_writer");
+  try{
+   await client.query('CREATE ROLE "'+writer+'" NOLOGIN NOSUPERUSER NOBYPASSRLS');
+   await client.query('GRANT USAGE ON SCHEMA public TO "'+writer+'"');
+   await client.query('GRANT SELECT, INSERT ON public.verified_deposit_evidence TO "'+writer+'"');
+   await client.query('SET LOCAL ROLE "'+writer+'"');
+   assert.equal((await client.query("SELECT pg_catalog.has_table_privilege(current_user,'public.verified_deposit_evidence','UPDATE') AS allowed")).rows[0].allowed,false);
+   assert.deepEqual(await persistVerifiedDepositEvidence(client,evidence),{inserted:false,eventKey:evidence.eventKey});
+   const newEvidence={...evidence,eventKey:"bsc:56:0x"+"c".repeat(64)+":9"};
+   assert.deepEqual(await persistVerifiedDepositEvidence(client,newEvidence),{inserted:true,eventKey:newEvidence.eventKey});
+   await assert.rejects(persistVerifiedDepositEvidence(client,{...newEvidence,amountBaseUnits:"2"}),/Conflicting verified deposit evidence/);
+  }finally{
+   await client.query("ROLLBACK TO SAVEPOINT restricted_writer");
+   await client.query("RELEASE SAVEPOINT restricted_writer");
+  }
   // ALWAYS must reject actual mutation attempts in replica mode, including no-op writes.
   for(const sql of [
    "UPDATE public.verified_deposit_evidence SET amount_base_units=2 WHERE false",
