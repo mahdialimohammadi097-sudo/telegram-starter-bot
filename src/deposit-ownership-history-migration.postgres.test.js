@@ -38,23 +38,25 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   await insert(1,11,address,"100","200");
   await assert.rejects(insert(2,12,address,"150","250"),{code:"23P01"});
   await assert.rejects(insert(1,12,address,"150","180"),{code:"23P01"});
-  await insert(2,12,address,"200",null);
+  await insert(2,12,address,"200","300");
+  await insert(2,12,address,"300","400");
+  await assert.rejects(insert(2,12,address,"400",null),{code:"23502"});
   await assert.rejects(insert(1,11,address,"300","400"),{code:"23P01"});
   await assert.rejects(insert(3,11,address,"1","2"),/identity mismatch/);
-  for(const [start,end] of [["NaN",null],[beyond,null],["-1",null],["1","NaN"],["1",beyond],["1","1"]]){
+  for(const [start,end] of [["NaN","2"],[beyond,max],["-1","2"],["1","NaN"],["1",beyond],["1","1"]]){
    await assert.rejects(insert(3,11,other,start,end),{code:"23514"});
   }
-  await insert(3,11,other,max,null);
+  await insert(3,11,other,(BigInt(max)-1n).toString(),max);
   await assert.rejects(client.query("UPDATE "+table+" SET user_id=12 WHERE wallet_id=1"),/immutable/);
   await assert.rejects(client.query("DELETE FROM "+table+" WHERE wallet_id=1"),/immutable/);
   await assert.rejects(client.query("TRUNCATE "+table),/immutable/);
-  assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,3);
+  assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,4);
   const triggers=await client.query("SELECT tgname,tgenabled FROM pg_catalog.pg_trigger WHERE tgrelid=$1::regclass AND NOT tgisinternal",[table]);
   assert.equal(triggers.rows.length,3);
   assert.ok(triggers.rows.every(r=>r.tgenabled==="A"));
   await assert.rejects(client.query(rehearsal),{code:"42P07"});
   await client.query("ROLLBACK");
-  assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,3);
+  assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,4);
  }finally{
   try{
    await client.query("ROLLBACK");
