@@ -75,6 +75,11 @@ jobs:
           if len(matches)!=1: raise SystemExit("FAIL: target service not uniquely identified")
           print("PASS: existing bot identified")
           print("Bot running:",matches[0].get("status")=="running")
+          for key in ("plan","tier","plan_name"):
+              v=matches[0].get(key)
+              if isinstance(v,str) and v.lower() in ("free","starter","pro","trial"):
+                  print("Service plan:",v.lower())
+          print("Service plan field recognized:",any(isinstance(matches[0].get(k),str) and matches[0][k].lower() in ("free","starter","pro","trial") for k in ("plan","tier","plan_name")))
           bot_id=matches[0].get("id")
           if not isinstance(bot_id,str) or not bot_id.startswith("bot_"):
               raise SystemExit("FAIL: service identifier unavailable")
@@ -95,6 +100,14 @@ jobs:
                   value=value.get(key)
               if isinstance(value,list):
                   print("Inventory count",method+":",len(value))
+                  if method=="list_app_deployments" and value:
+                      # Match only the known main revision; never expose deployment metadata.
+                      def revision_match(v):
+                          if isinstance(v,str): return v in ("e0d7509","e0d7509b43605493beb6a20485d5d17ce0ef8e16")
+                          if isinstance(v,dict): return any(revision_match(x) for x in v.values())
+                          if isinstance(v,list): return any(revision_match(x) for x in v)
+                          return False
+                      print("Known main revision in deployment inventory:",revision_match(value))
                   if method=="list_app_schedules":
                       print("Schema audit schedule present:",any(isinstance(v,dict) and v.get("command")=="node scripts/fadehost-schema-audit.js" for v in value))
               else:
@@ -136,6 +149,18 @@ jobs:
                   ("Syntax error marker","SyntaxError")):
                   print("Historical log",label+":",marker in logs)
           PY
+      - name: Compare public endpoint status using existing monitor client
+        if: always()
+        shell: bash
+        run: |
+          for endpoint in / /healthz; do
+            status="$(curl --silent --max-time 15 --output /dev/null --write-out '%{http_code}' "https://telegram-bot-d23e.fadehost.app${endpoint}" || true)"
+            if [[ "$status" =~ ^[0-9]{3}$ ]]; then
+              echo "Existing monitor client $endpoint HTTP: $status"
+            else
+              echo "Existing monitor client $endpoint transport unconfirmed"
+            fi
+          done
       - name: Public readiness without raw response or credentials
         if: always()
         shell: bash
