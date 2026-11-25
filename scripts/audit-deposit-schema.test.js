@@ -12,7 +12,10 @@ function run(args, env = {}) {
   assert.equal(result.error, undefined);
   assert.equal(result.status, 3);
   assert.equal(result.stdout, "");
-  return JSON.parse(result.stderr);
+  const report=JSON.parse(result.stderr);
+  assert.equal(report.financialActivationReady,false);
+  assert.equal(report.realDepositsEnabled,false);
+  return report;
 }
 
 test("default deposit audit retains its failure report when no DSN is supplied", () => {
