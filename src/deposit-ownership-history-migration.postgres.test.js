@@ -41,7 +41,11 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   await insert(2,12,address,"200","300");
   await insert(2,12,address,"300","400");
   await assert.rejects(insert(2,12,address,"400",null),{code:"23502"});
-  await assert.rejects(insert(1,11,address,"300","400"),{code:"23P01"});
+  // Distinct start isolates the exclusion constraint from the unique start constraint.
+  await assert.rejects(insert(1,11,address,"310","400"),{code:"23P01"});
+  // A repeated start also violates exclusion; PostgreSQL can report either.
+  await assert.rejects(insert(1,11,address,"300","400"),
+   error=>["23505","23P01"].includes(error.code));
   await assert.rejects(insert(3,11,address,"1","2"),/identity mismatch/);
   for(const [start,end] of [["NaN","2"],[beyond,max],["-1","2"],["1","NaN"],["1",beyond],["1","1"]]){
    await assert.rejects(insert(3,11,other,start,end),{code:"23514"});
