@@ -106,10 +106,31 @@ $guard$`);
   assert.equal(withoutIndex.ready,false);
   await q(`CREATE UNIQUE INDEX one_active_deposit_wallet ON ${prefix}user_wallet_assignments
     (wallet_id) WHERE status='active' AND assignment_type='deposit'`);
+  const missingHistory=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(missingHistory.catalog.ready,true);
+  assert.equal(missingHistory.assignments.ready,true);
+  assert.equal(missingHistory.historicalBasicGuardsPresent,false);
+  assert.equal(missingHistory.ready,false);
+  // Use the reviewed DDL in a disposable schema, retaining public extension prerequisites.
+  await q("CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public");
+  let history=await readFile(new URL("../migrations/20261125_deposit_ownership_history.review.sql",import.meta.url),"utf8");
+  for(const name of ["deposit_address_ownership_history","validate_deposit_ownership_wallet_identity","reject_deposit_ownership_history_mutation","wallets","users"]){
+   history=history.replaceAll("public."+name,prefix+name);
+  }
+  await q(history);
   const combined=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(combined.historicalBasicGuardsPresent,true);
   assert.equal(combined.ready,true);
   assert.equal(combined.realDepositsEnabled,false);
-  assert.equal(combined.scope,"catalog-and-legacy-assignment-only");
+  assert.equal(combined.scope,"catalog-legacy-assignment-and-basic-historical-guards-only");
+  await q("ALTER TABLE "+prefix+"deposit_address_ownership_history DISABLE TRIGGER deposit_ownership_history_immutable");
+  const disabled=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(disabled.catalog.ready,true);
+  assert.equal(disabled.assignments.ready,true);
+  assert.equal(disabled.historicalBasicGuardsPresent,false);
+  assert.equal(disabled.ready,false);
+  await q("ALTER TABLE "+prefix+"deposit_address_ownership_history ENABLE ALWAYS TRIGGER deposit_ownership_history_immutable");
+  assert.equal((await auditCombinedDepositPreflight(pool,{schema})).ready,true);
   // A coercing typmod must not be accepted even with all other checks.
   await q(`ALTER TABLE ${prefix}verified_deposit_evidence ALTER COLUMN block_number TYPE numeric(78,0)`);
   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence.block_number"));
