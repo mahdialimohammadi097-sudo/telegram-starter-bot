@@ -22,10 +22,13 @@ export async function persistVerifiedDepositEvidence(client, evidence) {
     VALUES ($1,$2,$3::numeric,$4,$5,$6::numeric)
     ON CONFLICT (event_key) DO NOTHING RETURNING event_key`,values);
   if (result.rowCount===1) return Object.freeze({inserted:true,eventKey:values[0]});
+  // The reviewed evidence table is append-only. Replay comparison needs no
+  // UPDATE privilege; the posting caller separately serializes each event.
+  // Production must verify the immutable guard and effective role privileges.
   const existing=await client.query(`
     SELECT block_hash,block_number::text AS block_number,token_contract,
            deposit_address,amount_base_units::text AS amount_base_units
-      FROM verified_deposit_evidence WHERE event_key=$1 FOR UPDATE`,[values[0]]);
+      FROM verified_deposit_evidence WHERE event_key=$1`,[values[0]]);
   const row=existing.rows[0];
   if (!row || row.block_hash!==values[1] || row.block_number!==values[2] ||
       row.token_contract!==values[3] || row.deposit_address!==values[4] ||
