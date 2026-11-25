@@ -2392,3 +2392,110 @@ test("two authorized synthetic reviewers release a blocked customer's hold exact
   assert.equal(posted.count, 1);
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+ 
+// Test-only compensating journal rehearsal. Not exported, not wired to the
+// bot, and deliberately restricted to synthetic adjustment journals in this
+// disposable schema. Domain-linked deposits/withdrawals/investments require
+// their own authorized correction workflow, not generic reversals.
+async function rehearseAdjustmentReversal(originalId, reason) {
+  if (!enabled || !/^profino_it_[0-9a-f]{32}$/.test(schema)) throw new Error("Disposable reversal rehearsal required");
+  if (typeof originalId !== "string" || !/^[1-9][0-9]{0,18}$/.test(originalId) ||
+      BigInt(originalId) > 9223372036854775807n) throw new Error("Invalid original journal ID");
+  if (typeof reason !== "string" || !reason.trim() || reason.length > 200) throw new Error("Correction reason required");
+  return withLedgerTransaction(pool, async client => {
+    const state = await client.query("SELECT current_database() AS db, current_schema() AS schema, current_setting('transaction_isolation') AS isolation");
+    assert.deepEqual(state.rows[0], {db:"profino_test",schema,isolation:"read committed"});
+    const original = await client.query(
+      "SELECT id, transaction_type, status FROM ledger_transactions WHERE id=$1 FOR UPDATE", [originalId]);
+    if (original.rowCount !== 1 || original.rows[0].transaction_type !== "test-adjustment" ||
+        original.rows[0].status !== "posted") throw new Error("Only posted synthetic adjustments can be reversed");
+    const prior = await client.query(
+      "SELECT id, idempotency_key, status FROM ledger_transactions WHERE transaction_type='test-adjustment-reversal' AND reference_id=$1 FOR UPDATE",
+      [originalId]);
+    const key = "test-adjustment-reversal:" + originalId;
+    if (prior.rowCount > 1 || prior.rows.some(j => j.idempotency_key !== key || j.status !== "posted")) {
+      throw new Error("Conflicting reversal identity");
+    }
+    const entries = await client.query(
+      `SELECT e.account_id::text, e.entry_type, trim_scale(e.amount)::text AS amount, e.currency,
+              a.account_type, a.currency AS account_currency
+       FROM ledger_entries e JOIN ledger_accounts a ON a.id=e.account_id
+       WHERE e.transaction_id=$1 ORDER BY e.id`, [originalId]);
+    if (entries.rows.some(e => e.currency !== "USDT" || e.account_currency !== "USDT" ||
+        !["AVAILABLE","CLEARING"].includes(e.account_type) || !["debit","credit"].includes(e.entry_type))) {
+      throw new Error("Unsupported synthetic adjustment entries");
+    }
+    return postJournalInTransaction(client,{
+      transactionType:"test-adjustment-reversal", referenceId:originalId, idempotencyKey:key,
+      description:reason.trim(),
+      entries:entries.rows.map(e=>({account_id:e.account_id,
+        entry_type:e.entry_type==="debit"?"credit":"debit",amount:e.amount,currency:e.currency}))
+    });
+  });
+}
+
+async function makeSyntheticAdjustment() {
+  const available=await createAccount("AVAILABLE");
+  const clearing=await createAccount("CLEARING");
+  const original=await postLedgerTransaction({pool,transactionType:"test-adjustment",
+    idempotencyKey:"adjustment:"+randomUUID(),entries:[
+      {account_id:clearing,entry_type:"debit",amount:"10.12345678",currency:"USDT"},
+      {account_id:available,entry_type:"credit",amount:"10.12345678",currency:"USDT"}
+    ]});
+  return {available,clearing,originalId:original.transactionId};
+}
+
+async function readAdjustmentBalance(accountId) {
+  const {rows}=await pool.query(
+    `SELECT trim_scale(coalesce(sum(CASE WHEN e.entry_type='credit' THEN e.amount ELSE -e.amount END),0))::text AS balance
+     FROM ledger_entries e JOIN ledger_transactions t ON t.id=e.transaction_id
+     WHERE e.account_id=$1 AND t.status='posted'`,[accountId]);
+  return rows[0].balance;
+}
+
+test("compensating journal preserves the original and concurrent reversals post once", {skip:!enabled}, async()=>{
+  const {available,clearing,originalId}=await makeSyntheticAdjustment();
+  const originalBefore=await pool.query("SELECT * FROM ledger_transactions WHERE id=$1",[originalId]);
+  const entriesBefore=await pool.query("SELECT * FROM ledger_entries WHERE transaction_id=$1 ORDER BY id",[originalId]);
+  const results=await Promise.all(Array.from({length:8},()=>rehearseAdjustmentReversal(originalId,"synthetic correction")));
+  assert.equal(new Set(results.map(r=>r.transactionId)).size,1);
+  assert.equal(results.filter(r=>!r.idempotent).length,1);
+  assert.notEqual(results[0].transactionId,originalId);
+  assert.equal(await readAdjustmentBalance(available),"0");
+  assert.equal(await readAdjustmentBalance(clearing),"0");
+  assert.deepEqual((await pool.query("SELECT * FROM ledger_transactions WHERE id=$1",[originalId])).rows,originalBefore.rows);
+  assert.deepEqual((await pool.query("SELECT * FROM ledger_entries WHERE transaction_id=$1 ORDER BY id",[originalId])).rows,entriesBefore.rows);
+  await assert.rejects(rehearseAdjustmentReversal(originalId,"different reason"),/different request/);
+  await assert.rejects(rehearseAdjustmentReversal(results[0].transactionId,"reverse the reversal"),/Only posted synthetic adjustments/);
+  const count=await pool.query("SELECT count(*)::int AS n FROM ledger_transactions WHERE transaction_type='test-adjustment-reversal' AND reference_id=$1",[originalId]);
+  assert.equal(count.rows[0].n,1);
+});
+
+test("correction with insufficient balance rolls back and can safely retry after synthetic funding", {skip:!enabled}, async()=>{
+  const {available,clearing,originalId}=await makeSyntheticAdjustment();
+  await postLedgerTransaction({pool,transactionType:"test-spend",idempotencyKey:"spend:"+originalId,entries:[
+    {account_id:available,entry_type:"debit",amount:"1",currency:"USDT"},
+    {account_id:clearing,entry_type:"credit",amount:"1",currency:"USDT"}
+  ]});
+  await assert.rejects(rehearseAdjustmentReversal(originalId,"synthetic correction"),/Insufficient available balance/);
+  assert.equal(await readAdjustmentBalance(available),"9.12345678");
+  const count=await pool.query("SELECT count(*)::int AS n FROM ledger_transactions WHERE transaction_type='test-adjustment-reversal' AND reference_id=$1",[originalId]);
+  assert.equal(count.rows[0].n,0);
+  await seedAvailableBalance(available,"1");
+  assert.equal((await rehearseAdjustmentReversal(originalId,"synthetic correction")).idempotent,false);
+  assert.equal(await readAdjustmentBalance(available),"0");
+});
+
+test("posted journal header cannot be edited deleted or relabelled as reversed", {skip:!enabled}, async()=>{
+  const {originalId}=await makeSyntheticAdjustment();
+  const before=await pool.query("SELECT * FROM ledger_transactions WHERE id=$1",[originalId]);
+  for(const sql of [
+    "UPDATE ledger_transactions SET status='reversed' WHERE id=$1",
+    "UPDATE ledger_transactions SET idempotency_key='tampered-key' WHERE id=$1",
+    "UPDATE ledger_transactions SET reference_id='tampered-ref' WHERE id=$1",
+    "UPDATE ledger_transactions SET description='tampered' WHERE id=$1",
+    "DELETE FROM ledger_transactions WHERE id=$1"
+  ]) await assert.rejects(pool.query(sql,[originalId]),/Posted transactions are immutable/);
+  assert.deepEqual((await pool.query("SELECT * FROM ledger_transactions WHERE id=$1",[originalId])).rows,before.rows);
+});
