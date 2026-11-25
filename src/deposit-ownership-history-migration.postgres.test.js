@@ -85,9 +85,38 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   const triggers=await client.query("SELECT tgname,tgenabled FROM pg_catalog.pg_trigger WHERE tgrelid=$1::regclass AND NOT tgisinternal",[table]);
   assert.equal(triggers.rows.length,3);
   assert.ok(triggers.rows.every(r=>r.tgenabled==="A"));
+  // Execute ALWAYS triggers in replica mode, rather than only inspecting catalog flags.
+  // The disposable CI database uses a privileged test account. This does not
+  // establish production privileges or resistance to privileged trigger disabling.
+  for(const [statement,expectedError] of [
+   ["UPDATE "+table+" SET user_id=12 WHERE wallet_id=1",/immutable/],
+   ["DELETE FROM "+table+" WHERE wallet_id=1",/immutable/],
+   ["TRUNCATE "+table,/immutable/],
+   ["INSERT INTO "+table+"(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source) VALUES (3,11,56,'"+address+"',500,600,'disposable-review')",/identity mismatch/]
+  ]){
+   await client.query("BEGIN");
+   try{
+    await client.query("SET LOCAL session_replication_role = replica");
+    await assert.rejects(client.query(statement),expectedError);
+   }finally{await client.query("ROLLBACK");}
+  }
   await assert.rejects(client.query(rehearsal),{code:"42P07"});
   await client.query("ROLLBACK");
   assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,4);
+  // Competing autocommit writers must not both claim overlapping ownership,
+  // even when their wallet IDs and interval starts are different.
+  const competingSql="INSERT INTO "+table+"(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source) VALUES ($1,$2,56,$3,$4,$5,'disposable-review')";
+  const claims=[[1,11,address,"500","600"],[2,12,address,"550","650"]];
+  const results=await Promise.allSettled([
+   client.query(competingSql,claims[0]),
+   pool.query(competingSql,claims[1])
+  ]);
+  assert.equal(results.filter(r=>r.status==="fulfilled").length,1);
+  const loser=results.findIndex(r=>r.status==="rejected");
+  assert.ok(["23P01","40P01"].includes(results[loser].reason.code));
+  // A retry after any deadlock must still reject the already committed conflict.
+  await assert.rejects(client.query(competingSql,claims[loser]),{code:"23P01"});
+  assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,5);
  }finally{
   try{
    await client.query("ROLLBACK");
