@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for suite in deposit-evidence-migration confirmed-deposit-posting deposit-schema-audit verified-deposit-evidence-store catalog-deposit-owner; do
+          for suite in deposit-evidence-migration confirmed-deposit-posting deposit-schema-audit verified-deposit-evidence-store catalog-deposit-owner legacy-deposit-assignment-audit; do
             node --test --test-reporter=tap "src/$suite.postgres.test.js" | tee "$RUNNER_TEMP/$suite.tap"
             grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/$suite.tap"
             grep -Fxq '# skipped 0' "$RUNNER_TEMP/$suite.tap"
