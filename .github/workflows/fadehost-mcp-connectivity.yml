@@ -159,11 +159,18 @@ jobs:
               description=str(spec.get("description","")).lower()
               if any(word in description for word in ("paid plan","requires starter","upgrade required","paid tier","additional charge","billable")):
                   print("Backup inventory: paid restriction; not attempted")
-              elif "app" not in props or required-{"app"}:
-                  print("Backup inventory: service-scoped tool contract unconfirmed")
+              elif not isinstance(props,dict):
+                  print("Backup inventory: invalid tool contract")
               else:
+                  # Accept only a single explicit existing-service identifier.
+                  # No account-wide enumeration and no guessing database IDs.
+                  identifiers=[k for k in ("app","app_id","appId","bot","bot_id","botId") if k in props and isinstance(props[k],dict) and props[k].get("type")=="string"]
+                  print("Backup service identifier field recognized:",len(identifiers)==1)
+                  print("Backup requires other fields:",bool(required-set(identifiers)))
                   try:
-                      result=rpc("tools/call",{"name":"list_backups","arguments":{"app":bot_id}},8)
+                      if len(identifiers)!=1 or required-set(identifiers):
+                          raise SystemExit("Unsupported scoped inventory contract")
+                      result=rpc("tools/call",{"name":"list_backups","arguments":{identifiers[0]:bot_id}},8)
                   except SystemExit:
                       print("Backup inventory: request unsuccessful; no retry")
                   else:
