@@ -30,7 +30,23 @@ export async function postConfirmedDeposit({ pool, evidence, clearingAccountId,
   return withLedgerTransaction(pool, async client => {
     // Lock event before accounts, matching the ledger's global lock order.
     const key = "confirmed-deposit:" + verified.eventKey;
-    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
+    const lock = await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+       WHERE current_setting('transaction_isolation') = 'read committed'`, [key]);
+    if (lock.rowCount !== 1) throw new Error("Confirmed deposit requires READ COMMITTED");
+    // A legacy or corrupted journal may carry the event reference but a
+    // different key (or vice versa). Never create a new credit or report a
+    // successful replay while that conflicting identity exists.
+    const prior = await client.query(
+      `SELECT id, transaction_type, reference_id, idempotency_key, status
+       FROM ledger_transactions
+       WHERE reference_id = $1 OR idempotency_key = $2
+       ORDER BY id FOR UPDATE`, [verified.eventKey, key]);
+    if (prior.rowCount > 1 || prior.rows.some(j =>
+      j.transaction_type !== "confirmed-deposit" || j.reference_id !== verified.eventKey ||
+      j.idempotency_key !== key || j.status !== "posted")) {
+      throw new Error("Conflicting deposit journal identity; reconciliation required");
+    }
     const assignments = await resolveAndLockAssignments(client, verified);
     const owner = requireUniqueDepositOwner(verified, assignments);
     // Evidence and journal must commit or roll back together.

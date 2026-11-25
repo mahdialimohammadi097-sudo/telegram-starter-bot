@@ -312,3 +312,33 @@ test('missing evidence table prevents a journal even when ownership and receipt 
   assert.equal((await rehearseVerifiedBep20Deposit(args)).idempotent,false);
   assert.equal(await count(),before+1);
 });
+
+test('posting blocks legacy alternate keys, conflicting references and duplicate event replays', {skip:!enabled}, async()=>{
+  // Event 1 already has two journals from the deliberate audit corruption fixture.
+  const beforeDuplicate=await count();
+  await assert.rejects(post(1),/Conflicting deposit journal identity/);
+  assert.equal(await count(),beforeDuplicate);
+  for(const [n, reference, key, type, status] of [
+    [201,evidence(201).eventKey,'legacy-alternate-201','confirmed-deposit','posted'],
+    [202,'wrong-reference','confirmed-deposit:'+evidence(202).eventKey,'confirmed-deposit','posted'],
+    [203,evidence(203).eventKey,'confirmed-deposit:'+evidence(203).eventKey,'other-credit','posted'],
+    [204,evidence(204).eventKey,'confirmed-deposit:'+evidence(204).eventKey,'confirmed-deposit','pending']
+  ]){
+    // Fault fixtures deliberately bypass the domain service; no external transfer.
+    if(status==='posted'){
+      await postLedgerTransaction({pool,transactionType:type,referenceId:reference,idempotencyKey:key,
+        entries:[{account_id:'1',entry_type:'debit',amount:'25',currency:'USDT'},
+                 {account_id:'2',entry_type:'credit',amount:'25',currency:'USDT'}]});
+    }else{
+      await pool.query("INSERT INTO ledger_transactions(transaction_type,reference_id,idempotency_key,status) VALUES ($1,$2,$3,$4)",[type,reference,key,status]);
+    }
+    const before=await count();
+    let touched=false;
+    await assert.rejects(post(n,{persistVerifiedEvidence:async()=>{touched=true;}}),/Conflicting deposit journal identity/);
+    assert.equal(touched,false);
+    assert.equal(await count(),before);
+  }
+  const fresh=await post(205);
+  assert.equal(fresh.idempotent,false);
+  assert.equal((await post(205)).transactionId,fresh.transactionId);
+});
