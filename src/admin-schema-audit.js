@@ -46,9 +46,13 @@ export async function inspectDepositSchemaReadOnly(pool) {
   const observedTypes=Object.fromEntries(result.rows
    .filter(r=>Object.hasOwn(expectedTypes,r.table_name+"."+r.column_name))
    .map(r=>[r.table_name+"."+r.column_name,r.data_type??"unknown"]));
+  // The historical migration accepts both int4 and int8 chain IDs.
+  // Keep the stricter bigint contract for existing user and wallet keys.
   const incompatibleTypes=Object.entries(expectedTypes).filter(([key,type])=>
-   observedTypes[key]!==type).map(([key,type])=>({
-    column:key,expected:type,observed:observedTypes[key]??"missing"
+   key==="wallets.chain_id"
+    ? !["integer","bigint"].includes(observedTypes[key])
+    : observedTypes[key]!==type).map(([key,type])=>({
+    column:key,expected:key==="wallets.chain_id"?"integer or bigint":type,observed:observedTypes[key]??"missing"
    }));
   const indexes=await client.query(`SELECT t.relname AS table_name,a.attname AS column_name
    FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid
