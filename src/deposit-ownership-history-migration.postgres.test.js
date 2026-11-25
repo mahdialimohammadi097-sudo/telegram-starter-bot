@@ -49,7 +49,25 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   await client.query("ROLLBACK");
   assert.equal((await client.query("SELECT pg_catalog.to_regclass($1) AS relation",[table])).rows[0].relation,null);
   await client.query("DROP TABLE "+prefix+"wallet_children");
+  // Simulate unsafe schema-scoped default ACLs without changing global defaults.
+  for(const kind of ["TABLES","SEQUENCES","FUNCTIONS"]){
+   await client.query('ALTER DEFAULT PRIVILEGES IN SCHEMA "'+schema+'" GRANT ALL ON '+kind+' TO PUBLIC');
+  }
   await client.query(rehearsal);
+  const publicGrants=await client.query(`
+   SELECT count(*)::int AS n FROM (
+    SELECT acl.grantee FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace ns ON ns.oid=c.relnamespace
+     CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(c.relacl,
+       pg_catalog.acldefault(CASE WHEN c.relkind='S' THEN 'S' ELSE 'r' END::"char",c.relowner))) acl
+     WHERE ns.nspname=$1 AND c.relname IN ('deposit_address_ownership_history','deposit_address_ownership_history_id_seq')
+    UNION ALL
+    SELECT acl.grantee FROM pg_catalog.pg_proc p
+     JOIN pg_catalog.pg_namespace ns ON ns.oid=p.pronamespace
+     CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
+     WHERE ns.nspname=$1 AND p.proname IN ('validate_deposit_ownership_wallet_identity','reject_deposit_ownership_history_mutation')
+   ) grants WHERE grantee=0`,[schema]);
+  assert.equal(publicGrants.rows[0].n,0);
   const insert=(wallet,user,addr,start,end)=>client.query(
    "INSERT INTO "+table+"(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source) VALUES ($1,$2,56,$3,$4,$5,'disposable-review')",
    [wallet,user,addr,start,end]);
