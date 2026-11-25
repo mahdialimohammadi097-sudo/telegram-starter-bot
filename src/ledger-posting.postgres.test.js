@@ -3189,3 +3189,33 @@ test("offline submission never sends when its commit acknowledgement is lost",{s
   await assert.rejects(cancelWithdrawal(pool,owner,request.id),/cannot be cancelled/);
   assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"1.00000000");
 });
+
+test("offline recovery rejects a corrupted held-account reference before transport access",{skip:!enabled},async()=>{
+  const {reserveWithdrawal,submitSimulatedWithdrawal,recoverSimulatedWithdrawals,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const {createHash}=await import("node:crypto");
+  const owner=await createSimulationWallet(19525),other=await createSimulationWallet(19526);
+  for(const id of [owner,other]){
+    const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[id]);
+    await seedAvailableBalance(available.id,"1");
+  }
+  const dest="0x"+"56".repeat(20);
+  const w=await reserveWithdrawal(pool,owner,"recovery-owner-fault","1",dest);
+  const otherW=await reserveWithdrawal(pool,other,"recovery-owner-fault","1",dest);
+  const payload=Buffer.from("offline-recovery-owner-fault");
+  const hash="0x"+createHash("sha256").update(payload).digest("hex");
+  await submitSimulatedWithdrawal(pool,w.id,hash,async()=>{},payload);
+  const {rows:[original]}=await pool.query("SELECT held_id FROM simulation_withdrawals WHERE id=$1",[w.id]);
+  const {rows:[wrong]}=await pool.query("SELECT held_id FROM simulation_withdrawals WHERE id=$1",[otherW.id]);
+  let lookups=0,sends=0;
+  const transport={hasTransaction:async()=>{lookups++;return false;},send:async()=>{sends++;}};
+  await pool.query("UPDATE simulation_withdrawals SET held_id=$2 WHERE id=$1",[w.id,wrong.held_id]);
+  try{
+    await assert.rejects(recoverSimulatedWithdrawals(pool,transport,String(BigInt(w.id)-1n)),/reservation mismatch/);
+    assert.equal(lookups,0);assert.equal(sends,0);
+    assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"1.00000000");
+    assert.equal(formatUsdt((await getWalletBalances(pool,other)).WITHDRAWAL_HOLD),"1.00000000");
+  }finally{await pool.query("UPDATE simulation_withdrawals SET held_id=$2 WHERE id=$1",[w.id,original.held_id]);}
+  await recoverSimulatedWithdrawals(pool,transport,String(BigInt(w.id)-1n));
+  assert.equal(lookups,1);assert.equal(sends,1);
+  await cancelWithdrawal(pool,other,otherW.id);
+});

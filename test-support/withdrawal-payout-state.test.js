@@ -60,7 +60,7 @@ for (const lookupResult of [undefined, null, "unknown", 0]) {
     let sent = 0;
     const pool = { async query(sql) {
       assert.match(sql, /FROM simulation_withdrawals/);
-      return { rows: [{ id: "7", hash: "0x" + createHash("sha256").update("test").digest("hex"), amount: "1", destination: "0x" + "1".repeat(40), payload: Buffer.from("test") }] };
+      return { rows: [{ id: "7", hash: "0x" + createHash("sha256").update("test").digest("hex"), amount: "1", destination: "0x" + "1".repeat(40), reservation_verified: true, payload: Buffer.from("test") }] };
     } };
     const transport = { hasTransaction: async () => lookupResult, send: async () => { sent++; } };
     await assert.rejects(recoverSimulatedWithdrawals(pool, transport), /indeterminate transaction status/);
@@ -75,8 +75,8 @@ for (const alreadyKnown of [true, false]) {
     const sent = [];
     const pool = { async query(sql, params) {
       assert.match(sql, /status = 'pending_receipt'/);
-      assert.deepEqual(params, ["0"]);
-      return { rows: [{ id: "7", hash, amount: "1.00000000", destination: "0x" + "1".repeat(40), payload }] };
+      assert.ok(params[0] === "0" || (!alreadyKnown && params[0] === "7"));
+      return { rows: [{ id: "7", hash, amount: "1.00000000", destination: "0x" + "1".repeat(40), reservation_verified: true, payload }] };
     } };
     const transport = {
       async hasTransaction(candidate) { assert.equal(candidate, hash); return alreadyKnown; },
@@ -132,3 +132,23 @@ for (const corrupt of [Buffer.from("wrong"), Buffer.alloc(0), null]) {
     assert.equal(calls, 0);
   });
 }
+
+test("recovery skips a claim no longer pending after transport lookup",async()=>{
+  const payload=Buffer.from("offline-recovery");
+  const hash="0x"+createHash("sha256").update(payload).digest("hex");
+  let reads=0,sends=0;
+  const pool={async query(){return {rows:++reads===1?[{id:"7",hash,amount:"1",destination:"0x"+"1".repeat(40),payload,reservation_verified:true}]:[]};}};
+  await recoverSimulatedWithdrawals(pool,{hasTransaction:async()=>false,send:async()=>{sends++;}});
+  assert.equal(reads,2);assert.equal(sends,0);
+});
+test("recovery refuses changed claim or invalid reservation before fake send",async()=>{
+  const payload=Buffer.from("offline-recovery-changed");
+  const hash="0x"+createHash("sha256").update(payload).digest("hex");
+  const row={id:"7",hash,amount:"1",destination:"0x"+"1".repeat(40),payload,reservation_verified:true};
+  for(const override of [{reservation_verified:false},{destination:"0x"+"2".repeat(40)}]){
+    let reads=0,sends=0;
+    const pool={async query(){return {rows:[++reads===1?row:{...row,...override}]};}};
+    await assert.rejects(recoverSimulatedWithdrawals(pool,{hasTransaction:async()=>false,send:async()=>{sends++;}}),/reservation mismatch|claim changed/);
+    assert.equal(sends,0);
+  }
+});

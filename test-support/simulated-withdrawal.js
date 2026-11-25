@@ -240,34 +240,70 @@ export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload 
   return hash;
 }
 
-// After a restart, process a bounded page. The transport must deduplicate identical
-// payloads by hash, including if lookup lags or a previous submit lost its reply.
+// All reads below are synthetic only. Verify the exact original reservation,
+// not merely the existence of a saved transport hash.
+const recoverySelect = `SELECT w.id,w.submitted_hash AS hash,w.amount,w.destination,w.simulation_payload AS payload,
+  (
+    EXISTS (SELECT 1 FROM ledger_accounts a WHERE a.id=w.available_id AND a.user_id=w.user_id
+      AND a.account_type='AVAILABLE' AND a.currency='USDT')
+    AND EXISTS (SELECT 1 FROM ledger_accounts a WHERE a.id=w.held_id AND a.user_id=w.user_id
+      AND a.account_type='WITHDRAWAL_HOLD' AND a.currency='USDT')
+    AND (SELECT count(*) FROM ledger_transactions j WHERE j.idempotency_key='sim-withdraw-reserve:'||w.id
+      OR (j.transaction_type='sim-withdraw-reserve' AND j.reference_id=w.id::text))=1
+    AND EXISTS (SELECT 1 FROM ledger_transactions j WHERE j.status='posted'
+      AND j.transaction_type='sim-withdraw-reserve' AND j.reference_id=w.id::text
+      AND j.idempotency_key='sim-withdraw-reserve:'||w.id
+      AND (SELECT count(*) FROM ledger_entries e WHERE e.transaction_id=j.id)=2
+      AND EXISTS (SELECT 1 FROM ledger_entries e WHERE e.transaction_id=j.id AND e.account_id=w.available_id
+        AND e.entry_type='debit' AND e.currency='USDT' AND e.amount=w.amount)
+      AND EXISTS (SELECT 1 FROM ledger_entries e WHERE e.transaction_id=j.id AND e.account_id=w.held_id
+        AND e.entry_type='credit' AND e.currency='USDT' AND e.amount=w.amount))
+    AND w.release_id IS NULL AND w.payout_id IS NULL
+    AND NOT EXISTS (SELECT 1 FROM ledger_transactions j WHERE j.reference_id=w.id::text
+      AND j.transaction_type IN ('sim-withdraw-release','sim-withdraw-payout'))
+  ) AS reservation_verified
+  FROM simulation_withdrawals w WHERE status = 'pending_receipt' AND simulation_payload IS NOT NULL
+    AND octet_length(simulation_payload)>0`;
+
+function validateRecoveryRequest(request) {
+  if (!Buffer.isBuffer(request.payload) || request.payload.length===0 ||
+      typeof request.hash!=="string" || !/^0x[0-9a-f]{64}$/.test(request.hash) ||
+      "0x"+createHash("sha256").update(request.payload).digest("hex")!==request.hash) {
+    throw new Error("Simulation recovery payload hash mismatch");
+  }
+  if (request.reservation_verified!==true || typeof request.destination!=="string" ||
+      !/^0x[0-9a-f]{40}$/.test(request.destination) || /^0x0{40}$/.test(request.destination) ||
+      toUsdtUnitsExact(request.amount)<=0n) {
+    throw new Error("Simulation recovery reservation mismatch");
+  }
+}
+
+// The offline transport must deduplicate the identical saved hash/payload.
+// A fresh read narrows the race with receipt confirmation, but cannot make an
+// external transport call atomic with PostgreSQL.
 export async function recoverSimulatedWithdrawals(pool, transport, afterId = "0") {
   if (!transport || typeof transport.hasTransaction !== "function" || typeof transport.send !== "function") {
     throw new Error("Simulation recovery requires a queryable, send-capable transport");
   }
-  const { rows } = await pool.query(
-    `SELECT id, submitted_hash AS hash, amount, destination, simulation_payload AS payload
-     FROM simulation_withdrawals WHERE status = 'pending_receipt' AND simulation_payload IS NOT NULL
-       AND octet_length(simulation_payload) > 0
-       AND id > $1 ORDER BY id LIMIT 50`, [afterId]
-  );
-  for (const request of rows) {
-    // Never replay a persisted payload whose identity no longer matches its claim.
-    if (!Buffer.isBuffer(request.payload) || request.payload.length === 0 ||
-        typeof request.hash !== "string" ||
-        "0x" + createHash("sha256").update(request.payload).digest("hex") !== request.hash.toLowerCase()) {
-      throw new Error("Simulation recovery payload hash mismatch");
-    }
-    const known = await transport.hasTransaction(request.hash);
-    if (typeof known !== "boolean") {
-      throw new Error("Simulation transport returned an indeterminate transaction status");
-    }
-    if (known === false) {
-      await transport.send({ txHash: request.hash, amount: request.amount, destination: request.destination, payload: request.payload });
+  const {rows}=await pool.query(recoverySelect+" AND w.id>$1 ORDER BY w.id LIMIT 50",[afterId]);
+  for(const request of rows){
+    validateRecoveryRequest(request);
+    const known=await transport.hasTransaction(request.hash);
+    if(typeof known!=="boolean") throw new Error("Simulation transport returned an indeterminate transaction status");
+    if(known===false){
+      const latest=await pool.query(recoverySelect+" AND w.id=$1",[request.id]);
+      if(latest.rows.length===0) continue;
+      if(latest.rows.length!==1) throw new Error("Simulation recovery reservation mismatch");
+      const current=latest.rows[0];
+      validateRecoveryRequest(current);
+      if(current.hash!==request.hash || current.amount!==request.amount ||
+         current.destination!==request.destination || !current.payload.equals(request.payload)) {
+        throw new Error("Simulation recovery claim changed");
+      }
+      await transport.send({txHash:current.hash,amount:current.amount,destination:current.destination,payload:current.payload});
     }
   }
-  return rows.length === 50 ? rows[49].id : null;
+  return rows.length===50?rows[49].id:null;
 }
 
 export async function confirmTestnetWithdrawal(pool, id, observation, expected, treasury) {
