@@ -25,6 +25,7 @@ test("read-only schema audit reports missing evidence without accessing user row
  },release:()=>{}};
  const result=await inspectDepositSchemaReadOnly({connect:async()=>withConfirmedControl(client)});
  assert.equal(result.structuralReady,false);
+ assert.equal(result.historicalBasicGuardsPresent,false);
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
  assert.ok(result.outstandingSecurityGates.includes("independent-historical-ownership-proof"));
@@ -68,7 +69,9 @@ test("legacy column and index inventory alone cannot certify structural readines
  assert.equal(result.structuralReady,false);
  assert.ok(result.missing.includes("users.status"));
  assert.ok(result.catalogIncompatible.includes("ledger_entries.account_id:foreign_key"));
- assert.equal(result.outstandingSecurityGates.length,4);
+ assert.equal(result.outstandingSecurityGates.length,5);
+ assert.equal(result.historicalBasicGuardsPresent,false);
+ assert.ok(result.outstandingSecurityGates.includes('historical-schema-definition-and-effective-privilege-review'));
  assert.equal(result.financialActivationReady,false);
  assert.equal(result.realDepositsEnabled,false);
 });
