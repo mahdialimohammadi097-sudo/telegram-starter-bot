@@ -1,7 +1,13 @@
 // Offline consistency check only. This is NOT independent proof of chain ownership.
 const address=/^0x[0-9a-f]{40}$/;
-// Historical block columns are numeric(78,0); reject unrepresentable values before BigInt parsing.
-const uint=v=>typeof v==="string" && /^(0|[1-9][0-9]{0,77})$/.test(v)?BigInt(v):null;
+// PostgreSQL numeric(78,0) can represent numbers above uint256.
+// Apply the chain bound independently of the storage precision.
+const MAX_UINT256=(1n<<256n)-1n;
+const uint=v=>{
+ if(typeof v!=="string" || !/^(0|[1-9][0-9]{0,77})$/.test(v)) return null;
+ const n=BigInt(v);
+ return n<=MAX_UINT256?n:null;
+};
 const id=v=>typeof v==="string" && /^[1-9][0-9]{0,18}$/.test(v) && BigInt(v)<=9223372036854775807n;
 export function verifyHistoricalWalletRecord({history,wallet,eventBlockNumber,expectedUserId,expectedWalletAddress}){
  if(!history || !wallet || !id(history.wallet_id) || !id(history.user_id) ||
