@@ -3008,3 +3008,90 @@ test("withdrawal cancellation and synthetic submission race cannot both release 
     assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"0.00000000");
   }
 });
+
+// Use a real disposable PostgreSQL connection. The wrapper models a lost
+// connection before COMMIT or a lost acknowledgement after successful COMMIT.
+function disconnectedCommitWorker(afterCommit){
+  return {async connect(){
+    const client=await pool.connect();
+    let disconnected=false;
+    return {
+      async query(sql,...args){
+        if(disconnected)throw new Error("Synthetic commit acknowledgement lost");
+        if(sql!=="COMMIT")return client.query(sql,...args);
+        if(afterCommit)await client.query(sql);
+        disconnected=true;
+        client.release(true);
+        throw new Error("Synthetic commit acknowledgement lost");
+      },
+      release(error){if(!disconnected)client.release(error);}
+    };
+  }};
+}
+
+test("investment opening and settlement survive lost commit acknowledgements exactly once",{skip:!enabled},async()=>{
+  const {openSimulatedInvestment,settleSimulatedInvestment}=await import("../test-support/simulated-investment.js");
+  const owner=await createSimulationWallet(19518);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"25");
+  const reserve=await createAccount("AVAILABLE"),fee=await createAccount("CLEARING");
+  await seedAvailableBalance(reserve,"3.5");
+  const open=worker=>openSimulatedInvestment(worker,owner,"lost-open-commit","SMART 25");
+  await assert.rejects(open(disconnectedCommitWorker(false)),/acknowledgement lost/);
+  assert.equal((await pool.query("SELECT id FROM simulation_investments WHERE user_id=$1 FOR UPDATE",[owner])).rowCount,0);
+  assert.deepEqual(await displayedBalances(owner),["25.00000000","0.00000000","0.00000000"]);
+  await assert.rejects(open(disconnectedCommitWorker(true)),/acknowledgement lost/);
+  const ids=await Promise.all([open(pool),open(pool)]);
+  assert.equal(ids[0],ids[1]);
+  const id=ids[0];
+  assert.deepEqual(await displayedBalances(owner),["0.00000000","25.00000000","0.00000000"]);
+  await pool.query("UPDATE simulation_investments SET matures_at=now() WHERE id=$1",[id]);
+  const settle=worker=>settleSimulatedInvestment(worker,owner,id,reserve,fee);
+  await assert.rejects(settle(disconnectedCommitWorker(false)),/acknowledgement lost/);
+  assert.deepEqual((await pool.query("SELECT status,settlement_id FROM simulation_investments WHERE id=$1 FOR UPDATE",[id])).rows[0],{status:"active",settlement_id:null});
+  assert.deepEqual(await displayedBalances(owner),["0.00000000","25.00000000","0.00000000"]);
+  assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["simulated-investment-settle:"+id])).rowCount,0);
+  await assert.rejects(settle(disconnectedCommitWorker(true)),/acknowledgement lost/);
+  const journals=await Promise.all([settle(pool),settle(pool)]);
+  assert.equal(journals[0],journals[1]);
+  assert.deepEqual(await displayedBalances(owner),["27.36000000","0.00000000","0.00000000"]);
+  const {rows:[totals]}=await pool.query(`
+    SELECT count(*) FILTER(WHERE transaction_type='simulated-investment-open')::int AS opened,
+           count(*) FILTER(WHERE transaction_type='simulated-investment-settle')::int AS settled
+    FROM ledger_transactions WHERE reference_id=$1 AND status='posted'`,[id]);
+  assert.deepEqual(totals,{opened:1,settled:1});
+});
+
+test("synthetic payout receipt confirmation recovers after a lost commit without a second send",{skip:!enabled},async()=>{
+  const {reserveWithdrawal,submitSimulatedWithdrawal,confirmTestnetWithdrawal,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const {createHash}=await import("node:crypto");
+  const owner=await createSimulationWallet(19519);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"1");
+  const sample=JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json",import.meta.url),"utf8"));
+  const request=await reserveWithdrawal(pool,owner,"lost-payout-commit","1",sample.expected.recipient);
+  const payload=Buffer.from("offline-lost-payout-commit:"+request.id);
+  const hash="0x"+createHash("sha256").update(payload).digest("hex");
+  sample.expected.txHash=hash;
+  sample.observation.receipt.transactionHash=hash;
+  for(const log of sample.observation.receipt.logs)log.transactionHash=hash;
+  let sends=0;
+  const submit=()=>submitSimulatedWithdrawal(pool,request.id,hash,async()=>{sends++;},payload);
+  await submit();
+  const treasury={sender:"0x03e37a3686a553735dd9737a060e4a2c6c018ace",accountId:simulationClearing};
+  const confirm=worker=>confirmTestnetWithdrawal(worker,request.id,sample.observation,sample.expected,treasury);
+  await assert.rejects(confirm(disconnectedCommitWorker(false)),/acknowledgement lost/);
+  const state=async()=>(await pool.query("SELECT status,payout_id,submitted_hash FROM simulation_withdrawals WHERE id=$1 FOR UPDATE",[request.id])).rows[0];
+  assert.deepEqual(await state(),{status:"pending_receipt",payout_id:null,submitted_hash:hash});
+  assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"1.00000000");
+  assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-payout:"+request.id])).rowCount,0);
+  await assert.rejects(cancelWithdrawal(pool,owner,request.id),/cannot be cancelled/);
+  await assert.rejects(confirm(disconnectedCommitWorker(true)),/acknowledgement lost/);
+  const journals=await Promise.all([confirm(pool),confirm(pool)]);
+  assert.equal(journals[0],journals[1]);
+  assert.deepEqual(await state(),{status:"paid",payout_id:journals[0],submitted_hash:hash});
+  assert.equal(await submit(),hash);
+  assert.equal(sends,1);
+  assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"0.00000000");
+  assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-payout:"+request.id])).rowCount,1);
+});
