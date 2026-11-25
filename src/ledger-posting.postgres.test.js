@@ -2696,3 +2696,31 @@ test("suppressed payout confirmation rolls back the journal and retains the orig
   assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"0.00000000");
   assert.equal(sends,1);
 });
+
+test("settlement replay verifies its original journal and refuses detached or corrupted state", {skip:!enabled},async()=>{
+  const {openSimulatedInvestment,settleSimulatedInvestment}=await import("../test-support/simulated-investment.js");
+  const owner=await createSimulationWallet(19504);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"25");
+  const id=await openSimulatedInvestment(pool,owner,"settlement-replay-audit","STARTER 25");
+  const reserve=await createAccount("AVAILABLE"),fee=await createAccount("CLEARING");
+  await seedAvailableBalance(reserve,"10");
+  await pool.query("UPDATE simulation_investments SET matures_at=now() WHERE id=$1",[id]);
+  const settle=()=>settleSimulatedInvestment(pool,owner,id,reserve,fee);
+  const journal=await settle();
+  const before=await displayedBalances(owner);
+  assert.equal(await settle(),journal);
+  for(const [change,restore,pattern] of [
+    ["settlement_id=NULL","settlement_id="+journal,/journal mismatch/],
+    ["status='active'","status='settled'",/Detached investment settlement/],
+    ["profit_percent=5","profit_percent=4",/different request/]
+  ]){
+    await pool.query("UPDATE simulation_investments SET "+change+" WHERE id=$1",[id]);
+    try{
+      await assert.rejects(settle(),pattern);
+      assert.deepEqual(await displayedBalances(owner),before);
+      assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE reference_id=$1 AND transaction_type='simulated-investment-settle'",[id])).rowCount,1);
+    }finally{await pool.query("UPDATE simulation_investments SET "+restore+" WHERE id=$1",[id]);}
+  }
+  assert.equal(await settle(),journal);
+});

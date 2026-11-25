@@ -80,8 +80,27 @@ async function settleLockedInvestment(client, userId, investmentId, reserveId, f
      FROM simulation_investments WHERE id = $1 AND user_id = $2 FOR UPDATE`, [investmentId, userId]
   );
   if (!investment) throw new Error("Unknown investment");
-  if (investment.status === "settled") return investment.settlement_id;
-  if (investment.status !== "active" || !investment.mature) throw new Error("Investment is not due");
+  const replay = investment.status === "settled";
+  if (!replay && (investment.status !== "active" || !investment.mature)) throw new Error("Investment is not due");
+  const key = "simulated-investment-settle:" + investmentId;
+  // Never silently repair a detached journal or certify a corrupted terminal state.
+  const prior = await client.query(
+    `SELECT id, status, transaction_type, reference_id, idempotency_key
+     FROM ledger_transactions
+     WHERE idempotency_key = $1 OR (transaction_type = 'simulated-investment-settle' AND reference_id = $2)
+     ORDER BY id FOR UPDATE`, [key, String(investmentId)]
+  );
+  if (replay) {
+    const j = prior.rows[0];
+    if (!investment.mature || investment.settlement_id == null || prior.rowCount !== 1 ||
+        j.status !== "posted" || j.transaction_type !== "simulated-investment-settle" ||
+        j.reference_id !== String(investmentId) || j.idempotency_key !== key ||
+        String(j.id) !== String(investment.settlement_id)) {
+      throw new Error("Investment settlement journal mismatch; reconciliation required");
+    }
+  } else if (investment.settlement_id != null || prior.rowCount !== 0) {
+    throw new Error("Detached investment settlement journal; reconciliation required");
+  }
   const { rows } = await client.query(
     `SELECT account_type, id FROM ledger_accounts WHERE user_id = $1 AND currency = 'USDT'
      AND account_type IN ('AVAILABLE', 'INVESTED')`, [userId]
@@ -96,7 +115,7 @@ async function settleLockedInvestment(client, userId, investmentId, reserveId, f
   if (sources.rowCount !== 2) throw new Error("Invalid simulation settlement accounts");
   const journal = await postJournalInTransaction(client, {
     transactionType: "simulated-investment-settle", referenceId: investmentId,
-    idempotencyKey: "simulated-investment-settle:" + investmentId,
+    idempotencyKey: key,
     entries: [
       { account_id: accounts.get("INVESTED"), entry_type: "debit", amount: String(investment.principal), currency: "USDT" },
       { account_id: reserveId, entry_type: "debit", amount: profit, currency: "USDT" },
@@ -104,6 +123,13 @@ async function settleLockedInvestment(client, userId, investmentId, reserveId, f
       { account_id: feeId, entry_type: "credit", amount: fee, currency: "USDT" }
     ]
   });
+  if (replay) {
+    if (!journal.idempotent || journal.transactionId !== String(investment.settlement_id)) {
+      throw new Error("Investment settlement replay mismatch; reconciliation required");
+    }
+    return journal.transactionId;
+  }
+  if (journal.idempotent) throw new Error("Detached investment settlement journal; reconciliation required");
   const updated = await client.query(
     "UPDATE simulation_investments SET status = 'settled', settlement_id = $2 WHERE id = $1 AND status = 'active' AND settlement_id IS NULL",
     [investmentId, journal.transactionId]
