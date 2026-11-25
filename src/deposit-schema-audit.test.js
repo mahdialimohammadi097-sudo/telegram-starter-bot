@@ -86,3 +86,10 @@ test("schema audit rejects missing or unvalidated finite numeric evidence bounds
  assert.ok(report.incompatible.includes("verified_deposit_evidence.amount_uint256:check_constraint"));
  assert.ok(!report.incompatible.includes("verified_deposit_evidence.block_number_uint256:check_constraint"));
 });
+
+test("schema audit rejects nonstring and oversized identifiers before any query",async()=>{
+ const client={query:async()=>assert.fail("unexpected database query")};
+ for(const schema of [null,123,["public"],"a".repeat(64)]){
+  await assert.rejects(auditDepositSchema(client,{schema}),/Invalid/);
+ }
+});
