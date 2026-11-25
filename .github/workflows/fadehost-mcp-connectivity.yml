@@ -1,8 +1,5 @@
 name: FadeHost MCP Read-Only Connectivity Test
 on:
-  push:
-    branches: [test/fadehost-mcp-readonly-connection]
-    paths: [.github/workflows/fadehost-mcp-connectivity.yml]
   pull_request:
     branches: [main]
     paths: [.github/workflows/fadehost-mcp-connectivity.yml]
@@ -148,70 +145,43 @@ jobs:
                   ("Database idle error marker","idle PostgreSQL"),
                   ("Syntax error marker","SyntaxError")):
                   print("Historical log",label+":",marker in logs)
-          # A single fixed, already-deployed read-only diagnostic. No upgrade or
-          # schedule creation, no secret printing, no arbitrary commands.
-          # Only the PR synchronize event may execute it (not the push duplicate).
-          if os.environ.get("GITHUB_EVENT_NAME")=="pull_request":
-              with open(os.environ["GITHUB_EVENT_PATH"],encoding="utf-8") as event:
-                  action=json.load(event).get("action")
-              if action=="synchronize":
-                  specs=[t for t in tools if isinstance(t,dict) and t.get("name")=="run_app_command"]
-                  if len(specs)!=1:
-                      print("Schema audit execution: tool unavailable")
+          # Command execution is paid-restricted. Keep this probe strictly
+          # inventory-only: never execute, create, download or restore backups.
+          print("Schema audit execution: disabled after confirmed paid restriction")
+          specs=[t for t in tools if isinstance(t,dict) and t.get("name")=="list_backups"]
+          if len(specs)!=1:
+              print("Backup inventory: unavailable")
+          else:
+              spec=specs[0]
+              schema=spec.get("inputSchema",{})
+              props=schema.get("properties",{})
+              required=set(schema.get("required",[]))
+              description=str(spec.get("description","")).lower()
+              if any(word in description for word in ("paid plan","requires starter","upgrade required","paid tier","additional charge","billable")):
+                  print("Backup inventory: paid restriction; not attempted")
+              elif "app" not in props or required-{"app"}:
+                  print("Backup inventory: service-scoped tool contract unconfirmed")
+              else:
+                  try:
+                      result=rpc("tools/call",{"name":"list_backups","arguments":{"app":bot_id}},8)
+                  except SystemExit:
+                      print("Backup inventory: request unsuccessful; no retry")
                   else:
-                      spec=specs[0]
-                      schema=spec.get("inputSchema",{})
-                      props=schema.get("properties",{})
-                      description=str(spec.get("description","")).lower()
-                      if any(word in description for word in ("paid plan","requires starter","upgrade required","paid tier","additional charge","billable")):
-                          print("Schema audit execution: paid restriction; not attempted")
-                      elif set(schema.get("required",[])) - {"app","command"} or not {"app","command"} <= set(props):
-                          print("Schema audit execution: tool contract not confirmed")
+                      print("Backup inventory: service-scoped access confirmed")
+                      value=result.get("structuredContent")
+                      if value is None:
+                          for item in result.get("content",[]):
+                              if isinstance(item,dict) and item.get("type")=="text":
+                                  try: value=json.loads(item.get("text",""));break
+                                  except (ValueError,TypeError):pass
+                      if isinstance(value,dict):value=value.get("backups")
+                      if isinstance(value,list) and all(isinstance(v,dict) for v in value):
+                          print("Backup inventory count:",len(value))
+                          # Never print filenames, identifiers, paths or contents.
+                          print("Backup records with recognized success status:",sum(isinstance(v.get("status"),str) and v["status"].lower() in ("ready","completed","success","available") for v in value))
                       else:
-                          # The only permitted call is the checked existing script.
-                          # Tool errors may include provider text; never print it.
-                          try:
-                              result=rpc("tools/call",{"name":"run_app_command","arguments":{"app":bot_id,"command":"node scripts/fadehost-schema-audit.js"}},8)
-                          except SystemExit:
-                              print("Schema audit execution: command rejected or transport failed; no retry")
-                          else:
-                              print("Schema audit execution: tool returned")
-                              allowed={
-                                  "users.id","users.status","wallets.id","wallets.wallet_address","wallets.chain_id","wallets.network","wallets.status","wallets.wallet_type","wallets.is_platform_controlled",
-                                  "user_wallet_assignments.id","user_wallet_assignments.user_id","user_wallet_assignments.wallet_id","user_wallet_assignments.assignment_type","user_wallet_assignments.status","user_wallet_assignments.ended_at",
-                                  "ledger_accounts.id","ledger_accounts.user_id","ledger_accounts.account_type","ledger_accounts.currency",
-                                  "ledger_transactions.id","ledger_transactions.idempotency_key","ledger_transactions.status","ledger_transactions.transaction_type","ledger_transactions.reference_id",
-                                  "ledger_entries.transaction_id","ledger_entries.account_id","ledger_entries.entry_type","ledger_entries.amount","ledger_entries.currency",
-                                  "verified_deposit_evidence.event_key","verified_deposit_evidence.block_hash","verified_deposit_evidence.block_number","verified_deposit_evidence.token_contract","verified_deposit_evidence.deposit_address","verified_deposit_evidence.amount_base_units",
-                                  "unique:verified_deposit_evidence.event_key","unique:ledger_transactions.idempotency_key"}
-                              def audit_records(value,depth=0):
-                                  if depth>8:return
-                                  if isinstance(value,dict):
-                                      if value.get("audit")=="fadehost-schema": yield value
-                                      else:
-                                          for v in value.values():yield from audit_records(v,depth+1)
-                                  elif isinstance(value,list):
-                                      for v in value:yield from audit_records(v,depth+1)
-                                  elif isinstance(value,str):
-                                      for line in value.splitlines():
-                                          try: parsed=json.loads(line)
-                                          except (ValueError,TypeError):continue
-                                          if isinstance(parsed,(dict,list)):yield from audit_records(parsed,depth+1)
-                              records=list(audit_records(result))
-                              if len(records)==1:
-                                  record=records[0]
-                                  missing=record.get("missing")
-                                  ready=record.get("ready")
-                                  if isinstance(ready,bool) and isinstance(missing,list) and all(isinstance(x,str) and x in allowed for x in missing) and len(missing)==len(set(missing)) and ready==(len(missing)==0):
-                                      print("Schema audit result verified: true")
-                                      print("Schema audit structural ready:",ready)
-                                      print("Schema audit missing count:",len(missing))
-                                      for item in sorted(missing):print("Schema audit missing:",item)
-                                  elif record.get("error") in ("DATABASE_URL_NOT_CONFIGURED","READ_ONLY_AUDIT_FAILED") and ready is False:
-                                      print("Schema audit returned recognized failure:",record["error"])
-                                  else: print("Schema audit output: unconfirmed")
-                              else:
-                                  print("Schema audit output: unconfirmed (no unique sanitized result)")
+                          print("Backup inventory structure: unconfirmed")
+          print("Database-specific backup and independent restoration: unverified")
           PY
       - name: Verify public readiness using the existing monitor HTTP client
         if: always()
