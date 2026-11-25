@@ -3095,3 +3095,33 @@ test("synthetic payout receipt confirmation recovers after a lost commit without
   assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"0.00000000");
   assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-payout:"+request.id])).rowCount,1);
 });
+
+test("corrupted withdrawal account links cannot release another synthetic owner's funds",{skip:!enabled},async()=>{
+  const {reserveWithdrawal,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const owners=[await createSimulationWallet(19520),await createSimulationWallet(19521)];
+  const requests=[];
+  for(const owner of owners){
+    const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+    await seedAvailableBalance(available.id,"25");
+    requests.push(await reserveWithdrawal(pool,owner,"ownership-fault","10"));
+  }
+  const {rows:[original]}=await pool.query("SELECT held_id,available_id FROM simulation_withdrawals WHERE id=$1",[requests[0].id]);
+  const {rows:[other]}=await pool.query("SELECT held_id,available_id FROM simulation_withdrawals WHERE id=$1",[requests[1].id]);
+  const before=await Promise.all(owners.map(displayedBalances));
+  for(const [column,value,restore] of [["held_id",other.held_id,original.held_id],["available_id",other.available_id,original.available_id]]){
+    await pool.query("UPDATE simulation_withdrawals SET "+column+"=$2 WHERE id=$1",[requests[0].id,value]);
+    try{
+      await assert.rejects(cancelWithdrawal(pool,owners[0],requests[0].id),/account ownership mismatch/);
+      await assert.rejects(reserveWithdrawal(pool,owners[0],"ownership-fault","10"),/account ownership mismatch/);
+      assert.deepEqual(await Promise.all(owners.map(displayedBalances)),before);
+      assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-release:"+requests[0].id])).rowCount,0);
+    }finally{
+      await pool.query("UPDATE simulation_withdrawals SET "+column+"=$2 WHERE id=$1",[requests[0].id,restore]);
+    }
+  }
+  const released=await cancelWithdrawal(pool,owners[0],requests[0].id);
+  assert.equal(await cancelWithdrawal(pool,owners[0],requests[0].id),released);
+  assert.equal(formatUsdt((await getWalletBalances(pool,owners[0])).AVAILABLE),"25.00000000");
+  assert.deepEqual(await displayedBalances(owners[1]),before[1]);
+  await cancelWithdrawal(pool,owners[1],requests[1].id);
+});

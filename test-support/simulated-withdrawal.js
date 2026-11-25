@@ -37,6 +37,28 @@ async function verifyMovementIdentity(client, request, operation, pointer, repla
   }
 }
 
+// Require both the owner-specific wallet accounts and the exact original
+// reservation before trusting a request row. This is a simulation-only guard.
+async function verifyOriginalReservation(client, request) {
+  const accounts = await client.query(
+    `SELECT id FROM ledger_accounts WHERE user_id=$1 AND currency='USDT'
+       AND ((id=$2 AND account_type='AVAILABLE') OR (id=$3 AND account_type='WITHDRAWAL_HOLD'))`,
+    [request.user_id, request.available_id, request.held_id]
+  );
+  if (accounts.rowCount !== 2) throw new Error("Withdrawal account ownership mismatch; reconciliation required");
+  const type = "sim-withdraw-reserve";
+  const original = await client.query(
+    `SELECT id FROM ledger_transactions WHERE transaction_type=$1 AND reference_id=$2
+       AND idempotency_key=$3 AND status='posted' FOR UPDATE`,
+    [type,String(request.id),type+":"+request.id]
+  );
+  await verifyMovementIdentity(client, request, "reserve", original.rows[0]?.id, true);
+  const journal = await postMovement(client, request, "reserve", request.available_id, request.held_id);
+  if (!journal.idempotent || journal.transactionId !== String(original.rows[0].id)) {
+    throw new Error("Withdrawal reservation replay mismatch");
+  }
+}
+
 export async function reserveWithdrawal(pool, userId, key, amount, destination = null) {
   if (typeof key !== "string" || !key.trim()) throw new Error("Missing request key");
   if (toUsdtUnitsExact(amount) <= 0n) throw new Error("Withdrawal must be positive");
@@ -49,21 +71,13 @@ export async function reserveWithdrawal(pool, userId, key, amount, destination =
     const owner = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!owner.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
-      "SELECT id, amount, status, destination, available_id, held_id FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2 FOR UPDATE", [userId, key]
+      "SELECT id, user_id, amount, status, destination, available_id, held_id FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2 FOR UPDATE", [userId, key]
     );
     if (prior.rowCount) {
       if (formatUsdt(prior.rows[0].amount) !== normalized) throw new Error("Request amount mismatch");
       const request = prior.rows[0];
       if (request.destination !== destination) throw new Error("Withdrawal destination mismatch");
-      const type = "sim-withdraw-reserve";
-      const original = await client.query(
-        `SELECT id FROM ledger_transactions WHERE transaction_type = $1 AND reference_id = $2
-         AND idempotency_key = $3 AND status = 'posted' FOR UPDATE`,
-        [type, String(request.id), type + ":" + request.id]
-      );
-      await verifyMovementIdentity(client, request, "reserve", original.rows[0]?.id, true);
-      const journal = await postMovement(client, request, "reserve", request.available_id, request.held_id);
-      if (!journal.idempotent || journal.transactionId !== String(original.rows[0].id)) throw new Error("Withdrawal reservation replay mismatch");
+      await verifyOriginalReservation(client, request);
       return { id: request.id, amount: request.amount, status: request.status };
     }
     // First-use setup shares the reservation transaction so a failed hold leaves no account behind.
@@ -102,6 +116,7 @@ async function releaseReservation(client, request, reviewerId) {
   const replay = request.status === "cancelled";
   if (!replay && request.status !== "reserved") throw new Error("Withdrawal cannot be cancelled");
   await verifyMovementIdentity(client, request, "release", request.release_id, replay);
+  await verifyOriginalReservation(client, request);
   const journal = await postMovement(client, request, "release", request.held_id, request.available_id);
   if (replay) {
     if (!journal.idempotent || journal.transactionId !== String(request.release_id)) throw new Error("Withdrawal release replay mismatch");
@@ -261,6 +276,7 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
     const replay = request.status === "paid";
     if (replay && (request.payout_event !== event || String(request.clearing_id) !== String(treasury.accountId))) throw new Error("Payout mismatch");
     await verifyMovementIdentity(client, request, "payout", request.payout_id, replay);
+    await verifyOriginalReservation(client, request);
     const clearing = await client.query(
       "SELECT id FROM ledger_accounts WHERE id = $1 AND account_type = 'CLEARING' AND currency = 'USDT' AND user_id IS NULL FOR SHARE",
       [treasury.accountId]
