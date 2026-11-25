@@ -47,6 +47,11 @@ function trackedScan() {
     if (bytes.includes(0)) continue;
     for (const kind of detectSecretKinds(bytes.toString("utf8"), path)) {
       counts.set(kind, (counts.get(kind) ?? 0) + 1);
+      // Identify the exact indexed blob for private review without printing the
+      // matching value, filename, or potentially sensitive exception text.
+      const oid = execFileSync("git", ["rev-parse", ":" + path], { encoding: "utf8" }).trim();
+      if (!/^[a-f0-9]{40,64}$/.test(oid)) throw new Error("Unexpected Git object identifier");
+      console.error("Tracked review object: " + kind + " " + oid);
     }
   }
   return counts;
