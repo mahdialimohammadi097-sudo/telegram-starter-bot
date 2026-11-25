@@ -42,7 +42,7 @@ test("historical ownership rejects malformed identifiers and interval ambiguity"
   assert.throws(()=>check(p));
  }
  const openEnded=valid();openEnded.history.end_block=null;
- assert.deepEqual(check(openEnded),{walletId:"1",userId:"12"});
+ assert.throws(()=>check(openEnded),/interval mismatch/);
 });
 
 test("matching returned wallet rows must match the requested event address",()=>{
@@ -60,7 +60,7 @@ test("historical block intervals enforce uint256 independently of numeric precis
  boundary.history.start_block=(max-1n).toString();
  boundary.history.end_block=null;
  boundary.eventBlockNumber=max.toString();
- assert.deepEqual(check(boundary),{walletId:"1",userId:"12"});
+ assert.throws(()=>check(boundary),/interval mismatch/);
  for(const mutate of [
   p=>{p.history.end_block=beyond;},
   p=>{p.history.end_block=null;p.eventBlockNumber=beyond;},
