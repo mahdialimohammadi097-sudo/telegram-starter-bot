@@ -24,9 +24,10 @@ export async function inspectHistoricalWalletSnapshot(pool,{eventBlockNumber,wal
          h.wallet_address,h.start_block::text,h.end_block::text,
          w.id::text AS wallet_id_current,w.chain_id::text AS wallet_chain_id,
          w.wallet_address AS wallet_address_current,
-         w.is_platform_controlled
+         w.is_platform_controlled,u.id::text AS user_id_current
   FROM "${schema}".deposit_address_ownership_history h
   LEFT JOIN "${schema}".wallets w ON w.id=h.wallet_id
+  LEFT JOIN "${schema}".users u ON u.id=h.user_id
   WHERE h.chain_id=56 AND lower(h.wallet_address)=$1
     AND h.start_block <= $2::numeric
     AND (h.end_block IS NULL OR $2::numeric < h.end_block)
@@ -37,6 +38,9 @@ export async function inspectHistoricalWalletSnapshot(pool,{eventBlockNumber,wal
     result.rowCount!==1)
   throw new Error("Missing or ambiguous historical wallet owner");
  const row=result.rows[0];
+ // Do not assume a foreign key was enforced when legacy history was inserted.
+ if(row.user_id_current!==expectedUserId || row.user_id_current!==row.user_id)
+  throw new Error("Historical user identity mismatch");
  verifyHistoricalWalletRecord({
   history:{wallet_id:row.wallet_id,user_id:row.user_id,chain_id:row.chain_id,
    wallet_address:row.wallet_address,start_block:row.start_block,end_block:row.end_block},

@@ -49,7 +49,7 @@ test("schema audit rejects evidence tables missing validated format checks",asyn
  ];
  const client={query:async(sql)=>{
   if(sql.includes("c.contype='c'")) return {rows:[
-   {conname:checks[0],validated:true,expression:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'::text)"},
+   {conname:checks[0],validated:true,expression:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]{0,77})$'::text)"},
    {conname:checks[1],validated:true,expression:"(block_hash ~ '^0x[0-9a-f]{64}$'::text)"},
    {conname:checks[2],validated:true,expression:"(token_contract ~ '^0x[0-9a-f]{40}$'::text)"},
    {conname:checks[3],validated:false,expression:"(deposit_address ~ '^0x[0-9a-f]{40}$'::text)"}
@@ -91,5 +91,13 @@ test("schema audit rejects nonstring and oversized identifiers before any query"
  const client={query:async()=>assert.fail("unexpected database query")};
  for(const schema of [null,123,["public"],"a".repeat(64)]){
   await assert.rejects(auditDepositSchema(client,{schema}),/Invalid/);
+ }
+});
+
+
+test("catalog audit fails closed when direct SQL deposit identity checks are absent",async()=>{
+ const report=await auditDepositSchema({query:async()=>({rows:[]})});
+ for(const name of ["token_nonzero","address_nonzero","log_index_uint256"]){
+  assert.ok(report.incompatible.includes("verified_deposit_evidence.verified_deposit_evidence_"+name+":check_constraint"));
  }
 });

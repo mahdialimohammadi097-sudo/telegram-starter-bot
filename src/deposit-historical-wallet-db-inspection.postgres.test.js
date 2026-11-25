@@ -19,12 +19,19 @@ test("historical wallet snapshot checks real PostgreSQL without write locks or f
  try{
   await pool.query('CREATE SCHEMA "'+schema+'"');created=true;
   // Deliberately weak disposable fixture exercises fail-closed inspection, not migration readiness.
+  await pool.query("CREATE TABLE "+prefix+"users(id bigint PRIMARY KEY)");
+  await pool.query("INSERT INTO "+prefix+"users VALUES (11),(12)");
   await pool.query("CREATE TABLE "+prefix+"wallets(id bigint PRIMARY KEY,chain_id integer,wallet_address text,is_platform_controlled boolean)");
   await pool.query("CREATE TABLE "+prefix+"deposit_address_ownership_history(wallet_id bigint,user_id bigint,chain_id integer,wallet_address text,start_block numeric(78,0),end_block numeric(78,0))");
   await pool.query("INSERT INTO "+prefix+"wallets VALUES (1,56,$1,true),(2,56,$1,true)",[address]);
   await pool.query(insert,[1,11,address,"100","200"]);
   await pool.query(insert,[2,12,address,"200",null]);
   const consistent={recordConsistent:true,independentHistoricalProof:false,financialActivationReady:false,realDepositsEnabled:false};
+  assert.deepEqual(await inspect(pool,input),consistent);
+  // A legacy history row may have been written while FK enforcement was disabled.
+  await pool.query("DELETE FROM "+prefix+"users WHERE id=11");
+  await assert.rejects(inspect(pool,input),/Historical user identity mismatch/);
+  await pool.query("INSERT INTO "+prefix+"users VALUES (11)");
   assert.deepEqual(await inspect(pool,input),consistent);
   await assert.rejects(inspect(pool,{...input,eventBlockNumber:"200",expectedUserId:"12"}),/interval mismatch/);
   await pool.query("UPDATE "+prefix+"deposit_address_ownership_history SET end_block=300 WHERE wallet_id=2");
@@ -56,6 +63,8 @@ test("historical inspection rejects RLS-hidden conflicting ownership",{skip:!saf
  try {
   await client.query('CREATE ROLE "'+role+'" NOLOGIN NOSUPERUSER NOBYPASSRLS');
   await client.query('CREATE SCHEMA "'+schema+'"');
+  await client.query("CREATE TABLE "+prefix+"users(id bigint PRIMARY KEY)");
+  await client.query("INSERT INTO "+prefix+"users VALUES (11),(12)");
   await client.query("CREATE TABLE "+prefix+"wallets(id bigint PRIMARY KEY,chain_id integer,wallet_address text,is_platform_controlled boolean)");
   await client.query("CREATE TABLE "+prefix+"deposit_address_ownership_history(wallet_id bigint,user_id bigint,chain_id integer,wallet_address text,start_block numeric(78,0),end_block numeric(78,0))");
   await client.query("INSERT INTO "+prefix+"wallets VALUES (1,56,$1,true),(2,56,$1,true)",[address]);

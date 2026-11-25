@@ -26,6 +26,9 @@ export function validateBep20DepositObservation(event, policy) {
   if (unsigned(policy.chainId, "chain ID") !== 56n) throw new Error("Unsupported network");
   const contract = address(policy.tokenContract, "token contract");
   const recipient = address(policy.depositAddress, "deposit address");
+  if ([contract, recipient].some(value => value === "0x" + "0".repeat(40))) {
+    throw new Error("Invalid zero token contract or deposit address");
+  }
   if (unsigned(policy.tokenDecimals, "token decimals") !== 18n) throw new Error("Unsupported token decimals");
   if (unsigned(event.chainId, "event chain ID") !== 56n) throw new Error("Wrong event network");
   if (address(event.tokenContract, "event token contract") !== contract) throw new Error("Wrong token contract");
