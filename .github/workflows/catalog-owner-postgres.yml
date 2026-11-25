@@ -14,7 +14,7 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_PASSWORD: rehearsal
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: catalog_rehearsal
         ports:
           - 5432:5432
@@ -25,8 +25,8 @@ jobs:
           --health-retries 10
     env:
       PROFINO_DISPOSABLE_POSTGRES: 'yes'
-      CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
-      DATABASE_URL: postgresql://postgres:rehearsal@localhost:5432/profino_test
+      CATALOG_REHEARSAL_URL: postgresql://postgres:postgres@localhost:5432/catalog_rehearsal
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/profino_test
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,7 +37,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Create a separate disposable ledger test database
         env:
-          PGPASSWORD: rehearsal
+          PGPASSWORD: postgres
         run: psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE profino_test'
       - name: Run catalog and ledger suites without silent skips
         shell: bash
