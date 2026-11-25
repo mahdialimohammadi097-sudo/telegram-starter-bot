@@ -10,11 +10,22 @@ const required={
  verified_deposit_evidence:["event_key","block_hash","block_number","token_contract","deposit_address","amount_base_units"]
 };
 export async function auditDepositSchema(client,{schema="public"}={}) {
- if(!client || typeof client.query!=="function" || !/^[a-z_][a-z_0-9]*$/.test(schema))
+ if(!client || typeof client.query!=="function" || typeof schema!=="string" || !/^[a-z_][a-z_0-9]{0,62}$/.test(schema))
   throw new TypeError("Invalid schema audit configuration");
  const result=await client.query(`
- SELECT table_name,column_name,data_type,numeric_precision,numeric_scale,is_nullable FROM information_schema.columns
- WHERE table_schema=$1 AND table_name=ANY($2::text[])`,[schema,Object.keys(required)]);
+ SELECT col.table_name,col.column_name,col.data_type,col.numeric_precision,col.numeric_scale,col.is_nullable
+ FROM information_schema.columns col
+ WHERE col.table_schema=$1 AND col.table_name=ANY($2::text[])
+ AND EXISTS (
+   SELECT 1 FROM pg_catalog.pg_class relation
+   JOIN pg_catalog.pg_namespace ns ON ns.oid=relation.relnamespace
+   WHERE ns.nspname=col.table_schema AND relation.relname=col.table_name
+     AND relation.relkind='r' AND relation.relpersistence='p'
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_inherits inheritance
+       WHERE inheritance.inhparent=relation.oid OR inheritance.inhrelid=relation.oid
+     )
+ )`,[schema,Object.keys(required)]);
  const actual=new Map();
  const types=new Map();
  for(const row of result.rows) {
@@ -87,7 +98,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  JOIN pg_class t ON t.oid=i.indrelid
  JOIN pg_namespace n ON n.oid=t.relnamespace
  JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=i.indkey[0]
- WHERE n.nspname=$1 AND t.relname=ANY($2::text[]) AND i.indisunique
+ WHERE n.nspname=$1 AND t.relname=ANY($2::text[]) AND i.indisunique AND i.indislive AND NOT i.indisexclusion
  `,[schema,["verified_deposit_evidence","ledger_transactions"]]);
  const uniqueIndex=(table,column)=>unique.rows.some(r=>
    r.tablename===table && r.column_name===column &&
