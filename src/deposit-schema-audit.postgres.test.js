@@ -5,6 +5,7 @@ import pg from "pg";
 import {readFile} from "node:fs/promises";
 import {randomUUID} from "node:crypto";
 import {auditDepositSchema} from "./deposit-schema-audit.js";
+import {auditCombinedDepositPreflight} from "./legacy-deposit-assignment-audit.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
 // These tests CREATE and DROP schemas. Never run them against shared or
 // production databases, even if CATALOG_REHEARSAL_URL is set by mistake.
@@ -63,6 +64,16 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   assert.deepEqual(result.missing,[]);
   assert.deepEqual(result.incompatible,[]);
   assert.equal(result.ready,true);
+  const withoutIndex=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(withoutIndex.catalog.ready,true);
+  assert.equal(withoutIndex.assignments.ready,false);
+  assert.equal(withoutIndex.ready,false);
+  await q(`CREATE UNIQUE INDEX one_active_deposit_wallet ON ${prefix}user_wallet_assignments
+    (wallet_id) WHERE status='active' AND assignment_type='deposit'`);
+  const combined=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(combined.ready,true);
+  assert.equal(combined.realDepositsEnabled,false);
+  assert.equal(combined.scope,"catalog-and-legacy-assignment-only");
   // Removing an actual bound must make the read-only report fail closed.
   const numericConstraints=await pool.query(`SELECT c.conname,pg_catalog.pg_get_expr(c.conbin,c.conrelid,false) AS expression
     FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace
