@@ -52,3 +52,26 @@ test("matching returned wallet rows must match the requested event address",()=>
  assert.throws(()=>check(p),/identity mismatch/);
  const oversized=valid();oversized.history.user_id="1".repeat(500);assert.throws(()=>check(oversized));
 });
+
+test("historical block intervals enforce uint256 independently of numeric precision",()=>{
+ const max=(1n<<256n)-1n;
+ const beyond=(max+1n).toString();
+ const boundary=valid();
+ boundary.history.start_block=(max-1n).toString();
+ boundary.history.end_block=null;
+ boundary.eventBlockNumber=max.toString();
+ assert.deepEqual(check(boundary),{walletId:"1",userId:"12"});
+ for(const mutate of [
+  p=>{p.history.end_block=beyond;},
+  p=>{p.history.end_block=null;p.eventBlockNumber=beyond;},
+  p=>{p.history.start_block=beyond;p.history.end_block=null;p.eventBlockNumber=beyond;}
+ ]){
+  const p=valid();mutate(p);assert.throws(()=>check(p),/interval mismatch/);
+ }
+ const finite=valid();
+ finite.history.end_block=max.toString();
+ finite.eventBlockNumber=(max-1n).toString();
+ assert.deepEqual(check(finite),{walletId:"1",userId:"12"});
+ finite.eventBlockNumber=max.toString();
+ assert.throws(()=>check(finite),/interval mismatch/);
+});
