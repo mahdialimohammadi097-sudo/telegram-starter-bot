@@ -11,6 +11,8 @@ on:
       - 'src/bep20-deposit-rehearsal*'
       - 'src/bep20-rpc-reader*'
       - 'src/deposit-ingestion-gate*'
+      - 'src/deposit-historical-wallet-*'
+      - 'src/read-only-deposit-audit*'
       - '.github/workflows/catalog-owner-tests.yml'
   push:
     branches:
@@ -29,4 +31,4 @@ jobs:
         with:
           node-version: '22'
       - run: node --check scripts/audit-deposit-schema.js
-      - run: node --test src/catalog-deposit-owner.test.js src/deposit-owner-guard.test.js src/verified-deposit-evidence-store.test.js src/bep20-receipt-evidence.test.js src/bep20-deposit-observation.test.js src/bep20-deposit-rehearsal.test.js src/bep20-rpc-reader.test.js src/deposit-schema-audit.test.js src/deposit-ingestion-gate.test.js src/confirmed-deposit-posting.test.js
+      - run: node --test src/catalog-deposit-owner.test.js src/deposit-owner-guard.test.js src/deposit-historical-wallet-db-inspection.test.js src/deposit-historical-wallet-record.test.js src/read-only-deposit-audit.test.js src/verified-deposit-evidence-store.test.js src/bep20-receipt-evidence.test.js src/bep20-deposit-observation.test.js src/bep20-deposit-rehearsal.test.js src/bep20-rpc-reader.test.js src/deposit-schema-audit.test.js src/deposit-ingestion-gate.test.js src/confirmed-deposit-posting.test.js
