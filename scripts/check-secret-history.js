@@ -9,7 +9,9 @@ const reviewedFixtures = new Set(["c8a61100ee20e7f89e1b6c4d017f1c19aba4118f","60
   // Reviewed CI hardening revision: all five URL matches are identical to the previous disposable localhost catalog fixture.
   "c89ff6e48dda4d0f13390241ab72109cd5cc049e",
   // PR #182: reviewed diagnostic test blob; its sole synthetic database URL is unchanged from 832a6cc0.
-  "1fe4f4a88d2e04d1b7da6871d8a611d56a3f8b1f"]);
+  "1fe4f4a88d2e04d1b7da6871d8a611d56a3f8b1f",
+  // PR #185: historical catalog CI blob has exactly two reviewed localhost disposable DSNs.
+  "8ea44466ed4b9db07f9a12baea16b814f612d0c8"]);
 const maxBuffer = 32 * 1024 * 1024;
 
 export function scanHistory(cwd = process.cwd()) {

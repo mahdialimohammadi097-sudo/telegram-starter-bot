@@ -14,7 +14,7 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_PASSWORD: rehearsal
+          POSTGRES_PASSWORD: postgres
           POSTGRES_DB: catalog_rehearsal
         ports:
           - 5432:5432
@@ -23,6 +23,10 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+    env:
+      PROFINO_DISPOSABLE_POSTGRES: 'yes'
+      CATALOG_REHEARSAL_URL: postgresql://postgres:postgres@localhost:5432/catalog_rehearsal
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/profino_test
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,19 +35,16 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts
-      - run: node --test src/deposit-evidence-migration.postgres.test.js
+      - name: Create a separate disposable ledger test database
         env:
-          PROFINO_DISPOSABLE_POSTGRES: 'yes'
-          CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
-      - run: node --test src/confirmed-deposit-posting.postgres.test.js
-        env:
-          DATABASE_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
-      - run: node --test src/deposit-schema-audit.postgres.test.js
-        env:
-          CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
-      - run: node --test src/verified-deposit-evidence-store.postgres.test.js
-        env:
-          CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
-      - run: node --test src/catalog-deposit-owner.postgres.test.js
-        env:
-          CATALOG_REHEARSAL_URL: postgresql://postgres:rehearsal@localhost:5432/catalog_rehearsal
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE profino_test'
+      - name: Run catalog and ledger suites without silent skips
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in deposit-evidence-migration confirmed-deposit-posting deposit-schema-audit verified-deposit-evidence-store catalog-deposit-owner; do
+            node --test --test-reporter=tap "src/$suite.postgres.test.js" | tee "$RUNNER_TEMP/$suite.tap"
+            grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/$suite.tap"
+            grep -Fxq '# skipped 0' "$RUNNER_TEMP/$suite.tap"
+          done

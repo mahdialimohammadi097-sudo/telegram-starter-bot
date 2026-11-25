@@ -1,3 +1,4 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -6,12 +7,7 @@ import { isolatedDatabaseIdentitySql, isIsolatedDatabaseIdentity } from "./isola
 
 const url = process.env.CATALOG_REHEARSAL_URL;
 function safeTarget() {
-  if (!url || process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes") return false;
-  try {
-    const target = new URL(url);
-    return ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname) &&
-      target.pathname === "/catalog_rehearsal" && !target.search && !target.hash;
-  } catch { return false; }
+  return isDisposablePostgresTarget(url, "catalog_rehearsal");
 }
 
 test("PostgreSQL 17 distinguishes session markers from an independently marked test database", { skip: !safeTarget(), timeout: 20000 }, async () => {

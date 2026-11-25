@@ -1,3 +1,4 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import { auditConfirmedDepositLedger } from './confirmed-deposit-ledger-audit.js';
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,12 +11,7 @@ import {persistVerifiedDepositEvidence} from './verified-deposit-evidence-store.
 // These integration tests create and DROP PostgreSQL schemas. Never run them
 // against a production or shared database, even when DATABASE_URL is present.
 function isDisposableDatabase() {
- if (process.env.PROFINO_DISPOSABLE_POSTGRES !== "yes" || !process.env.DATABASE_URL) return false;
- try {
-  const target = new URL(process.env.DATABASE_URL);
-  return ["localhost", "127.0.0.1", "::1"].includes(target.hostname) &&
-   target.pathname === "/profino_test";
- } catch { return false; }
+  return isDisposablePostgresTarget(process.env.DATABASE_URL, "profino_test");
 }
 const enabled = isDisposableDatabase();
 let admin, pool, schema;

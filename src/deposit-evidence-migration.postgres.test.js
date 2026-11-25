@@ -1,16 +1,12 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
 import {readFile} from "node:fs/promises";
 const url=process.env.CATALOG_REHEARSAL_URL;
-const safeTarget=()=>{
- if(!url || process.env.PROFINO_DISPOSABLE_POSTGRES!=="yes") return false;
- try {
-  const target=new URL(url);
-  return ["localhost","127.0.0.1","::1"].includes(target.hostname) &&
-   target.pathname==="/catalog_rehearsal";
- } catch {return false}
-};
+function safeTarget() {
+  return isDisposablePostgresTarget(url, "catalog_rehearsal");
+}
 test("staged evidence migration creates constrained table and is idempotent",async()=>{
  assert.equal(safeTarget(),true,"Explicit disposable local PostgreSQL target is required");
  const pool=new pg.Pool({connectionString:url});

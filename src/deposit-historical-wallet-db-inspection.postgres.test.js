@@ -1,12 +1,12 @@
+import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import pg from "pg";
 import {inspectHistoricalWalletSnapshot as inspect} from "./deposit-historical-wallet-db-inspection.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
-function safeTarget(){
- if(!url || process.env.PROFINO_DISPOSABLE_POSTGRES!=="yes")return false;
- try {const u=new URL(url);return ["postgres:","postgresql:"].includes(u.protocol) && ["localhost","127.0.0.1","[::1]"].includes(u.hostname) && u.pathname==="/catalog_rehearsal" && !u.search && !u.hash;}catch{return false;}
+function safeTarget() {
+  return isDisposablePostgresTarget(url, "catalog_rehearsal");
 }
 test("historical wallet snapshot checks real PostgreSQL without write locks or financial authorization",{skip:!safeTarget(),timeout:20000},async()=>{
  const schema="history_snapshot_"+randomUUID().replaceAll("-","");
