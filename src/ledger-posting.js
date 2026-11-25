@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { assertBalancedLedgerEntries, toUsdtUnitsExact } from "./ledger-safety.js";
 import { rollbackTransaction } from "./transaction-safety.js";
 
@@ -113,8 +114,38 @@ export async function postLedgerTransaction({ pool, ...journal }) {
   return withLedgerTransaction(pool, client => postJournalInTransaction(client, journal));
 }
 
-// The caller owns BEGIN, COMMIT, and ROLLBACK.
-export async function postJournalInTransaction(client, {
+// The caller owns BEGIN, COMMIT, and ROLLBACK. A savepoint requires an
+// explicit PostgreSQL transaction and prevents partial journals surviving a
+// caught posting error. The surrounding business operation must still roll
+// back its own domain changes on failure. No parallel work on one client.
+export async function postJournalInTransaction(client, journal) {
+  const savepoint = "profino_journal_" + randomUUID().replaceAll("-", "");
+  const started = await client.query("SAVEPOINT " + savepoint);
+  if (started?.command !== "SAVEPOINT") throw new Error("Ledger savepoint start unconfirmed");
+  try {
+    const result = await postJournalWithinSavepoint(client, journal);
+    const released = await client.query("RELEASE SAVEPOINT " + savepoint);
+    if (released?.command !== "RELEASE") throw new Error("Ledger savepoint release unconfirmed");
+    return result;
+  } catch (error) {
+    try {
+      const rolledBack = await client.query("ROLLBACK TO SAVEPOINT " + savepoint);
+      if (rolledBack?.command !== "ROLLBACK") throw new Error("Ledger savepoint rollback unconfirmed");
+      const released = await client.query("RELEASE SAVEPOINT " + savepoint);
+      if (released?.command !== "RELEASE") throw new Error("Ledger savepoint release unconfirmed");
+    } catch (cleanupError) {
+      // The outer transaction must abort if savepoint cleanup is uncertain.
+      // Preserve the original failure for diagnosis.
+      if (error && typeof error === "object") {
+        try { error.savepointError = cleanupError; } catch {}
+      }
+      throw new Error("Ledger savepoint cleanup failed; outer transaction must roll back", { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function postJournalWithinSavepoint(client, {
   transactionType,
   referenceId = null,
   idempotencyKey,
@@ -138,10 +169,18 @@ export async function postJournalInTransaction(client, {
 
   // Serialize retries with the same key, including requests racing on separate
   // application instances. PostgreSQL releases this lock at transaction end.
-  await client.query(
-    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+  // The account-row locks below serialize writers, but do not refresh a
+  // REPEATABLE READ snapshot. A waiter could otherwise read a pre-debit
+  // balance after the first writer commits. Reject unsupported isolation
+  // before acquiring the key lock or touching any journal.
+  const keyLock = await client.query(
+    `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+     WHERE current_setting('transaction_isolation') = 'read committed'`,
     [key]
   );
+  if (keyLock.rowCount !== 1) {
+    throw new Error("Ledger posting requires READ COMMITTED transaction isolation");
+  }
 
   const existing = await client.query(
     `SELECT id, transaction_type, reference_id, description, status
@@ -209,7 +248,10 @@ export async function postJournalInTransaction(client, {
 
   for (const [accountId, movement] of byAccount) {
     const account = accounts.get(accountId);
-    if (String(account.account_type).toUpperCase() !== "AVAILABLE") continue;
+    const accountType = String(account.account_type).toUpperCase();
+    // An investment settlement or withdrawal release must not spend a
+    // principal/hold that no longer exists, even with a distinct request key.
+    if (!["AVAILABLE", "INVESTED", "WITHDRAWAL_HOLD"].includes(accountType)) continue;
 
     const balanceResult = await client.query(
       `SELECT trim_scale(COALESCE(
@@ -226,7 +268,7 @@ export async function postJournalInTransaction(client, {
     );
     const currentBalance = toUsdtUnitsExact(balanceResult.rows[0].balance);
     if (currentBalance + movement.credit - movement.debit < 0n) {
-      throw new Error("Insufficient available balance");
+      throw new Error(accountType === "AVAILABLE" ? "Insufficient available balance" : "Insufficient reserved ledger balance");
     }
   }
 

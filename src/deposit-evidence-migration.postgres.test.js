@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
 import {readFile} from "node:fs/promises";
+import {persistVerifiedDepositEvidence} from "./verified-deposit-evidence-store.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
 function safeTarget() {
   return isDisposablePostgresTarget(url, "catalog_rehearsal");
@@ -86,6 +87,30 @@ test("staged evidence migration creates constrained table and refuses existing r
       VALUES (${values.join(",")})`), error=>error.code==="23514");
     await client.query("ROLLBACK TO SAVEPOINT " + label);
   }
+  // Test direct SQL independently of all application validators.
+  const zeroAddress="0x"+"0".repeat(40);
+  const keyPrefix="bsc:56:0x"+"e".repeat(64)+":";
+  const validToken="0x"+"b".repeat(40),validAddress="0x"+"c".repeat(40);
+  for(const [key,token,address] of [
+    [keyPrefix+"01",validToken,validAddress],
+    [keyPrefix+(1n<<256n).toString(),validToken,validAddress],
+    [keyPrefix+"9".repeat(100),validToken,validAddress],
+    [keyPrefix+"6",zeroAddress,validAddress],
+    [keyPrefix+"7",validToken,zeroAddress]
+  ]){
+    await client.query("SAVEPOINT invalid_identity");
+    await assert.rejects(client.query(
+      "INSERT INTO public.verified_deposit_evidence (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES ($1,$2,1,$3,$4,1)",
+      [key,"0x"+"a".repeat(64),token,address]),{code:"23514"});
+    await client.query("ROLLBACK TO SAVEPOINT invalid_identity");
+    await client.query("RELEASE SAVEPOINT invalid_identity");
+  }
+  await client.query("SAVEPOINT maximum_identity");
+  const maximumKey=keyPrefix+((1n<<256n)-1n).toString();
+  await client.query("INSERT INTO public.verified_deposit_evidence (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES ($1,$2,1,$3,$4,1)",
+    [maximumKey,"0x"+"a".repeat(64),validToken,validAddress]);
+  await client.query("ROLLBACK TO SAVEPOINT maximum_identity");
+  await client.query("RELEASE SAVEPOINT maximum_identity");
   // NaN compares greater than finite numerics in PostgreSQL. A lower bound
   // alone is insufficient. Test both numeric fields and the uint256 ceiling.
   for(const [block,amount] of [
@@ -113,11 +138,60 @@ test("staged evidence migration creates constrained table and refuses existing r
     assert.equal(columnMap.get(name)?.numeric_precision,null);
     assert.equal(columnMap.get(name)?.numeric_scale,null);
   }
-  // Evidence-only migration must not introduce ledger posting triggers.
-  const triggers=await client.query(`SELECT tgname FROM pg_trigger
-    WHERE tgrelid='public.verified_deposit_evidence'::regclass
-      AND NOT tgisinternal`);
-  assert.deepEqual(triggers.rows,[],"Evidence table must not post balances via triggers");
+  // Only the reviewed mutation guard may be installed; no posting trigger.
+  const triggers=await client.query(`SELECT t.tgname,t.tgenabled,p.proname
+    FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
+    WHERE t.tgrelid='public.verified_deposit_evidence'::regclass
+      AND NOT t.tgisinternal`);
+  assert.deepEqual(triggers.rows,[{tgname:"verified_deposit_evidence_immutable",tgenabled:"A",proname:"reject_verified_deposit_evidence_mutation"}]);
+  for(const sql of [
+    "UPDATE public.verified_deposit_evidence SET amount_base_units=2",
+    "DELETE FROM public.verified_deposit_evidence",
+    "TRUNCATE public.verified_deposit_evidence"
+  ]){
+    await client.query("SAVEPOINT immutable_evidence");
+    await assert.rejects(client.query(sql),{code:"55000"});
+    await client.query("ROLLBACK TO SAVEPOINT immutable_evidence");
+  }
+  // Exercise the real store against the reviewed migration, not the legacy fixture.
+  await client.query("SET LOCAL search_path = pg_catalog, public");
+  const evidence={eventKey:"bsc:56:0x"+"d".repeat(64)+":0",blockHash:"0x"+"a".repeat(64),
+   blockNumber:"1",tokenContract:"0x"+"b".repeat(40),depositAddress:"0x"+"c".repeat(40),
+   amountBaseUnits:"1000000000000000000"};
+  assert.deepEqual(await persistVerifiedDepositEvidence(client,evidence),{inserted:false,eventKey:evidence.eventKey});
+  await assert.rejects(persistVerifiedDepositEvidence(client,{...evidence,blockHash:"0x"+"e".repeat(64)}),/Conflicting verified deposit evidence/);
+  // The evidence writer needs only INSERT/SELECT; do not require UPDATE
+  // permission simply to compare an already committed receipt.
+  const writer="evidence_writer_"+(await import("node:crypto")).randomUUID().replaceAll("-","");
+  await client.query("SAVEPOINT restricted_writer");
+  try{
+   await client.query('CREATE ROLE "'+writer+'" NOLOGIN NOSUPERUSER NOBYPASSRLS');
+   await client.query('GRANT USAGE ON SCHEMA public TO "'+writer+'"');
+   await client.query('GRANT SELECT, INSERT ON public.verified_deposit_evidence TO "'+writer+'"');
+   await client.query('SET LOCAL ROLE "'+writer+'"');
+   assert.equal((await client.query("SELECT pg_catalog.has_table_privilege(current_user,'public.verified_deposit_evidence','UPDATE') AS allowed")).rows[0].allowed,false);
+   assert.deepEqual(await persistVerifiedDepositEvidence(client,evidence),{inserted:false,eventKey:evidence.eventKey});
+   const newEvidence={...evidence,eventKey:"bsc:56:0x"+"c".repeat(64)+":9"};
+   assert.deepEqual(await persistVerifiedDepositEvidence(client,newEvidence),{inserted:true,eventKey:newEvidence.eventKey});
+   await assert.rejects(persistVerifiedDepositEvidence(client,{...newEvidence,amountBaseUnits:"2"}),/Conflicting verified deposit evidence/);
+  }finally{
+   await client.query("ROLLBACK TO SAVEPOINT restricted_writer");
+   await client.query("RELEASE SAVEPOINT restricted_writer");
+  }
+  // ALWAYS must reject actual mutation attempts in replica mode, including no-op writes.
+  for(const sql of [
+   "UPDATE public.verified_deposit_evidence SET amount_base_units=2 WHERE false",
+   "DELETE FROM public.verified_deposit_evidence WHERE false",
+   "TRUNCATE public.verified_deposit_evidence"
+  ]){
+   await client.query("SAVEPOINT replica_guard");
+   try{
+    await client.query("SET LOCAL session_replication_role = replica");
+    await assert.rejects(client.query(sql),{code:"55000"});
+   }finally{await client.query("ROLLBACK TO SAVEPOINT replica_guard");await client.query("RELEASE SAVEPOINT replica_guard");}
+  }
+  const original=await client.query("SELECT amount_base_units::text AS amount FROM public.verified_deposit_evidence");
+  assert.deepEqual(original.rows,[{amount:"1000000000000000000"}]);
   const ledgerTouches=await client.query(`SELECT count(*)::int AS n FROM pg_depend d
     JOIN pg_class source ON source.oid=d.objid
     WHERE source.oid='public.verified_deposit_evidence'::regclass
