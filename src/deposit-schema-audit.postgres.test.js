@@ -75,80 +75,14 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
   await q(`REVOKE ALL ON FUNCTION ${prefix}reject_verified_deposit_evidence_mutation() FROM PUBLIC`);
   await q(`CREATE OR REPLACE FUNCTION ${prefix}reject_verified_deposit_evidence_mutation()
-    RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $ BEGIN RETURN NULL; END $`);
+    RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $body$ BEGIN RETURN NULL; END $body$`);
   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
   await q(`CREATE OR REPLACE FUNCTION ${prefix}reject_verified_deposit_evidence_mutation()
     RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $guard$
 BEGIN
  RAISE EXCEPTION 'Verified deposit evidence is immutable' USING ERRCODE='55000';
 END
-$guardimport { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
-import test from "node:test";
-import assert from "node:assert/strict";
-import pg from "pg";
-import {readFile} from "node:fs/promises";
-import {randomUUID} from "node:crypto";
-import {auditDepositSchema} from "./deposit-schema-audit.js";
-import {auditCombinedDepositPreflight} from "./legacy-deposit-assignment-audit.js";
-const url=process.env.CATALOG_REHEARSAL_URL;
-// These tests CREATE and DROP schemas. Never run them against shared or
-// production databases, even if CATALOG_REHEARSAL_URL is set by mistake.
-function safeDisposableTarget() {
-  return isDisposablePostgresTarget(url, "catalog_rehearsal");
-}
-const skipUnsafeTarget = !safeDisposableTarget();
-test("read-only audit queries real PostgreSQL catalog and fails closed on incomplete schema",{skip:skipUnsafeTarget},async()=>{
- const pool=new pg.Pool({connectionString:url});
- const schema="audit_"+randomUUID().replaceAll("-","");
- try {
-  await pool.query('CREATE SCHEMA "'+schema+'"');
-  const result=await auditDepositSchema(pool,{schema});
-  assert.equal(result.ready,false);
-  assert.ok(result.missing.includes("users.id"));
-  assert.ok(result.incompatible.includes("ledger_transactions.idempotency_key:unique_index"));
-  assert.ok(result.incompatible.includes("user_wallet_assignments.wallet_id:foreign_key"));
- } finally {
-  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
-  await pool.end();
- }
-});
-
-test("read-only audit accepts complete PostgreSQL ownership and ledger contract",{skip:skipUnsafeTarget},async()=>{
- const pool=new pg.Pool({connectionString:url});
- const schema="audit_ok_"+randomUUID().replaceAll("-","");
- const q=async sql=>pool.query(sql);
- try{
-  await q('CREATE SCHEMA "'+schema+'"');
-  const prefix='"'+schema+'".';
-  await q(`
-   CREATE TABLE ${prefix}users(id bigint PRIMARY KEY,status text NOT NULL);
-   CREATE TABLE ${prefix}wallets(id bigint PRIMARY KEY,wallet_address text NOT NULL,
-     chain_id integer NOT NULL,network text NOT NULL,status text NOT NULL,
-     wallet_type text NOT NULL,is_platform_controlled boolean NOT NULL);
-   CREATE TABLE ${prefix}user_wallet_assignments(
-     id bigint PRIMARY KEY,ended_at timestamptz,
-     user_id bigint NOT NULL REFERENCES ${prefix}users(id),
-     wallet_id bigint NOT NULL REFERENCES ${prefix}wallets(id),
-     assignment_type text NOT NULL,status text NOT NULL);
-   CREATE TABLE ${prefix}ledger_accounts(
-     id bigint PRIMARY KEY,user_id bigint REFERENCES ${prefix}users(id),
-     account_type text NOT NULL,currency text NOT NULL);
-   CREATE TABLE ${prefix}ledger_transactions(
-     id bigint PRIMARY KEY,idempotency_key text UNIQUE NOT NULL,
-     status text NOT NULL,transaction_type text NOT NULL,reference_id text);
-   CREATE TABLE ${prefix}ledger_entries(
-     transaction_id bigint NOT NULL REFERENCES ${prefix}ledger_transactions(id),
-     account_id bigint NOT NULL REFERENCES ${prefix}ledger_accounts(id),
-     entry_type text NOT NULL,amount numeric(36,18) NOT NULL,currency text NOT NULL);
-
-  `);
-  const migration=await readFile(new URL("../migrations/20261121_verified_deposit_evidence.sql",import.meta.url),"utf8");
-  await q(migration.replaceAll("public.",prefix));
-  const result=await auditDepositSchema(pool,{schema});
-  assert.deepEqual(result.missing,[]);
-  assert.deepEqual(result.incompatible,[]);
-  assert.equal(result.ready,true);
-);
+$guard$`);
   assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
   const withoutIndex=await auditCombinedDepositPreflight(pool,{schema});
   assert.equal(withoutIndex.catalog.ready,true);
