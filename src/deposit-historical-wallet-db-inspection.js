@@ -13,6 +13,12 @@ export async function inspectHistoricalWalletSnapshot(pool,{eventBlockNumber,wal
   throw new TypeError("Invalid historical inspection input");
  // Read-only snapshot, not a posting lock or independent historical proof.
  return runReadOnlyDepositAudit(pool,async client=>{
+ // Do not report a consistent owner when a policy hides conflicting rows.
+ // This setting does not bypass RLS; PostgreSQL rejects filtered queries.
+ const setting=await client.query("SET LOCAL row_security = off");
+ const visibility=await client.query("SELECT pg_catalog.current_setting('row_security') AS row_security");
+ if(setting?.command!=="SET" || visibility.rows?.length!==1 || visibility.rows[0].row_security!=="off")
+  throw new Error("Historical wallet row visibility unconfirmed");
  const result=await client.query(`
   SELECT h.wallet_id::text,h.user_id::text,h.chain_id::text,
          h.wallet_address,h.start_block::text,h.end_block::text,
