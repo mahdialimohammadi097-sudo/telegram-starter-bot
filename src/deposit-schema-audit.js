@@ -185,6 +185,11 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
         NOT EXISTS (
           SELECT 1 FROM pg_catalog.aclexplode(COALESCE(t.relacl,pg_catalog.acldefault('r',t.relowner))) acl
           WHERE acl.grantee=0
+        ) AND NOT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_attribute col
+          CROSS JOIN LATERAL pg_catalog.aclexplode(col.attacl) acl
+          WHERE col.attrelid=t.oid AND col.attnum>0 AND NOT col.attisdropped
+            AND acl.grantee=0
         ) AS no_public_table_access,
         NOT EXISTS (
           SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
