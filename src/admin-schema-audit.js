@@ -1,5 +1,39 @@
 import { auditDepositSchema } from "./deposit-schema-audit.js";
 import { rollbackTransaction } from "./transaction-safety.js";
+// Basic historical guard inventory, not proof of function bodies, interval semantics,
+// effective privileges or historical provenance. A missing guard must fail closed.
+export async function inspectHistoricalGuardInventory(client,schema="public") {
+ const result=await client.query(`
+  SELECT c.relkind='r' AND c.relpersistence='p'
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i WHERE i.inhparent=c.oid OR i.inhrelid=c.oid)
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_rewrite r WHERE r.ev_class=c.oid)
+    AND (SELECT count(*) FROM pg_catalog.pg_trigger tg
+      WHERE tg.tgrelid=c.oid AND NOT tg.tgisinternal)=3
+    AND (SELECT count(*) FROM pg_catalog.pg_trigger tg
+      JOIN pg_catalog.pg_proc p ON p.oid=tg.tgfoid
+      JOIN pg_catalog.pg_namespace fn ON fn.oid=p.pronamespace
+      WHERE tg.tgrelid=c.oid AND NOT tg.tgisinternal AND tg.tgenabled='A'
+        AND tg.tgqual IS NULL AND tg.tgnargs=0 AND tg.tgconstraint=0
+        AND fn.nspname=$1 AND NOT p.prosecdef
+        AND ((tg.tgname='deposit_ownership_wallet_identity' AND tg.tgtype=7
+             AND p.proname='validate_deposit_ownership_wallet_identity')
+          OR (tg.tgname='deposit_ownership_history_immutable' AND tg.tgtype=27
+             AND p.proname='reject_deposit_ownership_history_mutation')
+          OR (tg.tgname='deposit_ownership_history_no_truncate' AND tg.tgtype=34
+             AND p.proname='reject_deposit_ownership_history_mutation')))=3
+    AND (SELECT count(*) FROM pg_catalog.pg_constraint co
+      JOIN pg_catalog.pg_index ix ON ix.indexrelid=co.conindid
+      WHERE co.conrelid=c.oid AND co.contype='x' AND co.convalidated
+        AND NOT co.condeferrable AND ix.indisvalid AND ix.indisready AND ix.indislive AND ix.indisexclusion
+        AND co.conname IN ('ownership_wallet_interval_no_overlap','ownership_interval_no_overlap'))=2
+    AS basic_guards_present
+  FROM pg_catalog.pg_class c
+  JOIN pg_catalog.pg_namespace ns ON ns.oid=c.relnamespace
+  WHERE ns.nspname=$1 AND c.relname='deposit_address_ownership_history'
+ `,[schema]);
+ return result.rows?.length===1 && result.rows[0].basic_guards_present===true;
+}
+
 // Read-only, one-shot structural diagnostic for the existing production database.
 // No user rows, wallet addresses, balances or secrets are queried or returned.
 export async function inspectDepositSchemaReadOnly(pool) {
@@ -69,14 +103,16 @@ export async function inspectDepositSchemaReadOnly(pool) {
   // the stronger shared catalog contract (nullability, precision, FK and CHECK).
   const catalog=await auditDepositSchema(client);
   for(const column of catalog.missing) if(!missing.includes(column)) missing.push(column);
+  const historicalBasicGuardsPresent=await inspectHistoricalGuardInventory(client);
   transactionOpen=false;
   const completion=await client.query("ROLLBACK");
   if(completion?.command!=="ROLLBACK")throw new Error("Schema audit rollback unconfirmed");
-  return {audit:"deposit-schema",structuralReady:missing.length===0&&catalog.ready&&incompatibleTypes.length===0,missing,
+  return {audit:"deposit-schema",structuralReady:missing.length===0&&catalog.ready&&incompatibleTypes.length===0&&historicalBasicGuardsPresent,missing,
+   historicalBasicGuardsPresent,
    catalogIncompatible:catalog.incompatible,
    migrationTypeCompatible:incompatibleTypes.length===0,incompatibleTypes,
    financialActivationReady:false,realDepositsEnabled:false,
-   outstandingSecurityGates:["independent-historical-ownership-proof","independent-chain-finality-verification","production-backup-restore","owner-financial-authorization"]};
+   outstandingSecurityGates:["historical-schema-definition-and-effective-privilege-review","independent-historical-ownership-proof","independent-chain-finality-verification","production-backup-restore","owner-financial-authorization"]};
  } catch(error) {
   // Failed BEGIN or unconfirmed completion must not return the session to the pool.
   if(transactionOpen){
