@@ -71,6 +71,13 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   await q(`GRANT SELECT ON ${prefix}verified_deposit_evidence TO PUBLIC`);
   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
   await q(`REVOKE ALL ON ${prefix}verified_deposit_evidence FROM PUBLIC`);
+  // Table-level REVOKE does not remove independent column ACLs.
+  for(const privilege of ["SELECT","INSERT","UPDATE","REFERENCES"]){
+   await q(`GRANT ${privilege} (deposit_address) ON ${prefix}verified_deposit_evidence TO PUBLIC`);
+   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"),privilege);
+   await q(`REVOKE ${privilege} (deposit_address) ON ${prefix}verified_deposit_evidence FROM PUBLIC`);
+   assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
+  }
   await q(`GRANT EXECUTE ON FUNCTION ${prefix}reject_verified_deposit_evidence_mutation() TO PUBLIC`);
   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
   await q(`REVOKE ALL ON FUNCTION ${prefix}reject_verified_deposit_evidence_mutation() FROM PUBLIC`);
