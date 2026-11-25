@@ -1,0 +1,34 @@
+# PROFINO priority 7 checkpoint and priority 8 release decision
+
+**NO-GO: real customer funds.** Review-only branch; do not deploy, apply production migrations, or enable financial operations.
+
+## Independently retrieved GitHub evidence (2026-11-25 UTC)
+
+- Main HEAD: `e0d7509b43605493beb6a20485d5d17ce0ef8e16` (repository state, not verified running revision).
+- Cumulative review candidate PR #224: `4f3bdea6b1be46e80d6d3b4e4f885f6a5c5791ed`, base `36b6285b8ca53198ccb38dd554ba76812af91ac1`. GitHub reports 12/12 checks successful; 124 commits ahead, zero behind that base; 64 changed files. Mergeable does not mean reviewed or authorized.
+- [Node 22 full/focused matrix](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/45696537726/job/139495290337): 585/585 and 138/138, zero fail/cancel/skip/todo; both reports explicitly contain nine critical PostgreSQL regressions. Focused subset overlaps full suite.
+- [Node 26 matrix](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/45696537726/job/139495290085): 585/585; nine critical tests present.
+- [Integration validator Node 22](https://github.com/mahdialimohammadi097-sudo/telegram-starter-bot/actions/runs/45696537385/job/139495289550): 585/585 full, 138/138 focused, dependency audit found zero known vulnerabilities at run time.
+- Credential scan, ownership, concurrency, safe audit and synthetic restore checks passed on that candidate.
+- Reviewed main and candidate source trees: migration files are absent from main; candidate contains three migration SQL files, including two review-only files. Candidate runtime verifies authenticated bot and isolated DB before staging handler injection; customer transfer text explicitly disables real funds. No deployment inferred.
+- #224 includes earlier cumulative review PRs; do not merge overlapping PRs independently. Keep exact tested revision separate from subsequent documentation edits.
+
+## Release evidence matrix
+
+| Gate | Status | Evidence / limitation |
+|---|---|---|
+| Disposable test matrix and synthetic scenarios | PASS for exact tested candidate | Above logs and check runs; includes concurrency, ambiguous commits, corruption and reconciliation |
+| Dependency and credential checks | PASS for exact candidate | CI only, not independent penetration testing or proof that secrets are safe |
+| Full cumulative dependency and integration review | OPEN | 64-path diff against integration baseline; review final target merge commit, not draft mergeability |
+| Actual deployed revision, health, private networking | UNVERIFIED | Repository HEAD is not deployment evidence; current direct FadeHost connector not available; plugin discovery returned no FadeHost result; external uptime workflow run listing rejected by GitHub connector |
+| Actual PostgreSQL catalog, functions, permissions and RLS | OPEN | No current private catalog evidence; test fixtures cannot substitute; production migration approval separate |
+| Actual encrypted backup and isolated restore | OPEN | Successful synthetic restore only; no verified production backup restoration |
+| Chain verification, custody, accessible liquidity and liabilities | OPEN | No real transfer or authenticated backing evidence; economic and applicable compliance review required |
+| Live isolated operational acceptance and incident recovery | OPEN | Offline Telegram and PostgreSQL test evidence only; no new staging bot or paid service created |
+| Owner approval | NOT REQUESTED | Final separate authorization only after all gates and independent safety review |
+
+## Operational boundaries
+
+Keep financial functions disabled. Do not request or expose credentials. Do not turn public database access on, restore over production, run review fixtures on live data, or use a test run as permission for money movement. No production or financial change was made by this checkpoint. No new cost incurred.
+
+Next free work: review current production access evidence and reconcile remaining code-level release gaps without altering the deployed service. When the exact target revision changes, refresh all CI evidence. The remaining operational gates may require provider access or an isolated restore target; do not bypass paid-plan restrictions.
