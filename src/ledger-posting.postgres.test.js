@@ -2392,3 +2392,43 @@ test("two authorized synthetic reviewers release a blocked customer's hold exact
   assert.equal(posted.count, 1);
   assert.deepEqual(await findWithdrawalDiscrepancies(pool), []);
 });
+
+for (const isolation of ["REPEATABLE READ", "SERIALIZABLE"]) {
+  test(`ledger rejects ${isolation} snapshots before posting or replay`, { skip: !enabled }, async () => {
+    const available = await createAccount("AVAILABLE");
+    const clearing = await createAccount("CLEARING");
+    await seedAvailableBalance(available, "10");
+    const journal = {
+      transactionType: "isolation-regression",
+      idempotencyKey: `isolation-${isolation}-${randomUUID()}`,
+      entries: [
+        { account_id: available, entry_type: "debit", amount: "7", currency: "USDT" },
+        { account_id: clearing, entry_type: "credit", amount: "7", currency: "USDT" }
+      ]
+    };
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL " + isolation);
+      // Acquire an older snapshot, then commit a debit from another session.
+      await client.query("SELECT id FROM ledger_accounts WHERE id = $1", [available]);
+      const first = await postLedgerTransaction({ pool, ...journal });
+      assert.equal(first.posted, true);
+      await assert.rejects(postJournalInTransaction(client, {
+        ...journal, idempotencyKey: journal.idempotencyKey + "-second"
+      }), /requires READ COMMITTED/);
+      await assert.rejects(postJournalInTransaction(client, journal), /requires READ COMMITTED/);
+      await client.query("ROLLBACK");
+    } finally {
+      try { await client.query("ROLLBACK"); } finally { client.release(); }
+    }
+    const balance = await pool.query(
+      `SELECT trim_scale(SUM(CASE WHEN le.entry_type = 'credit' THEN le.amount ELSE -le.amount END))::text AS balance
+       FROM ledger_entries le JOIN ledger_transactions lt ON lt.id = le.transaction_id
+       WHERE le.account_id = $1 AND lt.status = 'posted'`, [available]);
+    assert.equal(balance.rows[0].balance, "3");
+    const retry = await postLedgerTransaction({ pool, ...journal });
+    assert.equal(retry.idempotent, true);
+    const count = await pool.query("SELECT count(*)::int AS count FROM ledger_transactions WHERE idempotency_key = $1", [journal.idempotencyKey + "-second"]);
+    assert.equal(count.rows[0].count, 0);
+  });
+}
