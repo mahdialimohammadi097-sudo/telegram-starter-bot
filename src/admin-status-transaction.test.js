@@ -47,3 +47,50 @@ test("status changes fail closed when audit insertion or transaction completion 
   }finally{query.mock.restore();connect.mock.restore();}
  }
 });
+
+test("committed admin status change survives Telegram acknowledgement and notification failures", async t => {
+ const owner=8810232463;
+ const queries=[],releases=[],logs=[],notices=[];
+ t.mock.method(console,"error",(...args)=>logs.push(args));
+ t.mock.method(pool,"query",async sql=>{
+  if(sql.includes("admin_preferences"))return {rows:[{language:"en"}]};
+  throw Object.assign(new Error("synthetic-private-detail"),{code:"08006"});
+ });
+ t.mock.method(pool,"connect",async()=>({
+  async query(sql){
+   queries.push(sql);
+   if(sql==="BEGIN"||sql==="COMMIT"||sql==="ROLLBACK")return {command:sql};
+   if(sql.includes("SELECT id, status, xmin"))return {rowCount:1,rows:[{id:"2",status:"active",version:"7"}]};
+   if(sql.includes("FROM admin_users"))return {rowCount:1,rows:[{user_id:"1"}]};
+   if(sql.includes("UPDATE users SET status"))return {rowCount:1,rows:[{id:"2"}]};
+   if(sql.includes("INSERT INTO admin_audit_logs"))return {rowCount:1};
+   throw new Error("Unexpected transaction query");
+  },
+  release(error){releases.push(error);}
+ }));
+ let handler;
+ registerAdminOps({command(){},callbackQuery(pattern,fn){
+  if(Array.isArray(pattern)&&pattern.some(p=>p.test("usc:456:blocked:active:7")))handler=fn;
+ }});
+ assert.equal(typeof handler,"function");
+ await handler({
+  from:{id:owner},chat:{id:owner,type:"private"},
+  callbackQuery:{data:"usc:456:blocked:active:7"},
+  answerCallbackQuery:async value=>{
+   notices.push(value.text);
+   throw Object.assign(new Error("synthetic-private-detail"),{code:"08006"});
+  },
+  reply:async text=>{
+   notices.push(text);
+   throw Object.assign(new Error("synthetic-private-detail"),{code:"08006"});
+  }
+ });
+ assert.equal(queries.filter(sql=>sql==="COMMIT").length,1);
+ assert.equal(queries.includes("ROLLBACK"),false);
+ assert.equal(queries.filter(sql=>sql.includes("INSERT INTO admin_audit_logs")).length,1);
+ assert.deepEqual(releases,[null]);
+ assert.ok(notices.length>=1);
+ assert.ok(notices.every(text=>text.includes("User status updated.")));
+ assert.ok(logs.length>=1);
+ assert.doesNotMatch(JSON.stringify(logs),/synthetic-private-detail/);
+});
