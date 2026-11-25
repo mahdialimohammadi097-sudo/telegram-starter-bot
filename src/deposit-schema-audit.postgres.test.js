@@ -74,6 +74,11 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   assert.equal(combined.ready,true);
   assert.equal(combined.realDepositsEnabled,false);
   assert.equal(combined.scope,"catalog-and-legacy-assignment-only");
+  // A coercing typmod must not be accepted even with all other checks.
+  await q(`ALTER TABLE ${prefix}verified_deposit_evidence ALTER COLUMN block_number TYPE numeric(78,0)`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence.block_number"));
+  await q(`ALTER TABLE ${prefix}verified_deposit_evidence ALTER COLUMN block_number TYPE numeric`);
+  assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
   // Removing an actual bound must make the read-only report fail closed.
   const numericConstraints=await pool.query(`SELECT c.conname,pg_catalog.pg_get_expr(c.conbin,c.conrelid,false) AS expression
     FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace

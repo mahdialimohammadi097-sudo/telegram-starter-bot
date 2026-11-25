@@ -90,7 +90,7 @@ test("staged evidence migration creates constrained table and refuses existing r
   // alone is insufficient. Test both numeric fields and the uint256 ceiling.
   for(const [block,amount] of [
     ["NaN","1"],["1","NaN"],["115792089237316195423570985008687907853269984665640564039457584007913129639936","1"],
-    ["1","115792089237316195423570985008687907853269984665640564039457584007913129639936"],["1","-1"]
+    ["1","115792089237316195423570985008687907853269984665640564039457584007913129639936"],["1","-1"],["0.1","1"],["-0.1","1"],["1","1.4"],["1.0","1"],["1","1.0"]
   ]) {
     await client.query("SAVEPOINT invalid_numeric");
     await assert.rejects(client.query(`INSERT INTO public.verified_deposit_evidence
@@ -110,8 +110,8 @@ test("staged evidence migration creates constrained table and refuses existing r
   }
   for(const name of ["block_number","amount_base_units"]) {
     assert.equal(columnMap.get(name)?.data_type,"numeric");
-    assert.equal(Number(columnMap.get(name)?.numeric_precision),78);
-    assert.equal(Number(columnMap.get(name)?.numeric_scale),0);
+    assert.equal(columnMap.get(name)?.numeric_precision,null);
+    assert.equal(columnMap.get(name)?.numeric_scale,null);
   }
   // Evidence-only migration must not introduce ledger posting triggers.
   const triggers=await client.query(`SELECT tgname FROM pg_trigger
