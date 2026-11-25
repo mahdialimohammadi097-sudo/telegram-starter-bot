@@ -29,7 +29,9 @@ before(async () => {
   await admin.query(`CREATE SCHEMA "${schema}"`);
   pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, options: `-c search_path=${schema}` });
   await pool.query(await readFile(new URL('../test/fixtures/ledger-contract.sql', import.meta.url), 'utf8'));
-  await pool.query(await readFile(new URL('../test/fixtures/verified-deposit-evidence.sql', import.meta.url), 'utf8'));
+  // Exercise the reviewed append-only evidence migration rather than the older fixture.
+  const evidenceMigration = await readFile(new URL('../migrations/20261121_verified_deposit_evidence.sql', import.meta.url), 'utf8');
+  await pool.query(evidenceMigration.replaceAll('public.', `"${schema}".`));
   // Explicitly synthetic ownership contract; not a FadeHost schema claim.
   await pool.query(`INSERT INTO users VALUES (1), (2);
     INSERT INTO ledger_accounts (id, user_id, account_code, account_type) VALUES
@@ -61,8 +63,9 @@ test('concurrent confirmed receipts credit exactly once and replay after commit'
   assert.equal((await post(1)).idempotent, true);
   const balances = await pool.query(`SELECT account_id, sum(CASE WHEN entry_type='credit' THEN amount ELSE -amount END)::text AS balance
     FROM ledger_entries GROUP BY account_id ORDER BY account_id`);
-  assert.equal(Number(balances.rows[0].balance), -25);
-  assert.equal(Number(balances.rows[1].balance), 25);
+  assert.deepEqual(balances.rows.map(row=>row.balance), ['-25.000000000000000000','25.000000000000000000']);
+  const receiptRows=await pool.query('SELECT event_key,amount_base_units::text AS amount FROM verified_deposit_evidence');
+  assert.deepEqual(receiptRows.rows,[{event_key:evidence(1).eventKey,amount:evidence(1).amountBaseUnits}]);
   assert.equal(await count(), 1);
 });
 test('changed amount and reassigned owner cannot replay an already credited event', { skip: !enabled }, async () => {

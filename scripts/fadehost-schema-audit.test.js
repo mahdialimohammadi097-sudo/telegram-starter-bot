@@ -52,6 +52,7 @@ test("FadeHost schedule uses the full reviewed read-only catalog audit",()=>{
     if(sql.includes("FROM pg_index"))return {rows:[]};
     if(sql.includes("c.contype='f'"))return {rows:[]};
     if(sql.includes("c.contype='c'"))return {rows:[]};
+    if(sql.includes("FROM pg_catalog.pg_trigger tg"))return {rows:[]};
     throw new Error("Unexpected query");
    },release(){}
   });
