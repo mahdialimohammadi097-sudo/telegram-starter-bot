@@ -70,3 +70,48 @@ test("legacy assignment audit counts collisions and requires the exact live uniq
     finally { await pool.end(); }
   }
 });
+
+test("legacy assignment audit fails closed when RLS would hide wallet collisions", { skip: !enabled }, async () => {
+  const pool = new pg.Pool({ connectionString: url });
+  const suffix = randomUUID().replaceAll("-", "");
+  const schema = "assignment_rls_" + suffix;
+  const role = "assignment_reader_" + suffix;
+  const table = '"' + schema + '".user_wallet_assignments';
+  const client = await pool.connect();
+  try {
+    await client.query(`CREATE ROLE "${role}" NOLOGIN NOSUPERUSER NOBYPASSRLS`);
+    await client.query(`CREATE SCHEMA "${schema}"`);
+    await client.query(`CREATE TABLE ${table} (
+      wallet_id bigint NOT NULL, user_id bigint NOT NULL,
+      status text NOT NULL, assignment_type text NOT NULL
+    )`);
+    await client.query(`INSERT INTO ${table} VALUES
+      (11,101,'active','deposit'),(11,102,'active','deposit')`);
+    await client.query(`GRANT USAGE ON SCHEMA "${schema}" TO "${role}"`);
+    await client.query(`GRANT SELECT ON ${table} TO "${role}"`);
+    const audit = () => auditLegacyDepositAssignments({
+      async connect() {
+        return { query: (...args) => client.query(...args), release() {} };
+      }
+    }, { schema });
+    await client.query(`SET ROLE "${role}"`);
+    assert.equal((await audit()).conflictingActiveDepositWallets, "1");
+    await client.query("RESET ROLE");
+    await client.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+    await client.query(`CREATE POLICY visible_user ON ${table} FOR SELECT TO "${role}" USING (user_id=101)`);
+    await client.query(`SET ROLE "${role}"`);
+    assert.equal((await client.query(`SELECT count(*)::text AS count FROM ${table}`)).rows[0].count, "1");
+    await assert.rejects(audit(), { code: "42501" });
+    assert.equal((await client.query("SELECT current_setting('row_security') AS setting")).rows[0].setting, "on");
+    assert.equal((await client.query("SELECT 1 AS healthy")).rows[0].healthy, 1);
+  } finally {
+    try {
+      await client.query("RESET ROLE");
+      await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      await client.query(`DROP ROLE IF EXISTS "${role}"`);
+    } finally {
+      client.release();
+      await pool.end();
+    }
+  }
+});
