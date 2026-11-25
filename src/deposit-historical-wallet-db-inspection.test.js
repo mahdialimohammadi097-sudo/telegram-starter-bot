@@ -4,7 +4,7 @@ import {inspectHistoricalWalletSnapshot as inspect} from "./deposit-historical-w
 const address="0x"+"a".repeat(40);
 const input={walletAddress:address,eventBlockNumber:"150",expectedUserId:"12"};
 const row={wallet_id:"1",user_id:"12",chain_id:"56",wallet_address:address,start_block:"100",end_block:"200",wallet_id_current:"1",wallet_chain_id:"56",wallet_address_current:address,is_platform_controlled:true};
-function fixture(rows){
+function fixture(rows, visibility="off"){
  const calls=[];
  return {calls,pool:{connect:async()=>({query:async(sql,params)=>{
   calls.push({sql,params});
@@ -14,6 +14,7 @@ function fixture(rows){
    return {rows,rowCount:rows.length};
   }
   if(sql.includes("pg_catalog.current_setting('transaction_read_only')")) return {rows:[{read_only:"on",isolation:"repeatable read",statement_timeout:"10s",lock_timeout:"3s"}]};
+  if(sql.includes("pg_catalog.current_setting('row_security')")) return {rows:[{row_security:visibility}]};
   return {command:sql.split(" ")[0]};
  },release(){}})}};
 }
@@ -37,4 +38,11 @@ test("invalid inputs cannot access the database",async()=>{
   {expectedUserId:"9223372036854775808"},{eventBlockNumber:"1".repeat(79)}]){
   await assert.rejects(inspect(pool,{...input,...patch}),/Invalid/);
  }
+});
+
+test("snapshot refuses unconfirmed row visibility before reading history",async()=>{
+ const f=fixture([row],"on");
+ await assert.rejects(inspect(f.pool,input),/row visibility unconfirmed/);
+ assert.equal(f.calls.some(c=>c.sql.includes("deposit_address_ownership_history")),false);
+ assert.equal(f.calls.at(-1).sql,"ROLLBACK");
 });
