@@ -119,7 +119,7 @@ test("admin audit ignores Telegram send failure and logs only sanitized code",as
   sendMessage:async()=>{throw Error("SECRET_TOKEN leaked");},
   logCode:code=>codes.push(code)});
  assert.equal(result,false);
- assert.deepEqual(codes,["UNKNOWN"]);
+ assert.deepEqual(codes,["UNAVAILABLE"]);
 });
 
 test("successful audit sends metadata only to configured admin ID",async()=>{
@@ -298,4 +298,12 @@ test("read-only audit rejects noninteger chain ID types",async()=>{
   assert.ok(report.incompatibleTypes.some(x=>x.column==="wallets.chain_id"&&x.expected==="integer or bigint"));
   assert.equal(report.financialActivationReady,false);
  }
+});
+
+
+test("startup schema report rejects non-SQLSTATE diagnostic text",async()=>{
+ const codes=[];
+ const pool={connect:async()=>{throw Object.assign(new Error("synthetic diagnostic failure"),{code:"PRIVATE8"});}};
+ assert.equal(await deliverAdminSchemaAudit({pool,adminId:123,sendMessage:async()=>assert.fail("must not send"),logCode:code=>codes.push(code)}),false);
+ assert.deepEqual(codes,["UNAVAILABLE"]);
 });
