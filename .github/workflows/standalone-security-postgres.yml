@@ -1,0 +1,51 @@
+name: Standalone security PostgreSQL rehearsal
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  security:
+    name: Standalone security / Node.js ${{ matrix.node-version }} / PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24, 26]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: profino_security_rehearsal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d profino_security_rehearsal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci --ignore-scripts
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Run full standalone unit suite and real PostgreSQL security rehearsal
+        shell: bash
+        env:
+          SECURITY_REHEARSAL_URL: postgresql://postgres:postgres@localhost:5432/profino_security_rehearsal
+        run: |
+          set -euo pipefail
+          npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/security-unit.tap"
+          grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/security-unit.tap"
+          grep -Fxq '# skipped 0' "$RUNNER_TEMP/security-unit.tap"
+          node --test --test-reporter=tap test-support/security-postgres.mjs | tee "$RUNNER_TEMP/security-pg.tap"
+          grep -Fxq '# tests 1' "$RUNNER_TEMP/security-pg.tap"
+          grep -Fxq '# pass 1' "$RUNNER_TEMP/security-pg.tap"
+          grep -Fxq '# skipped 0' "$RUNNER_TEMP/security-pg.tap"
