@@ -99,6 +99,42 @@ jobs:
                       print("Schema audit schedule present:",any(isinstance(v,dict) and v.get("command")=="node scripts/fadehost-schema-audit.js" for v in value))
               else:
                   print("Inventory structure",method+": unconfirmed")
+          # Read-only diagnostics: never print raw configuration, IPs, or logs.
+          if "get_app_firewall" in names:
+              result=rpc("tools/call",{"name":"get_app_firewall","arguments":{"app":bot_id}},6)
+              print("Read-only firewall access: confirmed")
+              value=result.get("structuredContent")
+              if value is None:
+                  for item in result.get("content",[]):
+                      if isinstance(item,dict) and item.get("type")=="text":
+                          try: value=json.loads(item.get("text",""));break
+                          except (ValueError,TypeError): pass
+              if isinstance(value,dict):
+                  policy=value.get("policy")
+                  if isinstance(policy,str) and policy.lower() in ("allow","deny","allowlist","denylist","open","closed","public","private","allow_all","deny_all"):
+                      print("Recognized firewall policy:",policy.lower())
+                  else:
+                      print("Firewall policy interpretation: unconfirmed")
+              else:
+                  print("Firewall policy interpretation: unconfirmed")
+          if "get_bot_logs" in names:
+              result=rpc("tools/call",{"name":"get_bot_logs","arguments":{"bot":bot_id}},7)
+              print("Read-only runtime log access: confirmed")
+              def strings(value):
+                  if isinstance(value,str): yield value
+                  elif isinstance(value,dict):
+                      for v in value.values(): yield from strings(v)
+                  elif isinstance(value,list):
+                      for v in value: yield from strings(v)
+              logs="\n".join(strings(result))
+              for label,marker in (
+                  ("Database connection marker","PostgreSQL connected successfully"),
+                  ("Telegram polling marker","Telegram polling is active"),
+                  ("HTTP listener marker","HTTP endpoints listening"),
+                  ("Startup report marker","startup report delivered"),
+                  ("Database idle error marker","idle PostgreSQL"),
+                  ("Syntax error marker","SyntaxError")):
+                  print("Historical log",label+":",marker in logs)
           PY
       - name: Public readiness without raw response or credentials
         if: always()
