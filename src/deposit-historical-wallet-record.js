@@ -8,6 +8,7 @@ const uint=v=>{
  const n=BigInt(v);
  return n<=MAX_UINT256?n:null;
 };
+export const isValidHistoricalBlockNumber=v=>uint(v)!==null;
 const id=v=>typeof v==="string" && /^[1-9][0-9]{0,18}$/.test(v) && BigInt(v)<=9223372036854775807n;
 export function verifyHistoricalWalletRecord({history,wallet,eventBlockNumber,expectedUserId,expectedWalletAddress}){
  if(!history || !wallet || !id(history.wallet_id) || !id(history.user_id) ||
