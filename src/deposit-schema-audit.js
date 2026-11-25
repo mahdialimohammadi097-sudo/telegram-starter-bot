@@ -194,7 +194,11 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
         NOT EXISTS (
           SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
           WHERE acl.grantee=0
-        ) AS no_public_function_access
+        ) AS no_public_function_access,
+        NOT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_rewrite rule
+          WHERE rule.ev_class=t.oid
+        ) AS no_rewrite_rules
  FROM pg_catalog.pg_trigger tg
  JOIN pg_catalog.pg_class t ON t.oid=tg.tgrelid
  JOIN pg_catalog.pg_namespace ns ON ns.oid=t.relnamespace
@@ -205,7 +209,7 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  `,[schema,guardBody]);
  if(guards.rows.length!==1 || guards.rows[0].tgname!=="verified_deposit_evidence_immutable" ||
     guards.rows[0].reviewed_guard!==true || guards.rows[0].no_public_table_access!==true ||
-    guards.rows[0].no_public_function_access!==true)
+    guards.rows[0].no_public_function_access!==true || guards.rows[0].no_rewrite_rules!==true)
    incompatible.push("verified_deposit_evidence:immutable_guard");
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
    missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
