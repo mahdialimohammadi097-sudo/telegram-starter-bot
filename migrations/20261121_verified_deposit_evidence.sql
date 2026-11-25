@@ -3,7 +3,8 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
-CREATE TABLE IF NOT EXISTS public.verified_deposit_evidence (
+-- Create only: an existing relation is an unexpected state requiring review.
+CREATE TABLE public.verified_deposit_evidence (
  event_key text PRIMARY KEY,
  block_hash text NOT NULL,
  block_number numeric(78,0) NOT NULL CHECK (block_number >= 0) CHECK (block_number <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric),
@@ -16,5 +17,5 @@ CREATE TABLE IF NOT EXISTS public.verified_deposit_evidence (
  CONSTRAINT verified_deposit_evidence_token_format CHECK (token_contract ~ '^0x[0-9a-f]{40}$'),
  CONSTRAINT verified_deposit_evidence_address_format CHECK (deposit_address ~ '^0x[0-9a-f]{40}$')
 );
--- Existing tables must be verified separately: IF NOT EXISTS does not repair them.
+-- Never drop, replace or repair an existing relation with this candidate.
 COMMIT;
