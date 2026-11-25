@@ -213,19 +213,30 @@ export async function submitSimulatedWithdrawal(pool, id, txHash, send, payload 
   if ("0x" + createHash("sha256").update(payload).digest("hex") !== hash) {
     throw new Error("Simulation payload hash mismatch");
   }
-  const claim = await pool.query(
-    `UPDATE simulation_withdrawals SET status = 'pending_receipt', submitted_hash = $2, simulation_payload = $3
-     WHERE id = $1 AND destination IS NOT NULL AND status = 'reserved'
-     RETURNING amount, destination, simulation_payload`, [id, hash, payload]
-  );
-  if (claim.rowCount) {
-    await send({ txHash: hash, amount: claim.rows[0].amount, destination: claim.rows[0].destination, payload: claim.rows[0].simulation_payload });
-  } else {
-    const { rows: [existing] } = await pool.query(
-      "SELECT submitted_hash FROM simulation_withdrawals WHERE id = $1", [id]
+  const claim = await withLedgerTransaction(pool, async client => {
+    const {rows:[request]} = await client.query(
+      "SELECT * FROM simulation_withdrawals WHERE id=$1 FOR UPDATE", [id]
     );
-    if (existing?.submitted_hash !== hash) throw new Error("Withdrawal submission mismatch");
-  }
+    if (!request || !request.destination || !["reserved","pending_receipt","paid"].includes(request.status)) {
+      throw new Error("Withdrawal submission mismatch");
+    }
+    await verifyOriginalReservation(client, request);
+    if (request.status !== "reserved") {
+      if (request.submitted_hash !== hash || !Buffer.isBuffer(request.simulation_payload) ||
+          !request.simulation_payload.equals(payload)) throw new Error("Withdrawal submission mismatch");
+      return null;
+    }
+    const updated = await client.query(
+      `UPDATE simulation_withdrawals SET status='pending_receipt',submitted_hash=$2,simulation_payload=$3
+       WHERE id=$1 AND status='reserved' AND submitted_hash IS NULL AND simulation_payload IS NULL
+       RETURNING amount,destination,simulation_payload`, [id,hash,payload]
+    );
+    if (updated.rowCount!==1) throw new Error("Withdrawal submission transition unconfirmed");
+    return updated.rows[0];
+  });
+  // No fake transport call before successful COMMIT. Lost acknowledgements
+  // are recovered through the persisted claim, never by creating another claim.
+  if (claim) await send({txHash:hash,amount:claim.amount,destination:claim.destination,payload:claim.simulation_payload});
   return hash;
 }
 

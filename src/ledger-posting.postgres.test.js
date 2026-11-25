@@ -3125,3 +3125,67 @@ test("corrupted withdrawal account links cannot release another synthetic owner'
   assert.deepEqual(await displayedBalances(owners[1]),before[1]);
   await cancelWithdrawal(pool,owners[1],requests[1].id);
 });
+
+test("offline submission refuses a corrupted reservation before claiming or sending",{skip:!enabled},async()=>{
+  const {reserveWithdrawal,submitSimulatedWithdrawal,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const {createHash}=await import("node:crypto");
+  const owner=await createSimulationWallet(19522),other=await createSimulationWallet(19523);
+  for(const id of [owner,other]){
+    const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[id]);
+    await seedAvailableBalance(available.id,"25");
+  }
+  const destination="0x"+"12".repeat(20);
+  const request=await reserveWithdrawal(pool,owner,"submission-identity","10",destination);
+  const unrelated=await reserveWithdrawal(pool,other,"submission-identity","10",destination);
+  const {rows:[original]}=await pool.query("SELECT held_id FROM simulation_withdrawals WHERE id=$1",[request.id]);
+  const {rows:[wrong]}=await pool.query("SELECT held_id FROM simulation_withdrawals WHERE id=$1",[unrelated.id]);
+  const payload=Buffer.from("offline-submission-identity");
+  const hash="0x"+createHash("sha256").update(payload).digest("hex");
+  let sends=0;
+  const submit=()=>submitSimulatedWithdrawal(pool,request.id,hash,async()=>{sends++;},payload);
+  await pool.query("UPDATE simulation_withdrawals SET held_id=$2 WHERE id=$1",[request.id,wrong.held_id]);
+  try{
+    await assert.rejects(submit(),/account ownership mismatch/);
+    assert.equal(sends,0);
+    assert.deepEqual((await pool.query("SELECT status,submitted_hash FROM simulation_withdrawals WHERE id=$1",[request.id])).rows[0],{status:"reserved",submitted_hash:null});
+  }finally{await pool.query("UPDATE simulation_withdrawals SET held_id=$2 WHERE id=$1",[request.id,original.held_id]);}
+  await pool.query("UPDATE simulation_withdrawals SET amount=11 WHERE id=$1",[request.id]);
+  try{await assert.rejects(submit(),/different request/);assert.equal(sends,0);}
+  finally{await pool.query("UPDATE simulation_withdrawals SET amount=10 WHERE id=$1",[request.id]);}
+  await pool.query(`CREATE FUNCTION test_skip_submission() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+    CREATE TRIGGER test_skip_submission BEFORE UPDATE ON simulation_withdrawals FOR EACH ROW
+    WHEN(NEW.status='pending_receipt') EXECUTE FUNCTION test_skip_submission()`);
+  try{
+    await assert.rejects(submit(),/submission transition unconfirmed/);
+    assert.equal(sends,0);
+  }finally{await pool.query("DROP TRIGGER test_skip_submission ON simulation_withdrawals; DROP FUNCTION test_skip_submission()");}
+  assert.equal(await submit(),hash);
+  assert.equal(await submit(),hash);
+  assert.equal(sends,1);
+  await pool.query("UPDATE simulation_withdrawals SET simulation_payload=$2 WHERE id=$1",[request.id,Buffer.from("different")]);
+  try{await assert.rejects(submit(),/submission mismatch/);assert.equal(sends,1);}
+  finally{await pool.query("UPDATE simulation_withdrawals SET simulation_payload=$2 WHERE id=$1",[request.id,payload]);}
+  await cancelWithdrawal(pool,other,unrelated.id);
+});
+test("offline submission never sends when its commit acknowledgement is lost",{skip:!enabled},async()=>{
+  const {reserveWithdrawal,submitSimulatedWithdrawal,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const {createHash}=await import("node:crypto");
+  const owner=await createSimulationWallet(19524);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"1");
+  const request=await reserveWithdrawal(pool,owner,"submission-commit","1","0x"+"34".repeat(20));
+  const payload=Buffer.from("offline-submission-commit");
+  const hash="0x"+createHash("sha256").update(payload).digest("hex");
+  let sends=0;
+  const submit=worker=>submitSimulatedWithdrawal(worker,request.id,hash,async()=>{sends++;},payload);
+  const state=async()=>(await pool.query("SELECT status,submitted_hash FROM simulation_withdrawals WHERE id=$1 FOR UPDATE",[request.id])).rows[0];
+  await assert.rejects(submit(disconnectedCommitWorker(false)),/acknowledgement lost/);
+  assert.deepEqual(await state(),{status:"reserved",submitted_hash:null});
+  assert.equal(sends,0);
+  await assert.rejects(submit(disconnectedCommitWorker(true)),/acknowledgement lost/);
+  assert.deepEqual(await state(),{status:"pending_receipt",submitted_hash:hash});
+  assert.equal(await submit(pool),hash);
+  assert.equal(sends,0);
+  await assert.rejects(cancelWithdrawal(pool,owner,request.id),/cannot be cancelled/);
+  assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"1.00000000");
+});
