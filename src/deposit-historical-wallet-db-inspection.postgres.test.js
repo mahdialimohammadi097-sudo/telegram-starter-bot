@@ -26,9 +26,15 @@ test("historical wallet snapshot checks real PostgreSQL without write locks or f
   await pool.query(insert,[2,12,address,"200",null]);
   const consistent={recordConsistent:true,independentHistoricalProof:false,financialActivationReady:false,realDepositsEnabled:false};
   assert.deepEqual(await inspect(pool,input),consistent);
+  await assert.rejects(inspect(pool,{...input,eventBlockNumber:"200",expectedUserId:"12"}),/interval mismatch/);
+  await pool.query("UPDATE "+prefix+"deposit_address_ownership_history SET end_block=300 WHERE wallet_id=2");
   assert.deepEqual(await inspect(pool,{...input,eventBlockNumber:"200",expectedUserId:"12"}),consistent);
   await assert.rejects(inspect(pool,{...input,eventBlockNumber:"200"}),/identity mismatch/);
   await assert.rejects(inspect(pool,{...input,eventBlockNumber:"99"}),/Missing or ambiguous/);
+  // Open-ended overlapping records cannot be ignored, even when a finite record matches.
+  await pool.query(insert,[2,12,address,"110",null]);
+  await assert.rejects(inspect(pool,input),/Missing or ambiguous/);
+  await pool.query("DELETE FROM "+prefix+"deposit_address_ownership_history WHERE end_block IS NULL");
   // Orphan and case-variant records must remain visible and prevent ambiguous attribution.
   await pool.query(insert,[999,12,address.toUpperCase().replace("0X","0x"),"110","180"]);
   await assert.rejects(inspect(pool,input),/Missing or ambiguous/);

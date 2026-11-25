@@ -27,7 +27,7 @@ test("snapshot reports record consistency only without returning identities",asy
 test("snapshot rejects missing, ambiguous, orphaned and mismatched history",async()=>{
  for(const rows of [[],[row,row],[{...row,wallet_id_current:null}],
    [{...row,wallet_address:"0x"+"b".repeat(40),wallet_address_current:"0x"+"b".repeat(40)}],
-   [{...row,user_id:"13"}],[{...row,end_block:"150"}]]){
+   [{...row,user_id:"13"}],[{...row,end_block:"150"}],[{...row,end_block:null}]]){
   const f=fixture(rows);await assert.rejects(inspect(f.pool,input));
   assert.equal(f.calls.at(-1).sql,"ROLLBACK");
  }
