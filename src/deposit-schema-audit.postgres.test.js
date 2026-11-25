@@ -85,6 +85,11 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   const missingBound=await auditDepositSchema(pool,{schema});
   assert.equal(missingBound.ready,false);
   assert.ok(missingBound.incompatible.includes("verified_deposit_evidence.amount_uint256:check_constraint"));
+  const incompleteCombined=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(incompleteCombined.catalog.ready,false);
+  assert.equal(incompleteCombined.assignments.ready,true);
+  assert.equal(incompleteCombined.ready,false);
+  assert.equal(incompleteCombined.realDepositsEnabled,false);
   // A validated but ineffective constraint with the expected name is not evidence.
   await q('ALTER TABLE '+prefix+'verified_deposit_evidence DROP CONSTRAINT verified_deposit_evidence_event_key_format');
   await q('ALTER TABLE '+prefix+'verified_deposit_evidence ADD CONSTRAINT verified_deposit_evidence_event_key_format CHECK (true)');
