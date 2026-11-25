@@ -22,9 +22,10 @@ export function verifyHistoricalWalletRecord({history,wallet,eventBlockNumber,ex
     /^0x0{40}$/.test(expectedWalletAddress) || history.wallet_address!==expectedWalletAddress)
    throw new Error("Historical wallet identity mismatch");
  const block=uint(eventBlockNumber),start=uint(history.start_block);
- const end=history.end_block===null?null:uint(history.end_block);
- if(block===null || start===null || (history.end_block!==null && end===null) ||
-    (end!==null && end<=start) || block<start || (end!==null && block>=end))
+ // Current assignment or an open-ended record cannot establish historical coverage.
+ const end=uint(history.end_block);
+ if(block===null || start===null || end===null ||
+    end<=start || block<start || block>=end)
    throw new Error("Historical wallet interval mismatch");
  return Object.freeze({walletId:history.wallet_id,userId:history.user_id});
 }
