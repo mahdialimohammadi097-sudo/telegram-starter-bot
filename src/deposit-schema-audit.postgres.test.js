@@ -289,3 +289,28 @@ test("schema audit rejects composite FK masquerading as independent ownership li
   await pool.end();
  }
 });
+
+test("schema audit refuses views, unlogged relations and both sides of table inheritance",{skip:skipUnsafeTarget},async()=>{
+ const pool=new pg.Pool({connectionString:url});
+ const schema="audit_relation_"+randomUUID().replaceAll("-","");
+ const prefix='"'+schema+'".';
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query(`
+   CREATE VIEW ${prefix}users AS SELECT 1::bigint AS id,'active'::text AS status;
+   CREATE UNLOGGED TABLE ${prefix}wallets(id bigint PRIMARY KEY);
+   CREATE TABLE ${prefix}ledger_accounts(id bigint NOT NULL);
+   CREATE TABLE ${prefix}ledger_entries(amount numeric(36,18) NOT NULL) INHERITS (${prefix}ledger_accounts);
+   CREATE TABLE ${prefix}ledger_transactions(id bigint PRIMARY KEY,idempotency_key text UNIQUE NOT NULL);
+  `);
+  const report=await auditDepositSchema(pool,{schema});
+  assert.equal(report.ready,false);
+  for(const field of ["users.id","wallets.id","ledger_accounts.id","ledger_entries.amount"])
+   assert.ok(report.missing.includes(field),field);
+  assert.ok(!report.missing.includes("ledger_transactions.id"));
+  assert.ok(!report.incompatible.includes("ledger_transactions.idempotency_key:unique_index"));
+ }finally{
+  await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+  await pool.end();
+ }
+});
