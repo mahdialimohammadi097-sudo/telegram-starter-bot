@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
-import { auditLegacyDepositAssignments } from "./legacy-deposit-assignment-audit.js";
+import { auditLegacyDepositAssignments, auditCombinedDepositPreflight } from "./legacy-deposit-assignment-audit.js";
 
 const url = process.env.CATALOG_REHEARSAL_URL;
 const enabled = isDisposablePostgresTarget(url, "catalog_rehearsal");
@@ -60,6 +60,11 @@ test("legacy assignment audit counts collisions and requires the exact live uniq
         ready:true, conflictingActiveDepositWallets:"0",
         activeDepositWalletUniquenessEnforced:true, realDepositsEnabled:false
       });
+      const combined = await auditCombinedDepositPreflight(pool, { schema });
+      assert.equal(combined.assignments.ready,true);
+      assert.equal(combined.historicalBasicGuardsPresent,false);
+      assert.equal(combined.ready,false);
+      assert.equal(combined.realDepositsEnabled,false);
       await assert.rejects(pool.query(`INSERT INTO ${table} VALUES (11,103,'active','deposit')`), { code:"23505" });
       await pool.query('DROP INDEX "' + schema + '".reviewed_candidate');
     }

@@ -58,22 +58,99 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
      entry_type text NOT NULL,amount numeric(36,18) NOT NULL,currency text NOT NULL);
 
   `);
-  const fixture=await readFile(new URL("../test/fixtures/verified-deposit-evidence.sql",import.meta.url),"utf8");
-  await q(fixture.replace("CREATE TABLE verified_deposit_evidence (","CREATE TABLE "+prefix+"verified_deposit_evidence ("));
+  const migration=await readFile(new URL("../migrations/20261121_verified_deposit_evidence.sql",import.meta.url),"utf8");
+  await q(migration.replaceAll("public.",prefix));
   const result=await auditDepositSchema(pool,{schema});
   assert.deepEqual(result.missing,[]);
   assert.deepEqual(result.incompatible,[]);
   assert.equal(result.ready,true);
+  // Verify all new identity checks against real PostgreSQL catalog metadata.
+  // The table is empty here; replacing constraints is confined to this disposable schema.
+  for(const name of ["verified_deposit_evidence_token_nonzero","verified_deposit_evidence_address_nonzero","verified_deposit_evidence_log_index_uint256"]){
+   const definition=await pool.query(
+    "SELECT pg_catalog.pg_get_constraintdef(c.oid) AS definition FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t ON t.oid=c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND t.relname='verified_deposit_evidence' AND c.conname=$2",
+    [schema,name]);
+   assert.equal(definition.rows.length,1);
+   assert.match(definition.rows[0].definition,/^CHECK /);
+   await q("ALTER TABLE "+prefix+"verified_deposit_evidence DROP CONSTRAINT "+name);
+   const absent=await auditDepositSchema(pool,{schema});
+   assert.equal(absent.ready,false);
+   assert.ok(absent.incompatible.includes("verified_deposit_evidence."+name+":check_constraint"));
+   await q("ALTER TABLE "+prefix+"verified_deposit_evidence ADD CONSTRAINT "+name+" CHECK (true)");
+   const weakened=await auditDepositSchema(pool,{schema});
+   assert.equal(weakened.ready,false);
+   assert.ok(weakened.incompatible.includes("verified_deposit_evidence."+name+":check_constraint"));
+   await q("ALTER TABLE "+prefix+"verified_deposit_evidence DROP CONSTRAINT "+name);
+   await q("ALTER TABLE "+prefix+"verified_deposit_evidence ADD CONSTRAINT "+name+" "+definition.rows[0].definition);
+   assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
+  }
+  // A matching name alone, disabled trigger or PUBLIC grant must not pass.
+  await q(`ALTER TABLE ${prefix}verified_deposit_evidence DISABLE TRIGGER verified_deposit_evidence_immutable`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
+  await q(`ALTER TABLE ${prefix}verified_deposit_evidence ENABLE ALWAYS TRIGGER verified_deposit_evidence_immutable`);
+  await q(`GRANT SELECT ON ${prefix}verified_deposit_evidence TO PUBLIC`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
+  await q(`REVOKE ALL ON ${prefix}verified_deposit_evidence FROM PUBLIC`);
+  // Table-level REVOKE does not remove independent column ACLs.
+  for(const privilege of ["SELECT","INSERT","UPDATE","REFERENCES"]){
+   await q(`GRANT ${privilege} (deposit_address) ON ${prefix}verified_deposit_evidence TO PUBLIC`);
+   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"),privilege);
+   await q(`REVOKE ${privilege} (deposit_address) ON ${prefix}verified_deposit_evidence FROM PUBLIC`);
+   assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
+  }
+  await q(`GRANT EXECUTE ON FUNCTION ${prefix}reject_verified_deposit_evidence_mutation() TO PUBLIC`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
+  await q(`REVOKE ALL ON FUNCTION ${prefix}reject_verified_deposit_evidence_mutation() FROM PUBLIC`);
+  await q(`CREATE OR REPLACE FUNCTION ${prefix}reject_verified_deposit_evidence_mutation()
+    RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $body$ BEGIN RETURN NULL; END $body$`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
+  await q(`CREATE OR REPLACE FUNCTION ${prefix}reject_verified_deposit_evidence_mutation()
+    RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $guard$
+BEGIN
+ RAISE EXCEPTION 'Verified deposit evidence is immutable' USING ERRCODE='55000';
+END
+$guard$`);
+  assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
+  // Unreviewed rewrite rules can suppress writes before the mutation guard runs.
+  await q(`CREATE RULE suppress_evidence_insert AS ON INSERT TO ${prefix}verified_deposit_evidence DO INSTEAD NOTHING`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
+  await q(`DROP RULE suppress_evidence_insert ON ${prefix}verified_deposit_evidence`);
+  assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
+  await q(`CREATE RULE suppress_evidence_update AS ON UPDATE TO ${prefix}verified_deposit_evidence DO INSTEAD NOTHING`);
+  assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));
+  await q(`DROP RULE suppress_evidence_update ON ${prefix}verified_deposit_evidence`);
+  assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
   const withoutIndex=await auditCombinedDepositPreflight(pool,{schema});
   assert.equal(withoutIndex.catalog.ready,true);
   assert.equal(withoutIndex.assignments.ready,false);
   assert.equal(withoutIndex.ready,false);
   await q(`CREATE UNIQUE INDEX one_active_deposit_wallet ON ${prefix}user_wallet_assignments
     (wallet_id) WHERE status='active' AND assignment_type='deposit'`);
+  const missingHistory=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(missingHistory.catalog.ready,true);
+  assert.equal(missingHistory.assignments.ready,true);
+  assert.equal(missingHistory.historicalBasicGuardsPresent,false);
+  assert.equal(missingHistory.ready,false);
+  // Use the reviewed DDL in a disposable schema, retaining public extension prerequisites.
+  await q("CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public");
+  let history=await readFile(new URL("../migrations/20261125_deposit_ownership_history.review.sql",import.meta.url),"utf8");
+  for(const name of ["deposit_address_ownership_history","validate_deposit_ownership_wallet_identity","reject_deposit_ownership_history_mutation","wallets","users"]){
+   history=history.replaceAll("public."+name,prefix+name);
+  }
+  await q(history);
   const combined=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(combined.historicalBasicGuardsPresent,true);
   assert.equal(combined.ready,true);
   assert.equal(combined.realDepositsEnabled,false);
-  assert.equal(combined.scope,"catalog-and-legacy-assignment-only");
+  assert.equal(combined.scope,"catalog-legacy-assignment-and-basic-historical-guards-only");
+  await q("ALTER TABLE "+prefix+"deposit_address_ownership_history DISABLE TRIGGER deposit_ownership_history_immutable");
+  const disabled=await auditCombinedDepositPreflight(pool,{schema});
+  assert.equal(disabled.catalog.ready,true);
+  assert.equal(disabled.assignments.ready,true);
+  assert.equal(disabled.historicalBasicGuardsPresent,false);
+  assert.equal(disabled.ready,false);
+  await q("ALTER TABLE "+prefix+"deposit_address_ownership_history ENABLE ALWAYS TRIGGER deposit_ownership_history_immutable");
+  assert.equal((await auditCombinedDepositPreflight(pool,{schema})).ready,true);
   // A coercing typmod must not be accepted even with all other checks.
   await q(`ALTER TABLE ${prefix}verified_deposit_evidence ALTER COLUMN block_number TYPE numeric(78,0)`);
   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence.block_number"));

@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import {inspectHistoricalWalletSnapshot as inspect} from "./deposit-historical-wallet-db-inspection.js";
 const address="0x"+"a".repeat(40);
 const input={walletAddress:address,eventBlockNumber:"150",expectedUserId:"12"};
-const row={wallet_id:"1",user_id:"12",chain_id:"56",wallet_address:address,start_block:"100",end_block:"200",wallet_id_current:"1",wallet_chain_id:"56",wallet_address_current:address,is_platform_controlled:true};
+const row={wallet_id:"1",user_id:"12",chain_id:"56",wallet_address:address,start_block:"100",end_block:"200",wallet_id_current:"1",wallet_chain_id:"56",wallet_address_current:address,is_platform_controlled:true,user_id_current:"12"};
 function fixture(rows, visibility="off"){
  const calls=[];
  return {calls,pool:{connect:async()=>({query:async(sql,params)=>{
   calls.push({sql,params});
   if(sql.includes("deposit_address_ownership_history")){
-   assert.match(sql,/LEFT JOIN/);assert.doesNotMatch(sql,/FOR SHARE|FOR UPDATE/);
+   assert.match(sql,/LEFT JOIN "public"\.users u ON u\.id=h\.user_id/);assert.doesNotMatch(sql,/FOR SHARE|FOR UPDATE/);
    assert.deepEqual(params,[address,"150"]);
    return {rows,rowCount:rows.length};
   }
@@ -27,7 +27,7 @@ test("snapshot reports record consistency only without returning identities",asy
 test("snapshot rejects missing, ambiguous, orphaned and mismatched history",async()=>{
  for(const rows of [[],[row,row],[{...row,wallet_id_current:null}],
    [{...row,wallet_address:"0x"+"b".repeat(40),wallet_address_current:"0x"+"b".repeat(40)}],
-   [{...row,user_id:"13"}],[{...row,end_block:"150"}],[{...row,end_block:null}]]){
+   [{...row,user_id:"13"}],[{...row,user_id_current:null}],[{...row,user_id_current:"13"}],[{...row,user_id_current:undefined}],[{...row,end_block:"150"}],[{...row,end_block:null}]]){
   const f=fixture(rows);await assert.rejects(inspect(f.pool,input));
   assert.equal(f.calls.at(-1).sql,"ROLLBACK");
  }
