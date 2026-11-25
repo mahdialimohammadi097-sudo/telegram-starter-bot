@@ -138,10 +138,18 @@ export async function postJournalInTransaction(client, {
 
   // Serialize retries with the same key, including requests racing on separate
   // application instances. PostgreSQL releases this lock at transaction end.
-  await client.query(
-    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+  // The account-row locks below serialize writers, but do not refresh a
+  // REPEATABLE READ snapshot. A waiter could otherwise read a pre-debit
+  // balance after the first writer commits. Reject unsupported isolation
+  // before acquiring the key lock or touching any journal.
+  const keyLock = await client.query(
+    `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+     WHERE current_setting('transaction_isolation') = 'read committed'`,
     [key]
   );
+  if (keyLock.rowCount !== 1) {
+    throw new Error("Ledger posting requires READ COMMITTED transaction isolation");
+  }
 
   const existing = await client.query(
     `SELECT id, transaction_type, reference_id, description, status

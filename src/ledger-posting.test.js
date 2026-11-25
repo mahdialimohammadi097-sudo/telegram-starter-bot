@@ -385,3 +385,25 @@ test("an unconfirmed rollback preserves the original error and discards the ledg
   assert.match(discarded.message, /rollback unconfirmed/);
   assert.equal(original.rollbackError, discarded);
 });
+
+test("rejects unsupported transaction isolation before any journal reads or writes", async () => {
+  const { postJournalInTransaction } = await import("./ledger-posting.js");
+  const calls = [];
+  const client = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return { rowCount: 0, rows: [] };
+    }
+  };
+  await assert.rejects(postJournalInTransaction(client, {
+    transactionType: "isolation-test",
+    idempotencyKey: "unsupported-isolation",
+    entries: [
+      { account_id: "1", entry_type: "debit", amount: "1", currency: "USDT" },
+      { account_id: "2", entry_type: "credit", amount: "1", currency: "USDT" }
+    ]
+  }), /requires READ COMMITTED/);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /current_setting\('transaction_isolation'\) = 'read committed'/);
+  assert.deepEqual(calls[0].params, ["unsupported-isolation"]);
+});
