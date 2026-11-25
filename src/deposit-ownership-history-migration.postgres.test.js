@@ -119,6 +119,13 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,5);
   // Missing users and non-platform wallets must not create ownership records.
   await assert.rejects(insert(1,999,address,"700","710"),{code:"23503"});
+  // Internal FK triggers are not ALWAYS triggers. The explicit user check
+  // must reject a missing user even in replica mode.
+  await client.query("BEGIN");
+  try{
+   await client.query("SET LOCAL session_replication_role = replica");
+   await assert.rejects(insert(1,999,address,"700","710"),{code:"23503"});
+  }finally{await client.query("ROLLBACK");}
   await client.query("INSERT INTO "+prefix+"wallets VALUES (4,56,$1,false)",[other]);
   await assert.rejects(insert(4,11,other,"700","710"),/identity mismatch/);
   // A conflicting second row must roll back an otherwise valid first row.
