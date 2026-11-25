@@ -29,7 +29,7 @@ BEGIN
  ) <> 3 THEN
   RAISE EXCEPTION 'Historical ownership extension prerequisites not confirmed';
  END IF;
- -- Restrict the candidate to the reviewed underlying types and ordinary tables.
+ -- Restrict the candidate to the reviewed underlying types and standalone permanent ordinary tables.
  IF (
   SELECT count(*)
   FROM (VALUES
@@ -39,7 +39,11 @@ BEGIN
    (pg_catalog.to_regclass('public.wallets'), 'wallet_address', ARRAY['pg_catalog.text'::regtype,'pg_catalog.varchar'::regtype]),
    (pg_catalog.to_regclass('public.wallets'), 'is_platform_controlled', ARRAY['pg_catalog.bool'::regtype])
   ) AS expected(rel, col, types)
-  JOIN pg_catalog.pg_class c ON c.oid=expected.rel AND c.relkind='r'
+  JOIN pg_catalog.pg_class c ON c.oid=expected.rel AND c.relkind='r' AND c.relpersistence='p'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_inherits i
+      WHERE i.inhparent=c.oid OR i.inhrelid=c.oid
+    )
   JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attname=expected.col
    AND a.attnum>0 AND NOT a.attisdropped AND a.atttypid=ANY(expected.types)
  ) <> 5 THEN
