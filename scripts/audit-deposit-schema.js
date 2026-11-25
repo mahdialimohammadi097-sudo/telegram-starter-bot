@@ -19,10 +19,13 @@ try {
  const result=audit==="combined-deposit-preflight"
    ? await auditCombinedDepositPreflight(pool)
    : await runReadOnlyDepositAudit(pool);
+ // Do not publish a successful report before connection cleanup succeeds.
+ await pool.end();
+ pool=undefined;
  process.stdout.write(JSON.stringify({audit,...result})+"\n");
  if(!result.ready) process.exitCode=2;
 } catch(error) {
- process.stderr.write(JSON.stringify({audit,ready:false,
+ process.stderr.write(JSON.stringify({audit,ready:false,...(audit==="combined-deposit-preflight"?{realDepositsEnabled:false}:{}) ,
    error:"Audit execution failed; inspect private server logs without sharing secrets",
    code:safeDiagnosticCode(error)})+"\n");
  process.exitCode=3;
