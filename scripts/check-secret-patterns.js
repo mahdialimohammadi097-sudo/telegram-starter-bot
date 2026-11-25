@@ -21,6 +21,8 @@ function placeholderDatabaseUrl(value) {
 // Exact values reviewed in these synthetic diagnostic tests and disposable CI only.
 // Neither a whole file nor a remote host is exempt from credential scanning.
 const reviewedFixtures = Object.freeze({
+  // Existing test intentionally uses an unreachable localhost endpoint.
+  "scripts/fadehost-schema-audit.test.js": ["postgresql://" + "secretuser:secretpass@127.0.0.1:1/private"],
   "src/admin-diagnostic-backport.test.js": ["postgresql://" + "fixture:fixture@127.0.0.1:1/diagnostic_fixture"],
   ".github/workflows/catalog-owner-postgres.yml": ["postgresql://" + "postgres:rehearsal@localhost:5432/catalog_rehearsal"],
   "src/database-idle-error.test.js": ["postgres://" + "secret:password@private-host/db"],
