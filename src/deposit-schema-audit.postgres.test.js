@@ -55,15 +55,10 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
      transaction_id bigint NOT NULL REFERENCES ${prefix}ledger_transactions(id),
      account_id bigint NOT NULL REFERENCES ${prefix}ledger_accounts(id),
      entry_type text NOT NULL,amount numeric(36,18) NOT NULL,currency text NOT NULL);
-   CREATE TABLE ${prefix}verified_deposit_evidence(
-     event_key text PRIMARY KEY,block_hash text NOT NULL,
-     block_number numeric(78,0) NOT NULL CHECK (block_number >= 0) CHECK (block_number <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric),token_contract text NOT NULL,
-     deposit_address text NOT NULL,amount_base_units numeric(78,0) NOT NULL CHECK (amount_base_units > 0) CHECK (amount_base_units <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric),
-     CONSTRAINT verified_deposit_evidence_event_key_format CHECK (event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'),
-     CONSTRAINT verified_deposit_evidence_block_hash_format CHECK (block_hash ~ '^0x[0-9a-f]{64}$'),
-     CONSTRAINT verified_deposit_evidence_token_format CHECK (token_contract ~ '^0x[0-9a-f]{40}$'),
-     CONSTRAINT verified_deposit_evidence_address_format CHECK (deposit_address ~ '^0x[0-9a-f]{40}$'));
+
   `);
+  const fixture=await readFile(new URL("../test/fixtures/verified-deposit-evidence.sql",import.meta.url),"utf8");
+  await q(fixture.replace("CREATE TABLE verified_deposit_evidence (","CREATE TABLE "+prefix+"verified_deposit_evidence ("));
   const result=await auditDepositSchema(pool,{schema});
   assert.deepEqual(result.missing,[]);
   assert.deepEqual(result.incompatible,[]);
