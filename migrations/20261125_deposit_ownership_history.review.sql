@@ -96,7 +96,7 @@ BEGIN
  END IF;
  RETURN NEW;
 END
-$;
+$$;
 CREATE TRIGGER deposit_ownership_wallet_identity
 BEFORE INSERT ON public.deposit_address_ownership_history
 FOR EACH ROW EXECUTE FUNCTION public.validate_deposit_ownership_wallet_identity();
