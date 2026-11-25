@@ -1,0 +1,29 @@
+name: Catalog ownership tests
+on:
+  pull_request:
+    paths:
+      - 'src/catalog-deposit-owner*'
+      - 'src/deposit-owner-guard.js'
+      - 'src/bep20-receipt-evidence*'
+      - 'src/bep20-deposit-rehearsal*'
+      - 'src/bep20-rpc-reader*'
+      - 'src/deposit-ingestion-gate*'
+      - '.github/workflows/catalog-owner-tests.yml'
+  push:
+    branches:
+      - feature/catalog-owner-adapter
+permissions:
+  contents: read
+jobs:
+  ownership:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check scripts/audit-deposit-schema.js
+      - run: node --test src/catalog-deposit-owner.test.js src/bep20-receipt-evidence.test.js src/bep20-deposit-rehearsal.test.js src/bep20-rpc-reader.test.js src/deposit-schema-audit.test.js src/deposit-ingestion-gate.test.js src/confirmed-deposit-posting.test.js

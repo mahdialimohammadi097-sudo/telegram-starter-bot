@@ -1,30 +1,19 @@
-# FadeHost production schema audit — controlled execution
+# FadeHost read-only schema audit — existing service
 
-Status: **NOT DEPLOYED**. This document does not authorize merging PR #81, changing the production bot, or enabling deposits.
+The integration candidate retains the existing schedule command and delegates to the reviewed deposit catalog audit. This is not evidence that the candidate is deployed. A push to main automatically deploys the existing bot; do not merge before release review and operational approval.
 
-## Preflight
+## Controlled execution
 
-1. Obtain explicit owner approval for a **code-only deployment** to the existing `telegram-bot` service. Approval to deploy diagnostics is **not** approval to receive or transfer real USDT.
-2. Review PR #81 and verify both CI checks pass. Verify the PR contains only the audit script, its tests, the workflow and CI dependency fix, and this guide.
-3. Before merging, verify the service's current `main` commit, runtime health, database connection and a rollback path. GitHub pushes to `main` auto-deploy on FadeHost.
-4. Do not copy `DATABASE_URL` or any credentials into a schedule, chat, log or PR.
+Confirm the deployed commit, service health, private database connection and rollback path. Use the existing schedule command in telegram-bot:
 
-## Running after approved deployment
+    node scripts/fadehost-schema-audit.js
 
-1. Confirm the FadeHost deployed commit contains `scripts/fadehost-schema-audit.js`.
-2. In **telegram-bot → Schedules**, add a temporary UTC cron schedule using exactly:
-   `node scripts/fadehost-schema-audit.js`
-3. The scheduler is recurring, not a guaranteed immediate one-shot. Select the next available UTC minute with enough lead time to save; record the schedule and remove it after its first execution. Avoid duplicating the existing cleanup schedule. Execution time limit: 60 seconds.
-4. Read the **last answer** in Schedules. Copy only sanitized JSON output, never environment variables or credentials. The script has a single 8-second statement timeout and an 8-second connection timeout.
-5. Delete the temporary schedule once it has run, whether successful or failed, to avoid recurring database checks.
+Inspect the sanitized JSON output only. If a temporary recurring schedule is used, remove it after its first execution, including on failure. Never put database credentials into the schedule or share them in logs. The command uses a bounded read-only repeatable-read transaction with the existing TLS policy, 8-second connection timeout, a verified 10-second transaction-local statement timeout, and a verified 3-second lock timeout. The shared audit wrapper verifies the effective read-only and repeatable-read settings before catalog inspection. These are per-statement limits, not a total runtime deadline.
 
-## Interpreting output
+## Interpretation
 
-- `ready: false, missing: [...]`: expected columns or uniqueness checks are missing. This is a **blocker**, not permission to apply migrations blindly.
-- `ready: true, missing: []`: only the script's limited table/column/unique-index inventory passed. It does **not** validate ledger correctness, chain receipts, security, ownership, reconciliation or legal readiness.
-- `error: DATABASE_URL_NOT_CONFIGURED`: connection environment not available.
-- `error: READ_ONLY_AUDIT_FAILED`: audit could not complete. The `code` is a sanitized SQLSTATE or UNKNOWN; investigate privately.
+- Exit 0 / ready true: reviewed structural checks passed, including required columns, precision, nullability, immediate unique indexes, validated foreign keys and reviewed evidence CHECK definitions. This does not certify historical ownership, real balances, role isolation, network security, backup/restore or financial activation.
+- Exit 2 / ready false: missing or incompatible catalog requirements. The missing array retains legacy unique: markers; incompatible provides detailed findings. Review differences before any migration.
+- Exit 3: missing configuration, read-only execution failure or cleanup failure. Investigate privately using sanitized diagnostics.
 
-## Hard boundaries
-
-The script executes only metadata SELECT statements in a PostgreSQL READ ONLY transaction and uses read-only session options. It does not insert, update, delete, migrate, approve deposits, start Telegram polling or move USDT. Real financial operations remain disabled until independent security and accounting verification and explicit owner approval.
+Successful structural reports explicitly set financialActivationReady and realDepositsEnabled to false. Error reports never authorize financial operations. No migrations, user records, wallet balances or money movements are performed. Real operations require independent verification and separate final owner approval.

@@ -11,17 +11,21 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: profino-external-uptime
+  cancel-in-progress: false
+
 jobs:
   uptime:
     name: Check FadeHost application availability
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - name: Restore previous monitor state
         uses: actions/cache/restore@v4
         with:
           path: .profinostate
-          key: profino-uptime-${{ github.run_id }}
+          key: profino-uptime-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             profino-uptime-
 
@@ -34,6 +38,7 @@ jobs:
           else
             PREVIOUS="unknown"
           fi
+          case "$PREVIOUS" in up|down|unknown) ;; *) PREVIOUS="unknown" ;; esac
           echo "status=$PREVIOUS" >> "$GITHUB_OUTPUT"
           echo "Previous monitor state: $PREVIOUS"
 
@@ -89,7 +94,7 @@ jobs:
             MESSAGE="PROFINO MONITOR CONNECTED: External monitoring is active and the FadeHost application is responding."
           fi
 
-          RESPONSE="$(curl --fail --silent --show-error --max-time 15 \
+          RESPONSE="$(curl --fail --silent --max-time 15 \
             --request POST \
             --data-urlencode "chat_id=8810232463" \
             --data-urlencode "text=$MESSAGE" \
@@ -99,17 +104,20 @@ jobs:
 
       - name: Prepare monitor state
         if: steps.notify.outcome == 'success'
+        env:
+          CURRENT_STATUS: ${{ steps.check.outputs.status }}
         shell: bash
         run: |
+          case "$CURRENT_STATUS" in up|down) ;; *) exit 1 ;; esac
           mkdir -p .profinostate
-          printf "%s" "${{ steps.check.outputs.status }}" > .profinostate/status
+          printf "%s" "$CURRENT_STATUS" > .profinostate/status
 
       - name: Save monitor state
         if: steps.notify.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: .profinostate
-          key: profino-uptime-${{ github.run_id }}
+          key: profino-uptime-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Mark unavailable application check as failed
         if: steps.check.outputs.status == 'down'

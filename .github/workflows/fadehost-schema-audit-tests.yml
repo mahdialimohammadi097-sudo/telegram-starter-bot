@@ -4,6 +4,10 @@ on:
     paths:
       - 'scripts/fadehost-schema-audit.js'
       - 'scripts/fadehost-schema-audit.test.js'
+      - 'src/deposit-schema-audit.js'
+      - 'src/database-tls-policy.js'
+      - 'src/transaction-safety.js'
+      - 'src/diagnostic-safety.js'
       - '.github/workflows/fadehost-schema-audit-tests.yml'
   push:
     branches:
@@ -13,11 +17,14 @@ permissions:
 jobs:
   safe-audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: node --check scripts/fadehost-schema-audit.js
       - run: node --test scripts/fadehost-schema-audit.test.js

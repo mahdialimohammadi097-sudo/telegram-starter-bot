@@ -12,13 +12,20 @@ export function createRateLimiter({ windowMs = 10_000, userLimit = 20, adminLimi
     }
   }
   function consume({ userId, isAdmin = false, now = Date.now() }) {
-    if (userId === undefined || userId === null) throw new TypeError("userId is required");
+    if (!Number.isSafeInteger(userId) || userId <= 0) throw new TypeError("Invalid userId");
+    if (typeof isAdmin !== "boolean") throw new TypeError("Invalid admin flag");
     if (!Number.isFinite(now)) throw new TypeError("now must be a finite timestamp");
     operations += 1;
     if (operations % 128 === 0) prune(now);
     const key = String(userId);
     const limit = isAdmin ? adminLimit : userLimit;
     let bucket = buckets.get(key);
+    // Never evict an active identity to admit another: eviction would reset
+    // that identity's quota. A saturated process rejects new identities until
+    // the periodic bounded cleanup makes room.
+    if (!bucket && buckets.size >= maxEntries) {
+      return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil(windowMs * 2 / 1000)), shouldNotify: false };
+    }
     if (!bucket || now - bucket.windowStartedAt >= windowMs || now < bucket.windowStartedAt) {
       bucket = { windowStartedAt: now, count: 0, lastSeenAt: now, lastNotifiedAt: null };
     }
@@ -27,12 +34,10 @@ export function createRateLimiter({ windowMs = 10_000, userLimit = 20, adminLimi
     buckets.set(key, bucket);
     if (bucket.count < limit) {
       bucket.count += 1;
-      if (buckets.size > maxEntries) buckets.delete(buckets.keys().next().value);
       return { allowed: true, retryAfterSeconds: 0, shouldNotify: false };
     }
     const shouldNotify = bucket.lastNotifiedAt === null || now - bucket.lastNotifiedAt >= windowMs;
     if (shouldNotify) bucket.lastNotifiedAt = now;
-    if (buckets.size > maxEntries) buckets.delete(buckets.keys().next().value);
     return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((bucket.windowStartedAt + windowMs - now) / 1000)), shouldNotify };
   }
   return { consume, get size() { return buckets.size; } };

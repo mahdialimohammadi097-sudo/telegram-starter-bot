@@ -1,0 +1,93 @@
+name: Integration ledger validator regression
+
+on:
+  push:
+    branches:
+      - integration/retain-ledger-validator-20261120
+  pull_request:
+    branches:
+      - feature/integrated-postgres-matrix
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validator-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify diagnostic source and test syntax
+        run: |
+          node --check src/database-diagnostics.js
+          node --check src/database-diagnostics.test.js
+      - name: Run delegated ledger validator and database TLS policy tests
+        run: node --test src/database-diagnostics.test.js src/database-tls-policy.test.js
+
+  postgres-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24, 26]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: profino_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d profino_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/profino_test
+      PROFINO_DISPOSABLE_POSTGRES: 'yes'
+      CATALOG_REHEARSAL_URL: postgres://postgres:postgres@localhost:5432/catalog_rehearsal
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Audit production dependencies
+        if: matrix.node-version == 22
+        run: npm audit --omit=dev --audit-level=high
+      - name: Create isolated catalog migration rehearsal database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
+      - name: Unit and PostgreSQL integration tests
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/profino-tests.tap"
+          grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-tests.tap"
+          # Some gated suites intentionally skip without their dedicated rehearsal target.
+          # Require the deposit evidence migration test itself to run and pass.
+          grep -Eq '^ok [0-9]+ - staged evidence migration creates constrained table and refuses existing relations$' "$RUNNER_TEMP/profino-tests.tap"
+      - name: Reset isolated catalog rehearsal database before focused tests
+        env:
+          PGPASSWORD: postgres
+        run: |
+          # CI-only disposable database; never use the production DATABASE_URL.
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE catalog_rehearsal WITH (FORCE)'
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
+      - name: Focused PostgreSQL tests
+        run: npm run test:postgres

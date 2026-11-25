@@ -1,2 +1,17 @@
 node_modules/
 .env
+
+# Local credentials, keys and database exports must never be committed.
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.pgpass
+.pgpass
+.npmrc.local
+*.dump
+*.backup
+*.sql.gz

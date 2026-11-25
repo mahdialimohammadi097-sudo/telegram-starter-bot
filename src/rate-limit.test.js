@@ -41,3 +41,34 @@ test("bounds memory used for per-user buckets", () => {
   limiter.consume({ userId: 3, now: 0 });
   assert.equal(limiter.size, 2);
 });
+
+test("full capacity never resets an active identity's quota", () => {
+  const limiter = createRateLimiter({ maxEntries: 2, userLimit: 1, windowMs: 1000 });
+  assert.equal(limiter.consume({ userId: 1, now: 0 }).allowed, true);
+  assert.equal(limiter.consume({ userId: 2, now: 0 }).allowed, true);
+  for (let id = 3; id <= 200; id++) {
+    const result = limiter.consume({ userId: id, now: 10 });
+    assert.equal(result.allowed, false);
+    assert.equal(result.shouldNotify, false);
+  }
+  assert.equal(limiter.consume({ userId: 1, now: 10 }).allowed, false);
+  assert.equal(limiter.consume({ userId: 2, now: 10 }).allowed, false);
+  assert.equal(limiter.size, 2);
+});
+
+test("periodic cleanup admits a new identity after stale buckets expire", () => {
+  const limiter = createRateLimiter({ maxEntries: 1, userLimit: 1, windowMs: 1000 });
+  limiter.consume({ userId: 1, now: 0 });
+  for (let i = 0; i < 126; i++) assert.equal(limiter.consume({ userId: 2, now: 100 }).allowed, false);
+  assert.equal(limiter.consume({ userId: 2, now: 2000 }).allowed, true);
+  assert.equal(limiter.size, 1);
+});
+
+test("rejects noncanonical Telegram identities and nonboolean admin flags", () => {
+  const limiter = createRateLimiter();
+  for (const userId of ["1", 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, { toString: () => "1" }]) {
+    assert.throws(() => limiter.consume({ userId }), /Invalid userId/);
+  }
+  assert.throws(() => limiter.consume({ userId: 1, isAdmin: "false" }), /Invalid admin flag/);
+  assert.equal(limiter.size, 0);
+});

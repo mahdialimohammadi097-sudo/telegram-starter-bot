@@ -29,3 +29,15 @@
 - GitHub Actions runs syntax checks and the complete Node.js unit test suite.
 - A successful CI run does not prove FadeHost deployment, Telegram delivery, database credentials, webhook routing, or polling exclusivity.
 - Production acceptance requires a supervised deployment, `/healthz` returning HTTP 200, a real test message round-trip in the private bot chat, a restart test, and a shutdown/restart check. Do not use customer funds or enable financial execution for these tests.
+
+### Scheduled preview shutdown
+
+Shutdown stops new scheduler ticks and waits for startup recovery and the claimed preview batch before closing PostgreSQL. A completed preview can therefore record its Telegram message and chat IDs. The PG17 drill blocks a synthetic delivery during shutdown and verifies its history after restarting. A separate fixture represents a hard interruption: startup marks the pending result unknown and does not resend it. Actual host termination grace time and Telegram delivery still require staging verification.
+
+Shutdown also stops admitting new publication and rejection callbacks and waits for actions already accepted. The offline PG17 drill holds the post row after synthetic channel delivery, verifies shutdown waits for the final message ID write, and replays approval after restarting. A post still marked publishing after a hard interruption is recovered as publish_unknown for manual channel verification. Host termination deadlines and actual Telegram delivery require staging verification.
+
+### Overlapping scheduler instances
+
+Candidate instances share a PostgreSQL advisory lock during a preview batch or approved publication. Startup recovery obtains the exclusive lock before classifying outstanding sends. The sending session owns its lock through the final database write; losing the session releases it. The offline PG17 drill starts another Node process while the publication write is blocked and verifies that recovery waits and preserves the published state. This protocol requires session-affine PostgreSQL connections and cooperating scheduler versions. Drain the older instance before a mixed-version cutover.
+
+The offline restore drill terminates only the fixture database backend blocked on writing the acknowledged channel message ID. The operator notification includes that message ID for manual inspection. Replaying the approval before and after startup recovery does not resend the post. Recovery converts the interrupted publishing state to publish_unknown. A database error cannot by itself establish whether an external delivery succeeded.

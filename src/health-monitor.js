@@ -1,3 +1,5 @@
+import { safeDiagnosticCode, safeTelegramDiagnosticCode } from "./diagnostic-safety.js";
+
 const ADMIN_ID = 8810232463;
 
 export function getHealthChanges(previous, current) {
@@ -32,41 +34,51 @@ export function startHealthMonitor({
   telegramCheck = async () => { await bot.api.getMe(); return true; }
 }) {
   let previous = { telegram: true, database: true };
-  let running = false;
+  const pendingAlerts = new Map();
+  let activeCheck = null;
+  let stopped = false;
 
-  async function check() {
-    if (running) return;
-    running = true;
+  async function performCheck() {
     try {
       const [telegramResult, databaseResult] = await Promise.allSettled([
-        telegramCheck(),
-        pool.query("SELECT 1 AS health_check")
+        Promise.resolve().then(() => telegramCheck()),
+        Promise.resolve().then(() => pool.query("SELECT 1 AS health_check"))
       ]);
+      if (stopped) return;
       const current = {
         telegram: telegramResult.status === "fulfilled" && telegramResult.value !== false,
         database: databaseResult.status === "fulfilled"
       };
       onStatus(current);
+      if (stopped) return;
       const changes = getHealthChanges(previous, current);
 
       for (const change of changes) {
+        pendingAlerts.set(change.service, change);
         logger.warn("[health] " + change.service + " " + change.status.toLowerCase());
       }
 
       previous = current;
 
-      if (changes.length && current.telegram) {
+      if (pendingAlerts.size && current.telegram) {
         try {
-          await bot.api.sendMessage(ADMIN_ID, formatHealthAlert(changes, now()));
+          await bot.api.sendMessage(ADMIN_ID, formatHealthAlert([...pendingAlerts.values()], now()));
+          pendingAlerts.clear();
         } catch (error) {
-          logger.error("[health] alert delivery failed:", error?.error_code || "telegram_send_failed");
+          logger.error("[health] alert delivery failed:", safeTelegramDiagnosticCode(error, "telegram_send_failed"));
         }
       }
     } catch (error) {
-      logger.error("[health] monitor check failed:", error?.code || "check_failed");
-    } finally {
-      running = false;
+      logger.error("[health] monitor check failed:", safeDiagnosticCode(error));
     }
+  }
+
+  function check() {
+    if (stopped) return Promise.resolve();
+    if (!activeCheck) {
+      activeCheck = performCheck().finally(() => { activeCheck = null; });
+    }
+    return activeCheck;
   }
 
   // Run once immediately, then at a fixed interval. This never receives Telegram updates.
@@ -77,7 +89,10 @@ export function startHealthMonitor({
   return {
     ready,
     stop() {
+      stopped = true;
       clearInterval(timer);
+      // Wait for any probe or Telegram delivery already in flight.
+      return activeCheck ?? Promise.resolve();
     },
     check
   };
