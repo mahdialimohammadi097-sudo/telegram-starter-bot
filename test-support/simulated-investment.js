@@ -39,6 +39,15 @@ async function verifyOpeningJournal(client, userId, investmentId, amount, replay
 
 }
 
+// Fixed v1 rehearsal catalogue only; production must bind immutable versioned terms.
+function requireReviewedTerms(investment) {
+  const plan = previewSettlement(investment.plan + " " + String(investment.principal));
+  if (!plan || investment.profit_percent !== plan.profitPercent || investment.fee_percent !== plan.feePercent) {
+    throw new Error("Investment terms differ from reviewed plan; reconciliation required");
+  }
+  return plan;
+}
+
 export async function openSimulatedInvestment(pool, userId, requestId, selection) {
   const plan = previewSettlement(selection);
   if (!plan) throw new Error("Unsupported plan or amount");
@@ -47,7 +56,7 @@ export async function openSimulatedInvestment(pool, userId, requestId, selection
     const user = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!user.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
-      "SELECT id, plan, principal::text FROM simulation_investments WHERE user_id = $1 AND request_id = $2",
+      "SELECT id, plan, principal::text, profit_percent, fee_percent FROM simulation_investments WHERE user_id = $1 AND request_id = $2 FOR UPDATE",
       [userId, requestId]
     );
     if (prior.rowCount) {
@@ -55,6 +64,7 @@ export async function openSimulatedInvestment(pool, userId, requestId, selection
       if (investment.plan !== plan.name || investment.principal !== plan.amount) {
         throw new Error("Request already used for a different investment");
       }
+      requireReviewedTerms(investment);
       await verifyOpeningJournal(client, userId, investment.id, plan.amount, true);
       return investment.id;
     }
@@ -102,12 +112,14 @@ export async function settleNextDueSimulation(pool, reserveId, feeId) {
 
 async function settleLockedInvestment(client, userId, investmentId, reserveId, feeId) {
   const { rows: [investment] } = await client.query(
-    `SELECT status, settlement_id, principal, profit_percent, fee_percent, matures_at <= now() AS mature
+    `SELECT status, settlement_id, plan, principal, profit_percent, fee_percent, matures_at <= now() AS mature
      FROM simulation_investments WHERE id = $1 AND user_id = $2 FOR UPDATE`, [investmentId, userId]
   );
   if (!investment) throw new Error("Unknown investment");
   const replay = investment.status === "settled";
   if (!replay && (investment.status !== "active" || !investment.mature)) throw new Error("Investment is not due");
+  requireReviewedTerms(investment);
+  await verifyOpeningJournal(client, userId, investmentId, String(investment.principal), true);
   const key = "simulated-investment-settle:" + investmentId;
   // Never silently repair a detached journal or certify a corrupted terminal state.
   const prior = await client.query(

@@ -2713,7 +2713,7 @@ test("settlement replay verifies its original journal and refuses detached or co
   for(const [change,restore,pattern] of [
     ["settlement_id=NULL","settlement_id="+journal,/journal mismatch/],
     ["status='active'","status='settled'",/Detached investment settlement/],
-    ["profit_percent=5","profit_percent=4",/different request/]
+    ["profit_percent=5","profit_percent=4",/terms differ/]
   ]){
     await pool.query("UPDATE simulation_investments SET "+change+" WHERE id=$1",[id]);
     try{
@@ -2800,4 +2800,29 @@ test("paid withdrawal replay rejects a substituted journal and modified amount",
   assert.equal(await confirm(),journal);
   assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"0.00000000");
   assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-payout:"+request.id])).rowCount,1);
+});
+
+test("fixed rehearsal plan terms are validated before settlement and opening replay", {skip:!enabled},async()=>{
+  const {openSimulatedInvestment,settleSimulatedInvestment}=await import("../test-support/simulated-investment.js");
+  const owner=await createSimulationWallet(19508);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"25");
+  const id=await openSimulatedInvestment(pool,owner,"fixed-terms-fault","SMART 25");
+  const reserve=await createAccount("AVAILABLE"),fee=await createAccount("CLEARING");
+  await seedAvailableBalance(reserve,"10");
+  await pool.query("UPDATE simulation_investments SET matures_at=now() WHERE id=$1",[id]);
+  const settle=()=>settleSimulatedInvestment(pool,owner,id,reserve,fee);
+  const before=await displayedBalances(owner);
+  for(const [field,value,original] of [["profit_percent",99,14],["fee_percent",1,4],["plan","OTHER","SMART"]]){
+    await pool.query("UPDATE simulation_investments SET "+field+"=$2 WHERE id=$1",[id,value]);
+    try{
+      await assert.rejects(settle(),/terms differ/);
+      await assert.rejects(openSimulatedInvestment(pool,owner,"fixed-terms-fault","SMART 25"),/terms differ|different investment/);
+      assert.deepEqual(await displayedBalances(owner),before);
+      assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["simulated-investment-settle:"+id])).rowCount,0);
+    }finally{await pool.query("UPDATE simulation_investments SET "+field+"=$2 WHERE id=$1",[id,original]);}
+  }
+  const journal=await settle();
+  assert.equal(await settle(),journal);
+  assert.deepEqual(await displayedBalances(owner),["27.36000000","0.00000000","0.00000000"]);
 });
