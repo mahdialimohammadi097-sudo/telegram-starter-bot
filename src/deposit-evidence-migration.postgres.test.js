@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
 import {readFile} from "node:fs/promises";
+import {persistVerifiedDepositEvidence} from "./verified-deposit-evidence-store.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
 function safeTarget() {
   return isDisposablePostgresTarget(url, "catalog_rehearsal");
@@ -127,6 +128,25 @@ test("staged evidence migration creates constrained table and refuses existing r
     await client.query("SAVEPOINT immutable_evidence");
     await assert.rejects(client.query(sql),{code:"55000"});
     await client.query("ROLLBACK TO SAVEPOINT immutable_evidence");
+  }
+  // Exercise the real store against the reviewed migration, not the legacy fixture.
+  await client.query("SET LOCAL search_path = pg_catalog, public");
+  const evidence={eventKey:"bsc:56:0x"+"d".repeat(64)+":0",blockHash:"0x"+"a".repeat(64),
+   blockNumber:"1",tokenContract:"0x"+"b".repeat(40),depositAddress:"0x"+"c".repeat(40),
+   amountBaseUnits:"1000000000000000000"};
+  assert.deepEqual(await persistVerifiedDepositEvidence(client,evidence),{inserted:false,eventKey:evidence.eventKey});
+  await assert.rejects(persistVerifiedDepositEvidence(client,{...evidence,blockHash:"0x"+"e".repeat(64)}),/Conflicting verified deposit evidence/);
+  // ALWAYS must reject actual mutation attempts in replica mode, including no-op writes.
+  for(const sql of [
+   "UPDATE public.verified_deposit_evidence SET amount_base_units=2 WHERE false",
+   "DELETE FROM public.verified_deposit_evidence WHERE false",
+   "TRUNCATE public.verified_deposit_evidence"
+  ]){
+   await client.query("SAVEPOINT replica_guard");
+   try{
+    await client.query("SET LOCAL session_replication_role = replica");
+    await assert.rejects(client.query(sql),{code:"55000"});
+   }finally{await client.query("ROLLBACK TO SAVEPOINT replica_guard");await client.query("RELEASE SAVEPOINT replica_guard");}
   }
   const original=await client.query("SELECT amount_base_units::text AS amount FROM public.verified_deposit_evidence");
   assert.deepEqual(original.rows,[{amount:"1000000000000000000"}]);
