@@ -38,3 +38,37 @@ test("historical wallet snapshot checks real PostgreSQL without write locks or f
   assert.equal((await pool.query("SELECT count(*)::int AS count FROM "+prefix+"deposit_address_ownership_history")).rows[0].count,2);
  }finally{try{if(created)await pool.query('DROP SCHEMA "'+schema+'" CASCADE');}finally{await pool.end();}}
 });
+
+test("historical inspection rejects RLS-hidden conflicting ownership",{skip:!safeTarget(),timeout:20000},async()=>{
+ const suffix=randomUUID().replaceAll("-","");
+ const schema="history_rls_"+suffix,role="history_reader_"+suffix;
+ const pool=new pg.Pool({connectionString:url,max:1,connectionTimeoutMillis:5000});
+ const client=await pool.connect();
+ const prefix='"'+schema+'".';
+ const address="0x"+"a".repeat(40);
+ const input={schema,walletAddress:address,eventBlockNumber:"150",expectedUserId:"11"};
+ try {
+  await client.query('CREATE ROLE "'+role+'" NOLOGIN NOSUPERUSER NOBYPASSRLS');
+  await client.query('CREATE SCHEMA "'+schema+'"');
+  await client.query("CREATE TABLE "+prefix+"wallets(id bigint PRIMARY KEY,chain_id integer,wallet_address text,is_platform_controlled boolean)");
+  await client.query("CREATE TABLE "+prefix+"deposit_address_ownership_history(wallet_id bigint,user_id bigint,chain_id integer,wallet_address text,start_block numeric(78,0),end_block numeric(78,0))");
+  await client.query("INSERT INTO "+prefix+"wallets VALUES (1,56,$1,true),(2,56,$1,true)",[address]);
+  await client.query("INSERT INTO "+prefix+"deposit_address_ownership_history VALUES (1,11,56,$1,100,200),(2,12,56,$1,100,200)",[address]);
+  await client.query('GRANT USAGE ON SCHEMA "'+schema+'" TO "'+role+'"');
+  await client.query('GRANT SELECT ON ALL TABLES IN SCHEMA "'+schema+'" TO "'+role+'"');
+  await client.query("ALTER TABLE "+prefix+"deposit_address_ownership_history ENABLE ROW LEVEL SECURITY");
+  await client.query("CREATE POLICY visible_history ON "+prefix+'deposit_address_ownership_history FOR SELECT TO "'+role+'" USING (user_id=11)');
+  await client.query('SET ROLE "'+role+'"');
+  const auditPool={connect:async()=>({query:(...args)=>client.query(...args),release(){}})};
+  assert.equal((await client.query("SELECT count(*)::int AS n FROM "+prefix+"deposit_address_ownership_history")).rows[0].n,1);
+  await assert.rejects(inspect(auditPool,input),{code:"42501"});
+  assert.equal((await client.query("SELECT current_setting('row_security') AS setting")).rows[0].setting,"on");
+  assert.equal((await client.query("SELECT 1 AS healthy")).rows[0].healthy,1);
+ } finally {
+  try {
+   await client.query("RESET ROLE");
+   await client.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+   await client.query('DROP ROLE IF EXISTS "'+role+'"');
+  } finally {client.release();await pool.end();}
+ }
+});
