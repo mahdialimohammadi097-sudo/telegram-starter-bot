@@ -1,7 +1,8 @@
 // PROFINO Telegram Bot runtime
 // Polling is the default; webhook mode is optional.
 
-import { Bot, webhookCallback } from "grammy";
+import { Bot } from "grammy";
+import { webhookConfiguration, telegramWebhookHandler } from "./src/telegram-webhook.js";
 import { safeDiagnosticCode, safeTelegramDiagnosticCode } from "./src/diagnostic-safety.js";
 import { registerCommands } from "./src/commands.js";
 import { pool, testDatabaseConnection, closeDatabase } from "./src/database.js";
@@ -201,9 +202,14 @@ async function startPolling() {
 }
 
 async function main() {
+  // Validate before starting any services. Polling needs no webhook configuration.
+  const webhook = mode === "webhook"
+    ? webhookConfiguration((process.env.WEBHOOK_URL || "").trim(), process.env.WEBHOOK_SECRET)
+    : null;
   healthServer = await startHealthHttpServer({
     port,
     runtimeHealth,
+    webhookPath: webhook ? new URL(webhook.url).pathname : "/telegram",
     getBotUsername: () => botUsername,
     getWebhookHandler: () => webhookHandler
   });
@@ -235,14 +241,14 @@ async function main() {
     logCode:(code)=>console.error("[deposit-audit] read-only inspection unavailable:",code)
   });
 
-  const webhookUrl = (process.env.WEBHOOK_URL || "").trim().replace(/\/$/, "");
+
   healthMonitor = startHealthMonitor({
     bot,
     pool,
     telegramCheck: mode === "webhook"
       ? async () => {
           const info = await bot.api.getWebhookInfo();
-          return info.url === `${webhookUrl}/telegram`;
+          return info.url === webhook.url;
         }
       : async () => { await bot.api.getMe(); return true; },
     onStatus: (status) => {
@@ -254,15 +260,10 @@ async function main() {
   scheduler = startScheduler(bot);
 
   if (mode === "webhook") {
-    if (!webhookUrl.startsWith("https://")) {
-      throw new Error("WEBHOOK_URL must be a valid HTTPS URL in webhook mode.");
-    }
+    webhookHandler = telegramWebhookHandler(bot, webhook);
 
-    const secret = (process.env.WEBHOOK_SECRET || "").trim() || undefined;
-    webhookHandler = webhookCallback(bot, "http", { secretToken: secret });
-
-    await retryUntilAvailable(() => bot.api.setWebhook(`${webhookUrl}/telegram`, {
-      secret_token: secret,
+    await retryUntilAvailable(() => bot.api.setWebhook(webhook.url, {
+      secret_token: webhook.secret,
       drop_pending_updates: false
     }), "Telegram webhook registration");
 
