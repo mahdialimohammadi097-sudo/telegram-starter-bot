@@ -60,7 +60,8 @@ jobs:
         run: |
           set -euo pipefail
           npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/profino-matrix.tap"
-          grep -Eq '^# tests [1-9][0-9]*
+          grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-matrix.tap"
+          grep -Fxq '# skipped 0' "$RUNNER_TEMP/profino-matrix.tap"
       - name: Reset isolated catalog database before focused PostgreSQL tests
         if: matrix.node-version == 22
         env:
@@ -74,30 +75,5 @@ jobs:
         run: |
           set -euo pipefail
           node --test --test-reporter=tap src/*.postgres.test.js | tee "$RUNNER_TEMP/profino-focused.tap"
-          grep -Eq '^# tests [1-9][0-9]*
- "$RUNNER_TEMP/profino-matrix.tap"
-          grep -Fxq '# skipped 0' "$RUNNER_TEMP/profino-matrix.tap"
-      - name: Reset isolated catalog database before focused PostgreSQL tests
-        if: matrix.node-version == 22
-        env:
-          PGPASSWORD: postgres
-        run: |
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE catalog_rehearsal WITH (FORCE)'
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
-      - name: Focused PostgreSQL tests
-        if: matrix.node-version == 22
-        run: npm run test:postgres
- "$RUNNER_TEMP/profino-focused.tap"
+          grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-focused.tap"
           grep -Fxq '# skipped 0' "$RUNNER_TEMP/profino-focused.tap"
- "$RUNNER_TEMP/profino-matrix.tap"
-          grep -Fxq '# skipped 0' "$RUNNER_TEMP/profino-matrix.tap"
-      - name: Reset isolated catalog database before focused PostgreSQL tests
-        if: matrix.node-version == 22
-        env:
-          PGPASSWORD: postgres
-        run: |
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE catalog_rehearsal WITH (FORCE)'
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
-      - name: Focused PostgreSQL tests
-        if: matrix.node-version == 22
-        run: npm run test:postgres
