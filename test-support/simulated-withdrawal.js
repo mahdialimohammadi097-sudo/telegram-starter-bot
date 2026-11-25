@@ -68,10 +68,11 @@ export async function cancelWithdrawal(pool, userId, id) {
 
 async function releaseReservation(client, request, reviewerId) {
   const journal = await postMovement(client, request, "release", request.held_id, request.available_id);
-  await client.query(
-    "UPDATE simulation_withdrawals SET status = 'cancelled', release_id = $2, cancelled_by_reviewer = $3 WHERE id = $1",
+  const updated = await client.query(
+    "UPDATE simulation_withdrawals SET status = 'cancelled', release_id = $2, cancelled_by_reviewer = $3 WHERE id = $1 AND status = 'reserved' AND release_id IS NULL",
     [request.id, journal.transactionId, reviewerId]
   );
+  if (updated.rowCount !== 1) throw new Error("Withdrawal release transition unconfirmed");
   return journal.transactionId;
 }
 
@@ -229,10 +230,11 @@ export async function confirmTestnetWithdrawal(pool, id, observation, expected, 
     );
     if (!clearing.rowCount) throw new Error("Invalid payout clearing account");
     const journal = await postMovement(client, request, "payout", request.held_id, treasury.accountId);
-    await client.query(
-      "UPDATE simulation_withdrawals SET status = 'paid', payout_event = $2, payout_id = $3, clearing_id = $4, submitted_hash = $5 WHERE id = $1",
+    const updated = await client.query(
+      "UPDATE simulation_withdrawals SET status = 'paid', payout_event = $2, payout_id = $3, clearing_id = $4, submitted_hash = $5 WHERE id = $1 AND status = 'pending_receipt' AND payout_id IS NULL AND submitted_hash = $5",
       [id, event, journal.transactionId, treasury.accountId, expected.txHash.toLowerCase()]
     );
+    if (updated.rowCount !== 1) throw new Error("Withdrawal payout transition unconfirmed");
     return journal.transactionId;
   });
 }

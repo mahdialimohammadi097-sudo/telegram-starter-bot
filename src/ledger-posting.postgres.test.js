@@ -2615,3 +2615,46 @@ test("caught mid-journal failure cannot commit a partial financial record", {ski
   assert.deepEqual(rows,[{idempotency_key:goodKey,status:"posted"}]);
   assert.equal(await readAdjustmentBalance(available),"5");
 });
+
+test("a suppressed simulated investment settlement update rolls back its journal and permits a safe retry", {skip:!enabled}, async()=>{
+  const {openSimulatedInvestment,settleSimulatedInvestment}=await import("../test-support/simulated-investment.js");
+  const owner=await createSimulationWallet(19501);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"25");
+  const id=await openSimulatedInvestment(pool,owner,"transition-fault","STARTER 25");
+  const reserve=await createAccount("AVAILABLE"),fee=await createAccount("CLEARING");
+  await seedAvailableBalance(reserve,"10");
+  await pool.query("UPDATE simulation_investments SET matures_at=now() WHERE id=$1",[id]);
+  const before=await displayedBalances(owner);
+  await pool.query(`CREATE FUNCTION test_skip_settlement() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+    CREATE TRIGGER test_skip_settlement BEFORE UPDATE ON simulation_investments FOR EACH ROW
+    WHEN (NEW.status='settled') EXECUTE FUNCTION test_skip_settlement()`);
+  try {
+    await assert.rejects(settleSimulatedInvestment(pool,owner,id,reserve,fee),/settlement transition unconfirmed/);
+    assert.deepEqual(await displayedBalances(owner),before);
+    assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["simulated-investment-settle:"+id])).rowCount,0);
+    assert.equal((await pool.query("SELECT status FROM simulation_investments WHERE id=$1",[id])).rows[0].status,"active");
+  }finally{await pool.query("DROP TRIGGER test_skip_settlement ON simulation_investments; DROP FUNCTION test_skip_settlement()");}
+  const settled=await settleSimulatedInvestment(pool,owner,id,reserve,fee);
+  assert.equal(await settleSimulatedInvestment(pool,owner,id,reserve,fee),settled);
+});
+test("a suppressed simulated withdrawal release cannot detach a journal from request state", {skip:!enabled}, async()=>{
+  const {reserveWithdrawal,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const owner=await createSimulationWallet(19502);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"25");
+  const request=await reserveWithdrawal(pool,owner,"transition-fault","10");
+  const before=await displayedBalances(owner);
+  await pool.query(`CREATE FUNCTION test_skip_release() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+    CREATE TRIGGER test_skip_release BEFORE UPDATE ON simulation_withdrawals FOR EACH ROW
+    WHEN (NEW.status='cancelled') EXECUTE FUNCTION test_skip_release()`);
+  try{
+    await assert.rejects(cancelWithdrawal(pool,owner,request.id),/release transition unconfirmed/);
+    assert.deepEqual(await displayedBalances(owner),before);
+    assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-release:"+request.id])).rowCount,0);
+    assert.equal((await pool.query("SELECT status FROM simulation_withdrawals WHERE id=$1",[request.id])).rows[0].status,"reserved");
+  }finally{await pool.query("DROP TRIGGER test_skip_release ON simulation_withdrawals; DROP FUNCTION test_skip_release()");}
+  const released=await cancelWithdrawal(pool,owner,request.id);
+  assert.equal(await cancelWithdrawal(pool,owner,request.id),released);
+  assert.equal((await displayedBalances(owner))[0],"25.00000000");
+});

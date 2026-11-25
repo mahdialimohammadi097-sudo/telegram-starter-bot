@@ -104,10 +104,11 @@ async function settleLockedInvestment(client, userId, investmentId, reserveId, f
       { account_id: feeId, entry_type: "credit", amount: fee, currency: "USDT" }
     ]
   });
-  await client.query(
-    "UPDATE simulation_investments SET status = 'settled', settlement_id = $2 WHERE id = $1",
+  const updated = await client.query(
+    "UPDATE simulation_investments SET status = 'settled', settlement_id = $2 WHERE id = $1 AND status = 'active' AND settlement_id IS NULL",
     [investmentId, journal.transactionId]
   );
+  if (updated.rowCount !== 1) throw new Error("Investment settlement transition unconfirmed");
   return journal.transactionId;
 }
 
