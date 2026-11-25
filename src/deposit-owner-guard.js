@@ -7,7 +7,7 @@ const EVENT_KEY = /^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]{0,77})$/;
 const MAX_UINT256 = (1n << 256n) - 1n;
 const nonzeroAddress = value => typeof value === "string" &&
   ADDRESS.test(value) && !/^0x0{40}$/i.test(value);
-function canonicalEventKey(value) {
+export function isCanonicalDepositEventKey(value) {
   if (typeof value !== "string") return false;
   const match = EVENT_KEY.exec(value);
   return match !== null && BigInt(match[1]) <= MAX_UINT256;
@@ -22,7 +22,7 @@ export function isValidDepositDatabaseId(value) {
 }
 export function requireUniqueDepositOwner(evidence, assignments) {
   if (!evidence || !nonzeroAddress(evidence.depositAddress) || !nonzeroAddress(evidence.tokenContract) ||
-      evidence.chainId !== "56" || !canonicalEventKey(evidence.eventKey) ||
+      evidence.chainId !== "56" || !isCanonicalDepositEventKey(evidence.eventKey) ||
       typeof evidence.ledgerAmount !== "string" ||
       !/^(?:0|[1-9][0-9]*)\.[0-9]{8}$/.test(evidence.ledgerAmount) ||
       !Array.isArray(assignments) || !/[1-9]/.test(evidence.ledgerAmount)) throw new Error("Invalid deposit attribution evidence");
