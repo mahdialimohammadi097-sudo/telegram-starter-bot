@@ -117,6 +117,15 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   // A retry after any deadlock must still reject the already committed conflict.
   await assert.rejects(client.query(competingSql,claims[loser]),{code:"23P01"});
   assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,5);
+  // Missing users and non-platform wallets must not create ownership records.
+  await assert.rejects(insert(1,999,address,"700","710"),{code:"23503"});
+  await client.query("INSERT INTO "+prefix+"wallets VALUES (4,56,$1,false)",[other]);
+  await assert.rejects(insert(4,11,other,"700","710"),/identity mismatch/);
+  // A conflicting second row must roll back an otherwise valid first row.
+  const batchSql="INSERT INTO "+table+"(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source) VALUES (1,11,56,$1,700,710,'disposable-review'),(2,12,56,$1,710,720,'disposable-review'),(1,11,56,$1,705,715,'disposable-review')";
+  await assert.rejects(client.query(batchSql,[address]),{code:"23P01"});
+  assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table+" WHERE start_block >= 700 AND start_block < 720")).rows[0].n,0);
+  assert.equal((await client.query("SELECT count(*)::int AS n FROM "+table)).rows[0].n,5);
  }finally{
   try{
    await client.query("ROLLBACK");
