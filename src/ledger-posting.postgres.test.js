@@ -2724,3 +2724,26 @@ test("settlement replay verifies its original journal and refuses detached or co
   }
   assert.equal(await settle(),journal);
 });
+
+test("withdrawal cancellation replay rejects mismatched or detached journal pointers", {skip:!enabled},async()=>{
+  const {reserveWithdrawal,cancelWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const owner=await createSimulationWallet(19505);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"25");
+  const request=await reserveWithdrawal(pool,owner,"withdrawal-replay-audit","10");
+  const cancel=()=>cancelWithdrawal(pool,owner,request.id);
+  const journal=await cancel();
+  assert.equal(await cancel(),journal);
+  const before=await displayedBalances(owner);
+  await pool.query("UPDATE simulation_withdrawals SET release_id=NULL WHERE id=$1",[request.id]);
+  try{
+    await assert.rejects(cancel(),/Withdrawal journal mismatch/);
+    await pool.query("UPDATE simulation_withdrawals SET status='reserved' WHERE id=$1",[request.id]);
+    await assert.rejects(cancel(),/Detached withdrawal journal/);
+    assert.deepEqual(await displayedBalances(owner),before);
+    assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-release:"+request.id])).rowCount,1);
+  }finally{
+    await pool.query("UPDATE simulation_withdrawals SET status='cancelled',release_id=$2 WHERE id=$1",[request.id,journal]);
+  }
+  assert.equal(await cancel(),journal);
+});
