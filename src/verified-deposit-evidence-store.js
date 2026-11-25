@@ -1,7 +1,8 @@
+import { isCanonicalDepositEventKey } from "./deposit-owner-guard.js";
 // Rehearsal-only durable receipt evidence store. Requires a reviewed migration
 // and reconciliation before production use. Does not credit user balances.
 const HASH=/^0x[0-9a-f]{64}$/;
-const KEY=/^bsc:56:0x[0-9a-f]{64}:(?:0|[1-9][0-9]*)$/;
+
 const ADDRESS=/^0x[0-9a-f]{40}$/;
 const UINT=/^(0|[1-9][0-9]{0,77})$/;
 const MAX_UINT256=(1n<<256n)-1n;
@@ -10,8 +11,9 @@ const validUint=value=>matches(UINT,value) && BigInt(value)<=MAX_UINT256;
 export async function persistVerifiedDepositEvidence(client, evidence) {
   const snapshot={...evidence};
   if (!client || typeof client.query!=="function" ||
-      !matches(KEY,snapshot.eventKey) || !matches(HASH,snapshot.blockHash) ||
+      !isCanonicalDepositEventKey(snapshot.eventKey) || !matches(HASH,snapshot.blockHash) ||
       !matches(ADDRESS,snapshot.tokenContract) || !matches(ADDRESS,snapshot.depositAddress) ||
+      /^0x0{40}$/.test(snapshot.tokenContract) || /^0x0{40}$/.test(snapshot.depositAddress) ||
       !validUint(snapshot.amountBaseUnits) || snapshot.amountBaseUnits==="0" ||
       !validUint(snapshot.blockNumber)) throw new Error("Invalid verified deposit evidence");
   const values=[snapshot.eventKey,snapshot.blockHash,snapshot.blockNumber,

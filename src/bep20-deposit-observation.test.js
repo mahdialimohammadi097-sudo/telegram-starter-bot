@@ -40,3 +40,10 @@ test("rejects self-transfers and zero sender observations",()=>{
   assert.throws(()=>validateBep20DepositObservation({...event,from},policy),/Invalid transfer sender/);
  }
 });
+
+
+test("rejects matching zero deposit and token configuration before producing evidence",()=>{
+ const zero="0x"+"0".repeat(40);
+ assert.throws(()=>validateBep20DepositObservation({...event,to:zero},{...policy,depositAddress:zero}),/Invalid zero/);
+ assert.throws(()=>validateBep20DepositObservation({...event,tokenContract:zero},{...policy,tokenContract:zero}),/Invalid zero/);
+});

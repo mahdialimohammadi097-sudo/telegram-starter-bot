@@ -87,6 +87,30 @@ test("staged evidence migration creates constrained table and refuses existing r
       VALUES (${values.join(",")})`), error=>error.code==="23514");
     await client.query("ROLLBACK TO SAVEPOINT " + label);
   }
+  // Test direct SQL independently of all application validators.
+  const zeroAddress="0x"+"0".repeat(40);
+  const keyPrefix="bsc:56:0x"+"e".repeat(64)+":";
+  const validToken="0x"+"b".repeat(40),validAddress="0x"+"c".repeat(40);
+  for(const [key,token,address] of [
+    [keyPrefix+"01",validToken,validAddress],
+    [keyPrefix+(1n<<256n).toString(),validToken,validAddress],
+    [keyPrefix+"9".repeat(100),validToken,validAddress],
+    [keyPrefix+"6",zeroAddress,validAddress],
+    [keyPrefix+"7",validToken,zeroAddress]
+  ]){
+    await client.query("SAVEPOINT invalid_identity");
+    await assert.rejects(client.query(
+      "INSERT INTO public.verified_deposit_evidence (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES ($1,$2,1,$3,$4,1)",
+      [key,"0x"+"a".repeat(64),token,address]),{code:"23514"});
+    await client.query("ROLLBACK TO SAVEPOINT invalid_identity");
+    await client.query("RELEASE SAVEPOINT invalid_identity");
+  }
+  await client.query("SAVEPOINT maximum_identity");
+  const maximumKey=keyPrefix+((1n<<256n)-1n).toString();
+  await client.query("INSERT INTO public.verified_deposit_evidence (event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES ($1,$2,1,$3,$4,1)",
+    [maximumKey,"0x"+"a".repeat(64),validToken,validAddress]);
+  await client.query("ROLLBACK TO SAVEPOINT maximum_identity");
+  await client.query("RELEASE SAVEPOINT maximum_identity");
   // NaN compares greater than finite numerics in PostgreSQL. A lower bound
   // alone is insufficient. Test both numeric fields and the uint256 ceiling.
   for(const [block,amount] of [

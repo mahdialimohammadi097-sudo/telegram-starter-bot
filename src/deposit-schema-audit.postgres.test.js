@@ -64,6 +64,26 @@ test("read-only audit accepts complete PostgreSQL ownership and ledger contract"
   assert.deepEqual(result.missing,[]);
   assert.deepEqual(result.incompatible,[]);
   assert.equal(result.ready,true);
+  // Verify all new identity checks against real PostgreSQL catalog metadata.
+  // The table is empty here; replacing constraints is confined to this disposable schema.
+  for(const name of ["verified_deposit_evidence_token_nonzero","verified_deposit_evidence_address_nonzero","verified_deposit_evidence_log_index_uint256"]){
+   const definition=await pool.query(
+    "SELECT pg_catalog.pg_get_constraintdef(c.oid) AS definition FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t ON t.oid=c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=$1 AND t.relname='verified_deposit_evidence' AND c.conname=$2",
+    [schema,name]);
+   assert.equal(definition.rows.length,1);
+   assert.match(definition.rows[0].definition,/^CHECK /);
+   await q("ALTER TABLE "+prefix+"verified_deposit_evidence DROP CONSTRAINT "+name);
+   const absent=await auditDepositSchema(pool,{schema});
+   assert.equal(absent.ready,false);
+   assert.ok(absent.incompatible.includes("verified_deposit_evidence."+name+":check_constraint"));
+   await q("ALTER TABLE "+prefix+"verified_deposit_evidence ADD CONSTRAINT "+name+" CHECK (true)");
+   const weakened=await auditDepositSchema(pool,{schema});
+   assert.equal(weakened.ready,false);
+   assert.ok(weakened.incompatible.includes("verified_deposit_evidence."+name+":check_constraint"));
+   await q("ALTER TABLE "+prefix+"verified_deposit_evidence DROP CONSTRAINT "+name);
+   await q("ALTER TABLE "+prefix+"verified_deposit_evidence ADD CONSTRAINT "+name+" "+definition.rows[0].definition);
+   assert.equal((await auditDepositSchema(pool,{schema})).ready,true);
+  }
   // A matching name alone, disabled trigger or PUBLIC grant must not pass.
   await q(`ALTER TABLE ${prefix}verified_deposit_evidence DISABLE TRIGGER verified_deposit_evidence_immutable`);
   assert.ok((await auditDepositSchema(pool,{schema})).incompatible.includes("verified_deposit_evidence:immutable_guard"));

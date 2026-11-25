@@ -143,14 +143,17 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
  // Require the reviewed PostgreSQL expression, not merely a trusted-looking name.
  // Semantically equivalent but differently rendered constraints need manual review.
  const expectedChecks={
-  verified_deposit_evidence_event_key_format:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]*)$'::text)",
+  verified_deposit_evidence_event_key_format:"(event_key ~ '^bsc:56:0x[0-9a-f]{64}:(0|[1-9][0-9]{0,77})$'::text)",
   verified_deposit_evidence_block_hash_format:"(block_hash ~ '^0x[0-9a-f]{64}$'::text)",
   verified_deposit_evidence_token_format:"(token_contract ~ '^0x[0-9a-f]{40}$'::text)",
-  verified_deposit_evidence_address_format:"(deposit_address ~ '^0x[0-9a-f]{40}$'::text)"
+  verified_deposit_evidence_address_format:"(deposit_address ~ '^0x[0-9a-f]{40}$'::text)",
+  verified_deposit_evidence_token_nonzero:"(token_contract <> '0x0000000000000000000000000000000000000000'::text)",
+  verified_deposit_evidence_address_nonzero:"(deposit_address <> '0x0000000000000000000000000000000000000000'::text)",
+  verified_deposit_evidence_log_index_uint256:"CASE WHEN (split_part(event_key, ':'::text, 4) ~ '^(0|[1-9][0-9]{0,77})$'::text) THEN ((split_part(event_key, ':'::text, 4))::numeric <= '115792089237316195423570985008687907853269984665640564039457584007913129639935'::numeric) ELSE false END"
  };
  for(const [name,expression] of Object.entries(expectedChecks)) {
   const matching=checks.rows.filter(r=>r.conname===name);
-  if(matching.length!==1 || matching[0].validated!==true || matching[0].expression!==expression)
+  if(matching.length!==1 || matching[0].validated!==true || typeof matching[0].expression!=="string" || matching[0].expression.replace(/\s+/g," ").trim()!==expression)
    incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  }
  // Named or unnamed numeric checks must have the exact reviewed expression.

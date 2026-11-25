@@ -17,7 +17,12 @@ test("rejects noncanonical types and out-of-range uint256 evidence before databa
     { amountBaseUnits: "0" }, { amountBaseUnits: (1n << 256n).toString() },
     { blockNumber: "1".repeat(79) },
     { eventKey: { toString: () => receipt().eventKey } },
-    { blockHash: [receipt().blockHash] }
+    { blockHash: [receipt().blockHash] },
+    { eventKey: "bsc:56:0x" + "a".repeat(64) + ":01" },
+    { eventKey: "bsc:56:0x" + "a".repeat(64) + ":" + (1n << 256n).toString() },
+    { eventKey: "bsc:56:0x" + "A".repeat(64) + ":0" },
+    { tokenContract: "0x" + "0".repeat(40) },
+    { depositAddress: "0x" + "0".repeat(40) }
   ]) {
     await assert.rejects(persistVerifiedDepositEvidence(client, { ...receipt(), ...patch }), /Invalid verified deposit evidence/);
   }
