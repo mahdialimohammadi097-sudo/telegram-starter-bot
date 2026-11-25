@@ -9,7 +9,8 @@ test("missing database connection fails safely without disclosing credentials",(
  assert.equal(result.status,3);
  assert.equal(result.stderr,"");
  assert.deepEqual(JSON.parse(result.stdout),{
-  audit:"fadehost-schema",ready:false,error:"DATABASE_URL_NOT_CONFIGURED"
+  audit:"fadehost-schema",ready:false,error:"DATABASE_URL_NOT_CONFIGURED",
+  financialActivationReady:false,realDepositsEnabled:false
  });
 });
 test("invalid private database endpoint emits sanitized failure only",()=>{
@@ -21,6 +22,8 @@ test("invalid private database endpoint emits sanitized failure only",()=>{
  const output=JSON.parse(result.stdout);
  assert.equal(output.ready,false);
  assert.equal(output.error,"READ_ONLY_AUDIT_FAILED");
+ assert.equal(output.financialActivationReady,false);
+ assert.equal(output.realDepositsEnabled,false);
 });
 
 test("conflicting TLS options fail closed and do not disclose the connection URL",()=>{
