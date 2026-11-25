@@ -113,11 +113,23 @@ test("staged evidence migration creates constrained table and refuses existing r
     assert.equal(columnMap.get(name)?.numeric_precision,null);
     assert.equal(columnMap.get(name)?.numeric_scale,null);
   }
-  // Evidence-only migration must not introduce ledger posting triggers.
-  const triggers=await client.query(`SELECT tgname FROM pg_trigger
-    WHERE tgrelid='public.verified_deposit_evidence'::regclass
-      AND NOT tgisinternal`);
-  assert.deepEqual(triggers.rows,[],"Evidence table must not post balances via triggers");
+  // Only the reviewed mutation guard may be installed; no posting trigger.
+  const triggers=await client.query(`SELECT t.tgname,t.tgenabled,p.proname
+    FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
+    WHERE t.tgrelid='public.verified_deposit_evidence'::regclass
+      AND NOT t.tgisinternal`);
+  assert.deepEqual(triggers.rows,[{tgname:"verified_deposit_evidence_immutable",tgenabled:"A",proname:"reject_verified_deposit_evidence_mutation"}]);
+  for(const sql of [
+    "UPDATE public.verified_deposit_evidence SET amount_base_units=2",
+    "DELETE FROM public.verified_deposit_evidence",
+    "TRUNCATE public.verified_deposit_evidence"
+  ]){
+    await client.query("SAVEPOINT immutable_evidence");
+    await assert.rejects(client.query(sql),{code:"55000"});
+    await client.query("ROLLBACK TO SAVEPOINT immutable_evidence");
+  }
+  const original=await client.query("SELECT amount_base_units::text AS amount FROM public.verified_deposit_evidence");
+  assert.deepEqual(original.rows,[{amount:"1000000000000000000"}]);
   const ledgerTouches=await client.query(`SELECT count(*)::int AS n FROM pg_depend d
     JOIN pg_class source ON source.oid=d.objid
     WHERE source.oid='public.verified_deposit_evidence'::regclass
