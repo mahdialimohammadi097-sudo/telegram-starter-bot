@@ -6,6 +6,31 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
 SET LOCAL search_path = pg_catalog;
+-- Refuse look-alike operator classes that are not members of the reviewed extension.
+DO $preflight$
+BEGIN
+ IF NOT EXISTS (
+  SELECT 1 FROM pg_catalog.pg_extension e
+  JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace
+  WHERE e.extname='btree_gist' AND n.nspname='public'
+ ) OR (
+  SELECT count(DISTINCT o.opcname)
+  FROM pg_catalog.pg_opclass o
+  JOIN pg_catalog.pg_namespace n ON n.oid=o.opcnamespace
+  JOIN pg_catalog.pg_am a ON a.oid=o.opcmethod
+  JOIN pg_catalog.pg_depend d ON d.classid='pg_catalog.pg_opclass'::regclass
+    AND d.objid=o.oid AND d.objsubid=0 AND d.deptype='e'
+    AND d.refclassid='pg_catalog.pg_extension'::regclass
+  JOIN pg_catalog.pg_extension e ON e.oid=d.refobjid
+  WHERE n.nspname='public' AND a.amname='gist' AND e.extname='btree_gist'
+    AND ((o.opcname='gist_int8_ops' AND o.opcintype='pg_catalog.int8'::regtype)
+      OR (o.opcname='gist_int4_ops' AND o.opcintype='pg_catalog.int4'::regtype)
+      OR (o.opcname='gist_text_ops' AND o.opcintype='pg_catalog.text'::regtype))
+ ) <> 3 THEN
+  RAISE EXCEPTION 'Historical ownership extension prerequisites not confirmed';
+ END IF;
+END
+$preflight$;
 CREATE TABLE public.deposit_address_ownership_history (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  wallet_id bigint NOT NULL REFERENCES public.wallets(id) CHECK (wallet_id > 0),
