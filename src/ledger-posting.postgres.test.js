@@ -495,15 +495,34 @@ function approveSimulatedClaim(requestId, observedTransfers, workerPool = pool) 
 
 async function reviewSimulatedClaim(client, requestId, observedTransfers) {
   const { rows: [deposit] } = await client.query(
-    `SELECT d.user_id, d.status, d.transfer_event, trim_scale(d.amount)::text AS amount, a.id AS account_id
+    `SELECT d.user_id, d.status, d.transfer_event, d.reviewed_at, trim_scale(d.amount)::text AS amount, a.id AS account_id
      FROM deposit_requests d JOIN ledger_accounts a ON a.user_id = d.user_id
      WHERE d.id = $1 AND a.account_type = 'AVAILABLE' AND a.currency = 'USDT'
      FOR UPDATE OF d`, [requestId]
   );
+  if (!deposit) throw new Error("Unknown simulated deposit");
   if (deposit.status === "rejected") throw new Error("Request already rejected");
+  if (!["pending","approved"].includes(deposit.status)) throw new Error("Invalid deposit status");
   const observed = observedTransfers.get(deposit.transfer_event);
   if (!observed || observed.userId !== deposit.user_id || observed.amount !== deposit.amount) {
     throw new Error("Claim does not match the simulated transfer");
+  }
+  const replay = deposit.status === "approved";
+  const key = `simulated-deposit:${deposit.transfer_event}`;
+  const prior = await client.query(
+    `SELECT id, status, transaction_type, reference_id, idempotency_key
+     FROM ledger_transactions WHERE idempotency_key=$1
+      OR (transaction_type='simulated-deposit' AND reference_id=$2)
+     ORDER BY id FOR UPDATE`,[key,String(requestId)]
+  );
+  if (replay) {
+    const j=prior.rows[0];
+    if (prior.rowCount!==1 || j.status!=="posted" || j.transaction_type!=="simulated-deposit"
+       || j.reference_id!==String(requestId) || j.idempotency_key!==key || !deposit.reviewed_at) {
+      throw new Error("Deposit approval journal mismatch; reconciliation required");
+    }
+  } else if (prior.rowCount!==0 || deposit.reviewed_at!=null) {
+    throw new Error("Detached deposit journal or different request; reconciliation required");
   }
   const journal = await postJournalInTransaction(client, {
     transactionType: "simulated-deposit", referenceId: requestId,
@@ -513,11 +532,15 @@ async function reviewSimulatedClaim(client, requestId, observedTransfers) {
       { account_id: deposit.account_id, entry_type: "credit", amount: deposit.amount, currency: "USDT" }
     ]
   });
-  if (deposit.status === "pending") {
-    await client.query(
-      "UPDATE deposit_requests SET status = 'approved', reviewed_at = now() WHERE id = $1",
+  if (journal.idempotent!==replay || (replay && journal.transactionId!==String(prior.rows[0].id))) {
+    throw new Error("Deposit approval replay mismatch; reconciliation required");
+  }
+  if (!replay) {
+    const updated = await client.query(
+      "UPDATE deposit_requests SET status = 'approved', reviewed_at = now() WHERE id = $1 AND status='pending' AND reviewed_at IS NULL",
       [requestId]
     );
+    if (updated.rowCount!==1) throw new Error("Deposit approval transition unconfirmed");
   }
   return journal;
 }
@@ -2825,4 +2848,36 @@ test("fixed rehearsal plan terms are validated before settlement and opening rep
   const journal=await settle();
   assert.equal(await settle(),journal);
   assert.deepEqual(await displayedBalances(owner),["27.36000000","0.00000000","0.00000000"]);
+});
+
+test("suppressed simulated deposit approval rolls back wallet credit and terminal replay rejects corruption",{skip:!enabled},async()=>{
+  const owner=await createSimulationWallet(19509);
+  const event="test-chain:approval-fault:0";
+  const observed=new Map([[event,{userId:owner,amount:"25"}]]);
+  const {rows:[request]}=await pool.query("INSERT INTO deposit_requests(user_id,amount,transfer_event) VALUES($1,25,$2) RETURNING id",[owner,event]);
+  const approve=()=>approveSimulatedClaim(request.id,observed);
+  await assert.rejects(approveSimulatedClaim("9223372036854775807",observed),/Unknown simulated deposit/);
+  await pool.query(`CREATE FUNCTION test_skip_approval() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+    CREATE TRIGGER test_skip_approval BEFORE UPDATE ON deposit_requests FOR EACH ROW
+    WHEN(NEW.status='approved') EXECUTE FUNCTION test_skip_approval()`);
+  try{
+    await assert.rejects(approve(),/approval transition unconfirmed/);
+    assert.deepEqual(await displayedBalances(owner),Array(3).fill("0.00000000"));
+    assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["simulated-deposit:"+event])).rowCount,0);
+    assert.deepEqual((await pool.query("SELECT status,reviewed_at FROM deposit_requests WHERE id=$1",[request.id])).rows[0],{status:"pending",reviewed_at:null});
+  }finally{await pool.query("DROP TRIGGER test_skip_approval ON deposit_requests; DROP FUNCTION test_skip_approval()");}
+  const journal=await approve();
+  assert.equal((await approve()).transactionId,journal.transactionId);
+  const {rows:[saved]}=await pool.query("SELECT reviewed_at::text FROM deposit_requests WHERE id=$1",[request.id]);
+  await pool.query("UPDATE deposit_requests SET status='pending',reviewed_at=NULL WHERE id=$1",[request.id]);
+  try{
+    await assert.rejects(approve(),/Detached deposit journal/);
+    assert.deepEqual(await displayedBalances(owner),["25.00000000","0.00000000","0.00000000"]);
+  }finally{await pool.query("UPDATE deposit_requests SET status='approved',reviewed_at=$2 WHERE id=$1",[request.id,saved.reviewed_at]);}
+  const {rows:[fake]}=await pool.query("INSERT INTO deposit_requests(user_id,amount,transfer_event,status,reviewed_at) VALUES($1,25,'test-chain:unbacked-approval:0','approved',now()) RETURNING id",[owner]);
+  try{
+    await assert.rejects(approveSimulatedClaim(fake.id,new Map([["test-chain:unbacked-approval:0",{userId:owner,amount:"25"}]])),/approval journal mismatch/);
+    assert.deepEqual(await displayedBalances(owner),["25.00000000","0.00000000","0.00000000"]);
+  }finally{await pool.query("DELETE FROM deposit_requests WHERE id=$1",[fake.id]);}
+  assert.equal((await approve()).transactionId,journal.transactionId);
 });
