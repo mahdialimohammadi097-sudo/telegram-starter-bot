@@ -13,7 +13,7 @@ npm run audit:deposit-schema
 npm run audit:deposit-schema -- --include-legacy-assignments
 ```
 
-The first command checks the deposit catalog. The second checks the catalog and legacy active deposit wallet assignments in one bounded repeatable-read, read-only transaction. For the combined result require both catalog.ready and assignments.ready, conflictingActiveDepositWallets equal to the string "0", activeDepositWalletUniquenessEnforced true, and realDepositsEnabled false. It does not prove distinct physical addresses, historical provenance, on-chain proof or posting readiness. Row-security filtering must fail closed rather than hide assignment conflicts.
+The first command checks the deposit catalog. The second checks the catalog and legacy active deposit wallet assignments in one bounded repeatable-read, read-only transaction. For the combined result require ready, catalog.ready, assignments.ready and historicalBasicGuardsPresent all true, conflictingActiveDepositWallets equal to the string "0", activeDepositWalletUniquenessEnforced true, and realDepositsEnabled false. The basic historical inventory checks the expected relation, trigger configuration and live exclusion indexes, not complete definitions, effective privileges or historical provenance. It does not prove distinct physical addresses, historical provenance, on-chain proof or posting readiness. Row-security filtering must fail closed rather than hide assignment conflicts.
 
 Exit status 0 means the selected limited checks passed; 2 means prerequisites are missing or incompatible; 3 means execution failed. The combined JSON uses nested catalog and assignments objects. Share only sanitized diagnostic JSON, not raw errors or user records.
 
