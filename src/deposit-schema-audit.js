@@ -169,6 +169,39 @@ export async function auditDepositSchema(client,{schema="public"}={}) {
   if(!checks.rows.some(r=>r.validated===true && r.expression===expression))
    incompatible.push("verified_deposit_evidence."+name+":check_constraint");
  }
+ // Check the exact reviewed statement-level mutation guard, not its name alone.
+ // This is catalog evidence only: privileged owners and role grants still need review.
+ const guardBody="\nBEGIN\n RAISE EXCEPTION 'Verified deposit evidence is immutable' USING ERRCODE='55000';\nEND\n";
+ const guards=await client.query(`
+ SELECT tg.tgname,
+        (tg.tgenabled='A' AND tg.tgtype=58 AND tg.tgconstraint=0
+         AND tg.tgqual IS NULL AND tg.tgnargs=0 AND tg.tgattr::text=''
+         AND p.proname='reject_verified_deposit_evidence_mutation'
+         AND fn.nspname=$1 AND p.prokind='f' AND p.pronargs=0
+         AND p.prorettype='pg_catalog.trigger'::pg_catalog.regtype
+         AND lang.lanname='plpgsql' AND NOT p.prosecdef
+         AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
+         AND p.prosrc=$2) AS reviewed_guard,
+        NOT EXISTS (
+          SELECT 1 FROM pg_catalog.aclexplode(COALESCE(t.relacl,pg_catalog.acldefault('r',t.relowner))) acl
+          WHERE acl.grantee=0
+        ) AS no_public_table_access,
+        NOT EXISTS (
+          SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
+          WHERE acl.grantee=0
+        ) AS no_public_function_access
+ FROM pg_catalog.pg_trigger tg
+ JOIN pg_catalog.pg_class t ON t.oid=tg.tgrelid
+ JOIN pg_catalog.pg_namespace ns ON ns.oid=t.relnamespace
+ JOIN pg_catalog.pg_proc p ON p.oid=tg.tgfoid
+ JOIN pg_catalog.pg_namespace fn ON fn.oid=p.pronamespace
+ JOIN pg_catalog.pg_language lang ON lang.oid=p.prolang
+ WHERE ns.nspname=$1 AND t.relname='verified_deposit_evidence' AND NOT tg.tgisinternal
+ `,[schema,guardBody]);
+ if(guards.rows.length!==1 || guards.rows[0].tgname!=="verified_deposit_evidence_immutable" ||
+    guards.rows[0].reviewed_guard!==true || guards.rows[0].no_public_table_access!==true ||
+    guards.rows[0].no_public_function_access!==true)
+   incompatible.push("verified_deposit_evidence:immutable_guard");
  return Object.freeze({ready:missing.length===0&&incompatible.length===0,
    missing:Object.freeze(missing),incompatible:Object.freeze(incompatible)});
 }
