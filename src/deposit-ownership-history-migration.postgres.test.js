@@ -68,6 +68,15 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
      WHERE ns.nspname=$1 AND p.proname IN ('validate_deposit_ownership_wallet_identity','reject_deposit_ownership_history_mutation')
    ) grants WHERE grantee=0`,[schema]);
   assert.equal(publicGrants.rows[0].n,0);
+  // Both reviewed migration candidates must coexist in the same isolated schema.
+  const evidenceDdl=await readFile(new URL("../migrations/20261121_verified_deposit_evidence.sql",import.meta.url),"utf8");
+  await client.query(evidenceDdl.replaceAll("public.",prefix));
+  const evidenceTable=prefix+"verified_deposit_evidence";
+  const eventKey="bsc:56:0x"+"c".repeat(64)+":0";
+  const receiptSql="INSERT INTO "+evidenceTable+"(event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES ($1,$2,199,$3,$4,1000000000000000000)";
+  await client.query(receiptSql,[eventKey,"0x"+"d".repeat(64),other,address]);
+  await assert.rejects(client.query(receiptSql,[eventKey,"0x"+"d".repeat(64),other,address]),{code:"23505"});
+  await assert.rejects(client.query("UPDATE "+evidenceTable+" SET block_number=200"),{code:"55000"});
   const insert=(wallet,user,addr,start,end)=>client.query(
    "INSERT INTO "+table+"(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source) VALUES ($1,$2,56,$3,$4,$5,'disposable-review')",
    [wallet,user,addr,start,end]);
@@ -81,6 +90,11 @@ test("reviewed history migration enforces bounds, interval exclusion and immutab
   const input={schema,walletAddress:address,eventBlockNumber:"199",expectedUserId:"11"};
   const expected={recordConsistent:true,independentHistoricalProof:false,financialActivationReady:false,realDepositsEnabled:false};
   assert.deepEqual(await inspect(pool,input),expected);
+  // The stored receipt and historical owner remain consistent across both schemas;
+  // this does not establish independent chain provenance or authorize posting.
+  const stored=await client.query("SELECT deposit_address,block_number::text AS block_number FROM "+evidenceTable+" WHERE event_key=$1",[eventKey]);
+  assert.deepEqual(stored.rows,[{deposit_address:address,block_number:"199"}]);
+  assert.deepEqual(await inspect(pool,{...input,walletAddress:stored.rows[0].deposit_address,eventBlockNumber:stored.rows[0].block_number}),expected);
   assert.deepEqual(await inspect(pool,{...input,eventBlockNumber:"200",expectedUserId:"12"}),expected);
   await assert.rejects(inspect(pool,{...input,eventBlockNumber:"200"}),/identity mismatch/);
   await assert.rejects(inspect(pool,{...input,eventBlockNumber:"400"}),/Missing or ambiguous/);
