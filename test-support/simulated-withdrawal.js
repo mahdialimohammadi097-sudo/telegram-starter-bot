@@ -49,13 +49,22 @@ export async function reserveWithdrawal(pool, userId, key, amount, destination =
     const owner = await client.query("SELECT id FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId]);
     if (!owner.rowCount) throw new Error("Unknown user");
     const prior = await client.query(
-      "SELECT id, amount, status, destination FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2", [userId, key]
+      "SELECT id, amount, status, destination, available_id, held_id FROM simulation_withdrawals WHERE user_id = $1 AND request_key = $2 FOR UPDATE", [userId, key]
     );
     if (prior.rowCount) {
       if (formatUsdt(prior.rows[0].amount) !== normalized) throw new Error("Request amount mismatch");
-      const { destination: saved, ...request } = prior.rows[0];
-      if (saved !== destination) throw new Error("Withdrawal destination mismatch");
-      return request;
+      const request = prior.rows[0];
+      if (request.destination !== destination) throw new Error("Withdrawal destination mismatch");
+      const type = "sim-withdraw-reserve";
+      const original = await client.query(
+        `SELECT id FROM ledger_transactions WHERE transaction_type = $1 AND reference_id = $2
+         AND idempotency_key = $3 AND status = 'posted' FOR UPDATE`,
+        [type, String(request.id), type + ":" + request.id]
+      );
+      await verifyMovementIdentity(client, request, "reserve", original.rows[0]?.id, true);
+      const journal = await postMovement(client, request, "reserve", request.available_id, request.held_id);
+      if (!journal.idempotent || journal.transactionId !== String(original.rows[0].id)) throw new Error("Withdrawal reservation replay mismatch");
+      return { id: request.id, amount: request.amount, status: request.status };
     }
     // First-use setup shares the reservation transaction so a failed hold leaves no account behind.
     await client.query(
@@ -72,7 +81,9 @@ export async function reserveWithdrawal(pool, userId, key, amount, destination =
     );
     if (!result.rowCount) throw new Error("Incomplete withdrawal wallet");
     const request = result.rows[0];
-    await postMovement(client, request, "reserve", request.available_id, request.held_id);
+    await verifyMovementIdentity(client, request, "reserve", null, false);
+    const journal = await postMovement(client, request, "reserve", request.available_id, request.held_id);
+    if (journal.idempotent) throw new Error("Detached withdrawal reservation; reconciliation required");
     return { id: request.id, amount: request.amount, status: request.status };
   });
 }

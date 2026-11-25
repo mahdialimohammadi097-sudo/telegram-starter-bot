@@ -2747,3 +2747,57 @@ test("withdrawal cancellation replay rejects mismatched or detached journal poin
   }
   assert.equal(await cancel(),journal);
 });
+
+test("fabricated request rows cannot certify an opening or reserve without a posted journal", {skip:!enabled},async()=>{
+  const {openSimulatedInvestment}=await import("../test-support/simulated-investment.js");
+  const {reserveWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const owner=await createSimulationWallet(19506);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"25");
+  const {rows:[hold]}=await pool.query("INSERT INTO ledger_accounts(user_id,account_code,account_type) VALUES ($1,'replay-fault-19506','WITHDRAWAL_HOLD') RETURNING id",[owner]);
+  await pool.query("INSERT INTO simulation_investments(user_id,request_id,plan,principal,profit_percent,fee_percent,matures_at) VALUES ($1,'fabricated-open','STARTER',10,4,2,now()+interval '10 days')",[owner]);
+  await pool.query("INSERT INTO simulation_withdrawals(user_id,request_key,amount,available_id,held_id) VALUES ($1,'fabricated-reserve',10,$2,$3)",[owner,available.id,hold.id]);
+  const before=await displayedBalances(owner);
+  try{
+    await assert.rejects(openSimulatedInvestment(pool,owner,"fabricated-open","STARTER 10"),/opening journal mismatch/);
+    await assert.rejects(reserveWithdrawal(pool,owner,"fabricated-reserve","10"),/Withdrawal journal mismatch/);
+    assert.deepEqual(await displayedBalances(owner),before);
+  }finally{
+    await pool.query("DELETE FROM simulation_investments WHERE user_id=$1 AND request_id='fabricated-open'",[owner]);
+    await pool.query("DELETE FROM simulation_withdrawals WHERE user_id=$1 AND request_key='fabricated-reserve'",[owner]);
+  }
+  const investment=await openSimulatedInvestment(pool,owner,"fabricated-open","STARTER 10");
+  assert.equal(await openSimulatedInvestment(pool,owner,"fabricated-open","STARTER 10"),investment);
+  const request=await reserveWithdrawal(pool,owner,"fabricated-reserve","10");
+  assert.deepEqual(await reserveWithdrawal(pool,owner,"fabricated-reserve","10"),request);
+});
+
+test("paid withdrawal replay rejects a substituted journal and modified amount", {skip:!enabled},async()=>{
+  const {reserveWithdrawal,submitSimulatedWithdrawal,confirmTestnetWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const {createHash}=await import("node:crypto");
+  const sample=JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json",import.meta.url),"utf8"));
+  const owner=await createSimulationWallet(19507);
+  const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+  await seedAvailableBalance(available.id,"1");
+  const request=await reserveWithdrawal(pool,owner,"paid-replay-fault","1",sample.expected.recipient);
+  const payload=Buffer.from("synthetic-paid-replay-fault:"+request.id);
+  const hash="0x"+createHash("sha256").update(payload).digest("hex");
+  sample.expected.txHash=hash;
+  sample.observation.receipt.transactionHash=hash;
+  for(const log of sample.observation.receipt.logs)log.transactionHash=hash;
+  await submitSimulatedWithdrawal(pool,request.id,hash,async()=>{},payload);
+  const treasury={sender:"0x03e37a3686a553735dd9737a060e4a2c6c018ace",accountId:simulationClearing};
+  const confirm=()=>confirmTestnetWithdrawal(pool,request.id,sample.observation,sample.expected,treasury);
+  const journal=await confirm();
+  const {rows:[originalReserve]}=await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-reserve:"+request.id]);
+  await pool.query("UPDATE simulation_withdrawals SET payout_id=$2 WHERE id=$1",[request.id,originalReserve.id]);
+  try{
+    await assert.rejects(confirm(),/Withdrawal journal mismatch/);
+  }finally{await pool.query("UPDATE simulation_withdrawals SET payout_id=$2 WHERE id=$1",[request.id,journal]);}
+  await pool.query("UPDATE simulation_withdrawals SET amount=2 WHERE id=$1",[request.id]);
+  try{await assert.rejects(confirm(),/Withdrawal amount mismatch/);}
+  finally{await pool.query("UPDATE simulation_withdrawals SET amount=1 WHERE id=$1",[request.id]);}
+  assert.equal(await confirm(),journal);
+  assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"0.00000000");
+  assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["sim-withdraw-payout:"+request.id])).rowCount,1);
+});

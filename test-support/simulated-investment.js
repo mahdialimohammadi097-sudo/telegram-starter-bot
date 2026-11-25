@@ -1,6 +1,44 @@
 import { previewSettlement, settlementAmounts } from "../src/plan-preview.js";
 import { withLedgerTransaction, postJournalInTransaction } from "../src/ledger-posting.js";
 
+// A request record alone cannot certify that the opening journal committed.
+async function verifyOpeningJournal(client, userId, investmentId, amount, replay) {
+  const type = "simulated-investment-open";
+  const key = type + ":" + investmentId;
+  const prior = await client.query(
+    `SELECT id, transaction_type, reference_id, idempotency_key, status
+     FROM ledger_transactions WHERE idempotency_key = $1 OR (transaction_type = $2 AND reference_id = $3)
+     ORDER BY id FOR UPDATE`, [key, type, String(investmentId)]
+  );
+  if (replay) {
+    const j = prior.rows[0];
+    if (prior.rowCount !== 1 || j.status !== "posted" || j.transaction_type !== type ||
+        j.reference_id !== String(investmentId) || j.idempotency_key !== key) {
+      throw new Error("Investment opening journal mismatch; reconciliation required");
+    }
+  } else if (prior.rowCount !== 0) {
+    throw new Error("Detached investment opening journal; reconciliation required");
+  }
+    const { rows } = await client.query(
+      `SELECT account_type, id FROM ledger_accounts WHERE user_id = $1
+       AND currency = 'USDT' AND account_type IN ('AVAILABLE','INVESTED')`, [userId]
+    );
+    const accounts = new Map(rows.map(row => [row.account_type, row.id]));
+    if (accounts.size !== 2) throw new Error("Incomplete investment wallet");
+    const journal = await postJournalInTransaction(client, {
+      transactionType: "simulated-investment-open", referenceId: investmentId,
+      idempotencyKey: "simulated-investment-open:" + investmentId,
+      entries: [
+        { account_id: accounts.get("AVAILABLE"), entry_type: "debit", amount: amount, currency: "USDT" },
+        { account_id: accounts.get("INVESTED"), entry_type: "credit", amount: amount, currency: "USDT" }
+      ]
+    });
+    if (journal.idempotent !== replay || (replay && journal.transactionId !== String(prior.rows[0].id))) {
+      throw new Error("Investment opening replay mismatch; reconciliation required");
+    }
+
+}
+
 export async function openSimulatedInvestment(pool, userId, requestId, selection) {
   const plan = previewSettlement(selection);
   if (!plan) throw new Error("Unsupported plan or amount");
@@ -17,6 +55,7 @@ export async function openSimulatedInvestment(pool, userId, requestId, selection
       if (investment.plan !== plan.name || investment.principal !== plan.amount) {
         throw new Error("Request already used for a different investment");
       }
+      await verifyOpeningJournal(client, userId, investment.id, plan.amount, true);
       return investment.id;
     }
     const active = await client.query(
@@ -30,20 +69,7 @@ export async function openSimulatedInvestment(pool, userId, requestId, selection
        VALUES ($1, $2, $3, $4, $5, $6, now() + $7::int * interval '24 hours') RETURNING id`,
       [userId, requestId, plan.name, plan.amount, plan.profitPercent, plan.feePercent, plan.days]
     );
-    const { rows } = await client.query(
-      `SELECT account_type, id FROM ledger_accounts WHERE user_id = $1
-       AND currency = 'USDT' AND account_type IN ('AVAILABLE','INVESTED')`, [userId]
-    );
-    const accounts = new Map(rows.map(row => [row.account_type, row.id]));
-    if (accounts.size !== 2) throw new Error("Incomplete investment wallet");
-    await postJournalInTransaction(client, {
-      transactionType: "simulated-investment-open", referenceId: investment.id,
-      idempotencyKey: "simulated-investment-open:" + investment.id,
-      entries: [
-        { account_id: accounts.get("AVAILABLE"), entry_type: "debit", amount: plan.amount, currency: "USDT" },
-        { account_id: accounts.get("INVESTED"), entry_type: "credit", amount: plan.amount, currency: "USDT" }
-      ]
-    });
+    await verifyOpeningJournal(client, userId, investment.id, plan.amount, false);
     return investment.id;
   });
 }
