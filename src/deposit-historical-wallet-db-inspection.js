@@ -1,5 +1,5 @@
 import {runReadOnlyDepositAudit} from "./read-only-deposit-audit.js";
-import {verifyHistoricalWalletRecord} from "./deposit-historical-wallet-record.js";
+import {verifyHistoricalWalletRecord,isValidHistoricalBlockNumber} from "./deposit-historical-wallet-record.js";
 
 // Read-only historical consistency inspection. Never credits balances.
 // Caller must independently verify chain evidence and historical provenance.
@@ -9,7 +9,7 @@ export async function inspectHistoricalWalletSnapshot(pool,{eventBlockNumber,wal
  if(typeof walletAddress!=="string" || /^0x0{40}$/.test(walletAddress) ||
     !/^0x[0-9a-f]{40}$/.test(walletAddress) ||
     typeof expectedUserId!=="string" || !/^[1-9][0-9]{0,18}$/.test(expectedUserId) || BigInt(expectedUserId)>9223372036854775807n ||
-    typeof eventBlockNumber!=="string" || !/^(0|[1-9][0-9]{0,77})$/.test(eventBlockNumber))
+    !isValidHistoricalBlockNumber(eventBlockNumber))
   throw new TypeError("Invalid historical inspection input");
  // Read-only snapshot, not a posting lock or independent historical proof.
  return runReadOnlyDepositAudit(pool,async client=>{
