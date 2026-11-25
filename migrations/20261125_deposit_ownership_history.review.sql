@@ -52,7 +52,7 @@ BEGIN
 END
 $preflight$;
 CREATE TABLE public.deposit_address_ownership_history (
- id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ id bigint GENERATED ALWAYS AS IDENTITY (SEQUENCE NAME public.deposit_address_ownership_history_id_seq) PRIMARY KEY,
  wallet_id bigint NOT NULL REFERENCES public.wallets(id) CHECK (wallet_id > 0),
  user_id bigint NOT NULL REFERENCES public.users(id) CHECK (user_id > 0),
  chain_id integer NOT NULL CHECK (chain_id = 56),
@@ -115,6 +115,12 @@ FOR EACH STATEMENT EXECUTE FUNCTION public.reject_deposit_ownership_history_muta
 ALTER TABLE public.deposit_address_ownership_history ENABLE ALWAYS TRIGGER deposit_ownership_wallet_identity;
 ALTER TABLE public.deposit_address_ownership_history ENABLE ALWAYS TRIGGER deposit_ownership_history_immutable;
 ALTER TABLE public.deposit_address_ownership_history ENABLE ALWAYS TRIGGER deposit_ownership_history_no_truncate;
+-- Default privileges can include PUBLIC grants. Explicitly revoke them from
+-- these new objects; named role grants and ownership still require live review.
+REVOKE ALL ON TABLE public.deposit_address_ownership_history FROM PUBLIC;
+REVOKE ALL ON SEQUENCE public.deposit_address_ownership_history_id_seq FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.validate_deposit_ownership_wallet_identity() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.reject_deposit_ownership_history_mutation() FROM PUBLIC;
 COMMIT;
 -- Only finite, independently established historical intervals are candidates for insertion.
 -- Consecutive verified intervals can be appended without editing earlier history.
