@@ -2924,3 +2924,87 @@ test("concurrent investment and withdrawal cannot spend the same available funds
     }
   }
 });
+
+test("two due investments competing for one profit reserve settle only once until replenished",{skip:!enabled},async()=>{
+  const {openSimulatedInvestment,settleSimulatedInvestment}=await import("../test-support/simulated-investment.js");
+  const reserve=await createAccount("AVAILABLE"),fee=await createAccount("CLEARING");
+  await seedAvailableBalance(reserve,"3.5");
+  const owners=[],investments=[];
+  for(const number of [19514,19515]){
+    const owner=await createSimulationWallet(number);
+    owners.push(owner);
+    const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+    await seedAvailableBalance(available.id,"25");
+    investments.push(await openSimulatedInvestment(pool,owner,"reserve-race","SMART 25"));
+  }
+  await pool.query("UPDATE simulation_investments SET matures_at=now() WHERE id=ANY($1::bigint[])",[investments]);
+  const settle=index=>settleSimulatedInvestment(pool,owners[index],investments[index],reserve,fee);
+  const outcomes=await Promise.allSettled([settle(0),settle(1)]);
+  assert.equal(outcomes.filter(x=>x.status==="fulfilled").length,1);
+  const winner=outcomes[0].status==="fulfilled"?0:1,loser=1-winner;
+  assert.match(outcomes[loser].reason.message,/Insufficient available balance/);
+  assert.deepEqual(await displayedBalances(owners[winner]),["27.36000000","0.00000000","0.00000000"]);
+  assert.deepEqual(await displayedBalances(owners[loser]),["0.00000000","25.00000000","0.00000000"]);
+  const read=async index=>(await pool.query("SELECT status,settlement_id FROM simulation_investments WHERE id=$1",[investments[index]])).rows[0];
+  assert.deepEqual(await read(loser),{status:"active",settlement_id:null});
+  assert.equal((await pool.query("SELECT id FROM ledger_transactions WHERE idempotency_key=$1",["simulated-investment-settle:"+investments[loser]])).rowCount,0);
+  assert.equal(await settle(winner),outcomes[winner].value);
+  await postLedgerTransaction({pool,transactionType:"test-reserve-topup",idempotencyKey:"cross-owner-reserve-race-topup",entries:[
+    {account_id:simulationClearing,entry_type:"debit",amount:"3.5",currency:"USDT"},
+    {account_id:reserve,entry_type:"credit",amount:"3.5",currency:"USDT"}]});
+  const recovered=await settle(loser);
+  assert.equal(await settle(loser),recovered);
+  assert.deepEqual(await displayedBalances(owners[loser]),["27.36000000","0.00000000","0.00000000"]);
+  const {rows:[totals]}=await pool.query(`
+    SELECT coalesce(sum(CASE WHEN e.entry_type='credit' THEN e.amount ELSE -e.amount END)
+      FILTER(WHERE e.account_id=$1),0)::text AS reserve,
+      coalesce(sum(CASE WHEN e.entry_type='credit' THEN e.amount ELSE -e.amount END)
+      FILTER(WHERE e.account_id=$2),0)::text AS fee
+    FROM ledger_entries e JOIN ledger_transactions j ON j.id=e.transaction_id WHERE j.status='posted'`,[reserve,fee]);
+  assert.equal(formatUsdt(totals.reserve),"0.00000000");
+  assert.equal(formatUsdt(totals.fee),"2.28000000");
+});
+test("withdrawal cancellation and synthetic submission race cannot both release and send",{skip:!enabled},async()=>{
+  const {reserveWithdrawal,cancelWithdrawal,submitSimulatedWithdrawal,confirmTestnetWithdrawal}=await import("../test-support/simulated-withdrawal.js");
+  const {createHash}=await import("node:crypto");
+  for(const [number,reverse] of [[19516,false],[19517,true]]){
+    const owner=await createSimulationWallet(number);
+    const {rows:[available]}=await pool.query("SELECT id FROM ledger_accounts WHERE user_id=$1 AND account_type='AVAILABLE'",[owner]);
+    await seedAvailableBalance(available.id,"1");
+    const sample=JSON.parse(await readFile(new URL("../test/fixtures/bsc-testnet-transfer.json",import.meta.url),"utf8"));
+    const request=await reserveWithdrawal(pool,owner,"cancel-submit-race","1",sample.expected.recipient);
+    const payload=Buffer.from("offline-cancel-submit-race:"+request.id);
+    const hash="0x"+createHash("sha256").update(payload).digest("hex");
+    sample.expected.txHash=hash;
+    sample.observation.receipt.transactionHash=hash;
+    for(const log of sample.observation.receipt.logs)log.transactionHash=hash;
+    let sends=0;
+    const cancel=()=>cancelWithdrawal(pool,owner,request.id);
+    const submit=()=>submitSimulatedWithdrawal(pool,request.id,hash,async()=>{sends++;},payload);
+    const calls=reverse?[submit,cancel]:[cancel,submit];
+    const outcomes=await Promise.allSettled(calls.map(call=>call()));
+    assert.equal(outcomes.filter(x=>x.status==="fulfilled").length,1);
+    const {rows:[state]}=await pool.query("SELECT status,release_id,submitted_hash FROM simulation_withdrawals WHERE id=$1",[request.id]);
+    if(state.status==="cancelled"){
+      assert.equal(sends,0);
+      assert.equal(state.submitted_hash,null);
+      assert.equal(await cancel(),state.release_id);
+      await assert.rejects(submit(),/submission mismatch/);
+      assert.equal(formatUsdt((await getWalletBalances(pool,owner)).AVAILABLE),"1.00000000");
+    }else{
+      assert.equal(state.status,"pending_receipt");
+      assert.equal(state.release_id,null);
+      assert.equal(state.submitted_hash,hash);
+      assert.equal(sends,1);
+      await assert.rejects(cancel(),/cannot be cancelled/);
+      assert.equal(await submit(),hash);
+      const treasury={sender:"0x03e37a3686a553735dd9737a060e4a2c6c018ace",accountId:simulationClearing};
+      const confirm=()=>confirmTestnetWithdrawal(pool,request.id,sample.observation,sample.expected,treasury);
+      const paid=await confirm();
+      assert.equal(await confirm(),paid);
+      assert.equal(sends,1);
+      assert.equal(formatUsdt((await getWalletBalances(pool,owner)).AVAILABLE),"0.00000000");
+    }
+    assert.equal(formatUsdt((await getWalletBalances(pool,owner)).WITHDRAWAL_HOLD),"0.00000000");
+  }
+});
