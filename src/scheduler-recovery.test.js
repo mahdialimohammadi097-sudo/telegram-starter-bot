@@ -178,3 +178,51 @@ test("scheduler shutdown drains both an in-flight claim and admitted callback, r
     await Promise.allSettled([action,stopping,scheduler.stop()]);
   }
 });
+
+test("ready scheduler denies foreign or malformed callback chats before any lookup or publication", { timeout: 5000 }, async t => {
+  const { startScheduler } = await import("./scheduler.js?ready-authorization");
+  const owner = 8810232463;
+  let callback, connections = 0, sends = 0;
+  let batchFinished;
+  const drainedBatch = new Promise(resolve => { batchFinished = resolve; });
+  const queries = t.mock.method(pool, "query", async () => {
+    throw new Error("Unauthorized callback must not query the database");
+  });
+  t.mock.method(pool, "connect", async () => {
+    const session = ++connections;
+    return Object.assign(new EventEmitter(), {
+      async query(sql) {
+        return { command: sql.split(" ")[0], rows: sql.includes("AS unlocked") ? [{ unlocked: true }] : [] };
+      },
+      release() { if (session === 2) batchFinished(); }
+    });
+  });
+  const scheduler = startScheduler({
+    callbackQuery(_pattern, fn) { callback = fn; },
+    api: { async sendMessage() { sends++; } }
+  });
+  try {
+    assert.equal(await scheduler.ready, true);
+    await drainedBatch;
+    for (const action of ["approve", "reject"]) {
+      for (const [from, chat] of [
+        [{ id: owner + 1 }, { id: owner, type: "private" }],
+        [{ id: owner }, { id: owner, type: "group" }],
+        [{ id: owner }, undefined],
+        [{ id: owner }, { id: owner + 1, type: "private" }],
+        [undefined, { id: owner, type: "private" }]
+      ]) {
+        const answers = [];
+        await callback({
+          from,
+          callbackQuery: { data: "post_" + action + ":42", message: chat && { chat, message_id: 9 } },
+          async answerCallbackQuery(answer) { answers.push(answer); }
+        });
+        assert.deepEqual(answers, [{ text: "Unauthorized.", show_alert: true }]);
+      }
+    }
+    assert.equal(queries.mock.callCount(), 0);
+    assert.equal(connections, 2);
+    assert.equal(sends, 0);
+  } finally { await scheduler.stop(); }
+});
