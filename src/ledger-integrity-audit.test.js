@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { auditLedgerIntegrity } from "./ledger-integrity-audit.js";
 
-function fakePool({ bad = false, fail = false, currency = "0", key = "0", shape = true, relationCount = 3 } = {}) {
+function fakePool({ bad = false, fail = false, currency = "0", key = "0", shape = true, relationCount = 3, visibility = true } = {}) {
   const calls = [];
   const row = { journals:"2", posted_journals:"2", entries:"4", unresolved_journals:"0",
     missing_idempotency_keys:"0", duplicate_idempotency_keys:"0", invalid_entries:"0",
@@ -15,7 +15,7 @@ function fakePool({ bad = false, fail = false, currency = "0", key = "0", shape 
     if (sql.startsWith("SELECT pg_catalog.current_setting")) return { rows:[{
       read_only:"on", isolation:"repeatable read", statement_timeout:"10s", lock_timeout:"3s" }] };
     if (sql.startsWith("SELECT current_setting")) return { rows:[{row_security:"off",search_path:"pg_catalog"}] };
-    if (sql.includes("AS relation_shape_compatible")) return { rows:[{relation_count:relationCount,relation_shape_compatible:shape}] };
+    if (sql.includes("AS relation_shape_compatible")) return { rows:[{relation_count:relationCount,relation_shape_compatible:shape,row_visibility_compatible:visibility}] };
     if (sql.includes("WITH journals")) return { rows:[fail?{...row, entries:4}:row] };
     if (sql==="COMMIT" || sql==="ROLLBACK") return {command:sql};
     throw Error("unexpected SQL");
@@ -53,6 +53,15 @@ test("integrity audit rejects absent or incompatible relations before financial 
   for(const options of [{shape:false},{shape:null},{relationCount:2}]){
     const {pool,calls}=fakePool(options);
     await assert.rejects(auditLedgerIntegrity(pool),/requires three permanent ordinary relations/);
+    assert.equal(calls.some(sql=>sql.includes("WITH journals")),false);
+    assert.equal(calls.at(-2),"ROLLBACK");
+  }
+});
+
+test("integrity audit rejects unknown or unreviewed row visibility before reading financial rows",async()=>{
+  for(const visibility of [false,null]){
+    const {pool,calls}=fakePool({visibility});
+    await assert.rejects(auditLedgerIntegrity(pool),/requires reviewed row visibility/);
     assert.equal(calls.some(sql=>sql.includes("WITH journals")),false);
     assert.equal(calls.at(-2),"ROLLBACK");
   }

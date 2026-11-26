@@ -42,7 +42,10 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
           AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i
             WHERE i.inhrelid=c.oid OR i.inhparent=c.oid)
           AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_rewrite rw
-            WHERE rw.ev_class=c.oid)),false) AS relation_shape_compatible
+            WHERE rw.ev_class=c.oid)),false) AS relation_shape_compatible,
+        COALESCE(bool_and(NOT c.relrowsecurity AND NOT c.relforcerowsecurity
+          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_policy p
+            WHERE p.polrelid=c.oid)),false) AS row_visibility_compatible
       FROM pg_catalog.pg_class c
       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname=$1
@@ -51,6 +54,12 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
     if(shape.rows?.length!==1 || shape.rows[0].relation_count!==3 ||
        shape.rows[0].relation_shape_compatible!==true){
       throw new Error("Ledger integrity requires three permanent ordinary relations without inheritance or rewrite rules");
+    }
+    // Even an audit role that bypasses RLS cannot certify the historical
+    // ledger contract when the runtime role may see a different row set.
+    // Reject dormant policies too; never output policy names or definitions.
+    if(shape.rows[0].row_visibility_compatible!==true){
+      throw new Error("Ledger integrity requires reviewed row visibility without RLS or policies");
     }
     const { rows } = await client.query(`
       WITH journals AS (

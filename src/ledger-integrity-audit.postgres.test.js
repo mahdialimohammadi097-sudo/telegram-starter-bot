@@ -115,3 +115,27 @@ test("standalone ledger integrity refuses views, unlogged relations, inheritance
     try{await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}finally{await admin.end();}
   }
 });
+
+test("standalone ledger integrity rejects enabled, forced and dormant row security policies even for an elevated audit role",{skip:!enabled},async()=>{
+  const schema="ledger_visibility_"+randomUUID().replaceAll("-","");
+  const admin=new pg.Pool({connectionString:process.env.DATABASE_URL});
+  let fixture;
+  try{
+    await admin.query('CREATE SCHEMA "'+schema+'"');
+    fixture=new pg.Pool({connectionString:process.env.DATABASE_URL,options:"-c search_path="+schema});
+    await fixture.query(await readFile(new URL("../test/fixtures/ledger-contract.sql",import.meta.url),"utf8"));
+    const reject=()=>assert.rejects(auditLedgerIntegrity(admin,{schema}),/requires reviewed row visibility/);
+    assert.equal((await auditLedgerIntegrity(admin,{schema})).clean,true);
+    await fixture.query("ALTER TABLE ledger_entries ENABLE ROW LEVEL SECURITY");
+    await reject();
+    await fixture.query("ALTER TABLE ledger_entries FORCE ROW LEVEL SECURITY");
+    await reject();
+    await fixture.query("ALTER TABLE ledger_entries NO FORCE ROW LEVEL SECURITY; ALTER TABLE ledger_entries DISABLE ROW LEVEL SECURITY; CREATE POLICY fixture_visibility ON ledger_entries FOR SELECT USING (false)");
+    await reject();
+    await fixture.query("DROP POLICY fixture_visibility ON ledger_entries");
+    assert.equal((await auditLedgerIntegrity(admin,{schema})).clean,true);
+  }finally{
+    if(fixture)await fixture.end();
+    try{await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}finally{await admin.end();}
+  }
+});
