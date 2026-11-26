@@ -7,8 +7,8 @@ export function isSensitivePath(path) {
   return /^\.env(?:\.|$)/.test(basename) ||
     /^(?:\.pgpass|\.?pg_service\.conf|\.npmrc\.local)$/.test(basename) ||
     /\.(?:pem|key|p12|pfx|pgpass)$/.test(basename) ||
-    /\.(?:dump|backup|pgdump|sql\.(?:gz|bz2|xz|zst|zip))(?:\.(?:gz|bz2|xz|zst|zip|age|gpg|enc|aes))*$/.test(basename) ||
-    /\.sql\.(?:age|gpg|enc|aes)$/.test(basename) ||
+    /\.(?:dump|backup|pgdump)(?:\..*)?$/.test(basename) ||
+    /\.sql\.(?:gz|bz2|xz|zst|zip|age|gpg|enc|aes)(?:\..*)?$/.test(basename) ||
     /^(?:id_rsa|id_ed25519|id_ecdsa|id_dsa)$/.test(basename);
 }
 

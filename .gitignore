@@ -36,3 +36,9 @@ pg_service.conf
 *.sql.xz.*
 *.sql.zst.*
 *.sql.zip.*
+
+# Wrapped or temporary encrypted SQL archives
+*.sql.age.*
+*.sql.gpg.*
+*.sql.enc.*
+*.sql.aes.*

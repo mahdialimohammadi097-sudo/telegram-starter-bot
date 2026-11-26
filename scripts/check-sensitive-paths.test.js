@@ -23,3 +23,13 @@ test("blocks encrypted and compressed PostgreSQL exports and service configurati
   assert.equal(countSensitivePaths(paths),paths.length);
   assert.equal(countSensitivePaths(["migrations/schema.sql","docs/backup.md","sample.pg_service.conf.example","public/logo.svg"]),0);
 });
+
+test("blocks temporary, rotated and wrapped protected database archives", () => {
+  const paths = ["db.dump.tmp", "db.backup.1", "db.pgdump.partial",
+    "nested/db.sql.gz.tmp", "db.sql.age.partial", "db.sql.gpg.bak",
+    "db.sql.enc.20261126", "DB.SQL.AES.TMP", "db.dump.tar"];
+  for (const path of paths) assert.equal(isSensitivePath(path), true, path);
+  assert.equal(countSensitivePaths(paths), paths.length);
+  assert.equal(countSensitivePaths(["migrations/001.sql", "docs/backup.md",
+    "src/backup.js", "sample.sql.example"]), 0);
+});
