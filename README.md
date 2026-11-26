@@ -1,63 +1,26 @@
-# Telegram starter bot
+# PROFINO — existing Telegram service
 
-[![Deploy to FadeHost](https://fadehost.com/deploy-button.svg)](https://laplace.fadehost.com/register?intent=bot&repo=https://github.com/FadeHost/telegram-starter-bot)
+Review candidate for the existing @PROFINO1bot and @PROFINO1 channel. Node.js / grammY, PostgreSQL 17, USDT. The existing FadeHost service is `telegram-bot`; pushes to `main` trigger automatic deployment.
 
-A small Telegram bot to deploy in one click and then make your own: `/start`,
-`/help`, `/ping`, `/id`, an inline button and an echo. Node.js and
-[grammY](https://grammy.dev). Runs in polling mode by default, so it needs no
-web address; switch to webhook mode when you have one.
+**Review only. NO-GO for real funds.** Do not create a second bot, deploy this candidate, apply production migrations, or activate financial operations on the strength of CI results.
 
-## Run it on FadeHost
+## Free, isolated validation
 
-1. In Telegram, talk to [@BotFather](https://t.me/BotFather), send `/newbot`,
-   and copy the token.
-2. In the FadeHost panel, Apps, Host something, choose Telegram bot and this
-   template, paste the token, deploy.
-3. Send `/start` to your bot.
+- Use the existing GitHub Actions checks on the exact candidate revision, or run `npm ci` and `npm test` in an offline development environment with no production credentials.
+- PostgreSQL integration tests require a genuinely disposable PostgreSQL 17 service and explicit opt-in (`PROFINO_DISPOSABLE_POSTGRES=yes`). Use only the documented loopback fixture databases `profino_test` and `catalog_rehearsal`; never a tunnel to production. A skipped PostgreSQL suite is not release evidence.
+- The Node.js 22/24/26 CI matrix, focused PostgreSQL replay and synthetic backup/restore are the reproducible test paths. No live funds, real Telegram credentials or production database are needed.
+- See [single-bot validation policy](docs/single-bot-validation-policy.md) and [release evidence and gates](docs/priority7-8-release-evidence-2026-11-25.md). The separate staging runbook is historical, not authorization to create another bot.
 
-The free tier (256 MB) runs it comfortably. Paid tiers add an always-on web
-address, which webhook mode can use.
+## Existing service configuration
 
-## Run it anywhere else
+Use protected host settings; never commit or print a bot token, database connection string, or private key. See `.env.example`. Polling is the existing default. Webhook mode requires an HTTPS base URL and a random secret containing only letters, digits, underscores or hyphens (1–256 characters). Do not start a competing receiver with the production token.
 
-```bash
-npm install
-TELEGRAM_BOT_TOKEN=123456789:AAF... npm start
-```
+Preserve the current database/TLS configuration until the real provider and network settings have been independently verified. Restricted verify-only runtime is a reviewed opt-in, not a migration procedure. The default legacy startup contract must not be confused with least-privilege release approval.
 
-## Webhook mode
+## Operator-only readiness
 
-Telegram pushes updates to your app instead of the app asking. Set:
+Use the reviewed read-only audit tools through an authorized private connection. An audit's success describes its own scope, not production financial readiness. Do not make the database public or bypass provider restrictions. See [independent backup and restore](docs/independent-postgres-backup-restore.md), [migration approval gate](docs/production-evidence-migration-approval.md), and the release evidence document.
 
-| Variable | Value |
-| --- | --- |
-| `TELEGRAM_MODE` | `webhook` |
-| `WEBHOOK_URL` | the app's public https address, e.g. `https://my-bot.fadehost.app` |
-| `WEBHOOK_SECRET` | required in webhook mode; use a randomly generated value of 1–256 ASCII letters, digits, underscores or hyphens |
-| `PORT` | the port to listen on (set for you on FadeHost) |
+An exact deployed revision, actual catalog and role evidence, isolated recovery from a real encrypted backup, independent custody/liquidity/liability and compliance checks, supervised single-bot acceptance and separate final owner authorization remain required. Never restore over production.
 
-Telegram only delivers webhooks to ports 443, 80, 88 and 8443 over https with
-a valid certificate. A FadeHost web address on 443 meets that as it is.
-
-## Make it yours
-
-Everything the bot does is in `src/commands.js`. Add a command:
-
-```js
-bot.command("weather", (ctx) => ctx.reply("Sunny."))
-```
-
-Rules that keep bots healthy: answer callback queries (`ctx.answerCallbackQuery`)
-so buttons stop spinning, keep long work off the update handler, and never log
-the token.
-
-## Environment
-
-See `.env.example`.
-
-## PROFINO deployment
-
-The production bot is deployed from the `main` branch on FadeHost. Pushes to
-`main` trigger automatic deployment through the FadeHost GitHub App.
-
-MIT licensed. Built and maintained by FadeHost.
+MIT license. Originally based on the FadeHost Telegram starter template.

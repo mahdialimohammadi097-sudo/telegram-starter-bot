@@ -1,6 +1,6 @@
 # Isolated staging simulation: operational readiness
 
-The production bot `@PROFINO1bot` and the production database must not be used for synthetic financial testing. PR #59 remains a draft; do not deploy it to the production service.
+**Historical alternative staging procedure — not the approved PROFINO execution path.** The [single-bot validation policy](single-bot-validation-policy.md) takes precedence: do not create a second bot, use the existing production token in staging, or deploy an isolated-staging financial writer to production. The steps below preserve the technical prerequisites of that alternative only; do not execute them for PROFINO. Use the offline CI/synthetic fixtures and the separately authorized single-bot acceptance path instead. The production database must not be used for synthetic financial testing.
 
 ## Required independent resources
 

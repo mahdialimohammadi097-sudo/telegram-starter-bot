@@ -4,7 +4,7 @@ The owner requires exactly one Telegram bot: `@PROFINO1bot`. Do not create a sec
 
 ## Validation without a second bot
 
-1. Keep PR #59 in draft and do not merge or deploy it to production merely because CI passes.
+1. Keep the current cumulative review PR #226 in draft and do not merge or deploy it to production merely because CI passes. PR #59 is historical; do not independently merge overlapping review branches.
 2. Run `npm test` and `npm run test:postgres` against a **disposable, isolated PostgreSQL 17 test database**, never production. The PostgreSQL integration suite uses synthetic identities and balances.
 3. Verify the GitHub Actions JavaScript matrix and PostgreSQL restore drills are green for the **same final commit SHA**.
 4. Use the existing mocked Telegram adapters and synthetic financial tests to exercise commands, investment lifecycle, withdrawal reservation, submission, receipt, cancellation, reviewer authorization, concurrency, idempotency and reconciliation. These are not a live Telegram end-to-end test.
