@@ -185,14 +185,48 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
       typeof x.expression==="string"&&
       ["amount>0::numeric","amount>0"].includes(x.expression.replace(/[()\s]/g,"")));
     const amountConstraint={positiveAmount,compatible:positiveAmount};
+    // Historical CHECKs must constrain the exact reviewed direction/status
+    // sets. Preserve quoted literal contents while normalizing deparse
+    // whitespace and parentheses outside those literals.
+    const valueRows=(await client.query(`
+      SELECT c.relname AS table_name,a.attname AS column_name,
+        k.convalidated,k.connoinherit,
+        pg_catalog.pg_get_expr(k.conbin,k.conrelid,false) AS expression
+      FROM pg_catalog.pg_constraint k
+      JOIN pg_catalog.pg_class c ON c.oid=k.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND k.conkey[1]=a.attnum
+      WHERE n.nspname=$1 AND k.contype='c' AND pg_catalog.cardinality(k.conkey)=1
+        AND ((c.relname='ledger_entries' AND a.attname='entry_type')
+          OR (c.relname='ledger_transactions' AND a.attname='status'))
+    `,[schema])).rows;
+    if(!Array.isArray(valueRows))throw new Error("Incomplete ledger value constraint evidence");
+    const normalizeExpression=value=>value.split("'").map((part,index)=>
+      index%2===0?part.replace(/[()\s]/g,""):part).join("'");
+    const valueContracts=[
+      ["ledger_entries","entry_type",["debit","credit"]],
+      ["ledger_transactions","status",["pending","posted","reversed"]]
+    ];
+    const valueChecks=valueContracts.map(([table,column,values])=>{
+      const varcharArray=values.map(value=>"'"+value+"'::charactervarying").join(",");
+      const textArray=values.map(value=>"'"+value+"'::text").join(",");
+      const forms=[
+        column+"::text=ANYARRAY["+varcharArray+"]::text[]",
+        column+"::text=ANYARRAY["+textArray+"]"
+      ];
+      return {table,column,compatible:valueRows.some(row=>row.table_name===table&&
+        row.column_name===column&&row.convalidated===true&&row.connoinherit===false&&
+        typeof row.expression==="string"&&forms.includes(normalizeExpression(row.expression)))};
+    });
+    const valueConstraints={checks:valueChecks,compatible:valueChecks.every(x=>x.compatible)};
     const integrity=await inspectLedgerIntegrity(client,{schema});
     const triggers=await inspectLedgerTriggerContract(client,{schema});
     const reviewedBodies=await inspectReviewedLedgerBodies(client,{schema});
     return {
       audit:"ledger-release-evidence",scope:"internal-ledger-and-trigger-shape-only",
       sameSnapshot:true,
-      relations,columnContract,identityConstraints,foreignKeys,amountConstraint,integrity,triggers,reviewedBodies,
-      checksPassed:columnContract.compatible===true&&identityConstraints.compatible===true&&foreignKeys.compatible===true&&amountConstraint.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
+      relations,columnContract,identityConstraints,foreignKeys,amountConstraint,valueConstraints,integrity,triggers,reviewedBodies,
+      checksPassed:columnContract.compatible===true&&identityConstraints.compatible===true&&foreignKeys.compatible===true&&amountConstraint.compatible===true&&valueConstraints.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
       custodyVerified:false,financialActivationReady:false,productionReady:false
     };
   });
