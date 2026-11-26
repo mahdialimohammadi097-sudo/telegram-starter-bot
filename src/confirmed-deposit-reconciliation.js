@@ -15,7 +15,10 @@ function accountId(value) {
 // reconstructed from the journal being checked. This is NOT a complete chain
 // scan: omitted events and journals with both identifiers corrupted are outside
 // its scope. No repair, balance change, or financial activation occurs here.
-export async function reconcileConfirmedDeposits(pool, expectedDeposits, clearingAccountId) {
+export async function reconcileConfirmedDeposits(pool, expectedDeposits, clearingAccountId, {schema} = {}) {
+  if (schema !== undefined && (typeof schema !== 'string' || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema))) throw new Error('Invalid deposit reconciliation schema');
+  // Explicit qualification for the verified audit; legacy isolated callers may supply their own reviewed search path.
+  const prefix = schema === undefined ? '' : '"'+schema+'".';
   const clearing = accountId(clearingAccountId);
   if (!Array.isArray(expectedDeposits) || expectedDeposits.length < 1 || expectedDeposits.length > 500) {
     throw new TypeError('Provide between 1 and 500 independently verified deposits');
@@ -43,9 +46,9 @@ export async function reconcileConfirmedDeposits(pool, expectedDeposits, clearin
               'user_id', a.user_id::text, 'account_type', a.account_type,
               'account_currency', a.currency
             )) FILTER (WHERE e.id IS NOT NULL), '[]'::jsonb) AS entries
-       FROM ledger_transactions t
-       LEFT JOIN ledger_entries e ON e.transaction_id=t.id
-       LEFT JOIN ledger_accounts a ON a.id=e.account_id
+       FROM ${prefix}ledger_transactions t
+       LEFT JOIN ${prefix}ledger_entries e ON e.transaction_id=t.id
+       LEFT JOIN ${prefix}ledger_accounts a ON a.id=e.account_id
        WHERE t.reference_id=ANY($1::text[]) OR t.idempotency_key=ANY($2::text[])
        GROUP BY t.id ORDER BY t.id`,
     [expected.map(e => e.eventKey), expected.map(e => e.key)]);

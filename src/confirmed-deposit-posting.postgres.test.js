@@ -114,7 +114,7 @@ test('ownership lock prevents reassignment until posting commits', { skip: !enab
 });
 
 test('ledger-first audit verifies a complete clean deposit set before fault fixtures are introduced', { skip: !enabled }, async () => {
-  const report = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', pageSize: 1,
+  const report = await auditConfirmedDepositLedger({ pool, schema, clearingAccountId: '1', pageSize: 1,
     resolveExpectedDeposits: async keys => keys.map(eventKey => ({ eventKey,
       expected: expectedDeposit(Number(BigInt(eventKey.split(':')[2]))) })) });
   assert.equal(report.scannedJournals, 3);
@@ -176,7 +176,7 @@ test('ledger-first audit scans all pages in read-only snapshot and finds unsuppo
     VALUES ('confirmed-deposit','corrupt-ref','corrupt-key','pending')`);
   const before = await count();
   let sourceCalls = 0;
-  const report = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', pageSize: 2,
+  const report = await auditConfirmedDepositLedger({ pool, schema, clearingAccountId: '1', pageSize: 2,
     resolveExpectedDeposits: async keys => {
       sourceCalls++;
       return keys.map(eventKey => ({ eventKey, expected: eventKey === evidence(14).eventKey ? null :
@@ -201,11 +201,11 @@ test('ledger audit is a consistent snapshot across concurrent commits and a fres
     return keys.map(eventKey => ({ eventKey, expected: null }));
   };
   const before = await count();
-  const first = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', pageSize: 2, resolveExpectedDeposits: resolver });
+  const first = await auditConfirmedDepositLedger({ pool, schema, clearingAccountId: '1', pageSize: 2, resolveExpectedDeposits: resolver });
   assert.equal(first.scannedJournals, before);
-  const second = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', pageSize: 2, resolveExpectedDeposits: resolver });
+  const second = await auditConfirmedDepositLedger({ pool, schema, clearingAccountId: '1', pageSize: 2, resolveExpectedDeposits: resolver });
   assert.equal(second.scannedJournals, before + 1);
-  const limited = await auditConfirmedDepositLedger({ pool, clearingAccountId: '1', maxJournals: 1, resolveExpectedDeposits: resolver });
+  const limited = await auditConfirmedDepositLedger({ pool, schema, clearingAccountId: '1', maxJournals: 1, resolveExpectedDeposits: resolver });
   assert.equal(limited.scanComplete, false);
   assert.equal(limited.clean, false);
 });
@@ -344,4 +344,28 @@ test('posting blocks legacy alternate keys, conflicting references and duplicate
   const fresh=await post(205);
   assert.equal(fresh.idempotent,false);
   assert.equal((await post(205)).transactionId,fresh.transactionId);
+});
+
+
+test('deposit audit refuses RLS-filtered journals and includes nonpositive journal IDs', {skip:!enabled}, async()=>{
+ const role='audit_reader_'+randomUUID().replaceAll('-','');
+ const client=await admin.connect();
+ try{
+  await pool.query("INSERT INTO ledger_transactions(id,transaction_type,status) VALUES (-1,'confirmed-deposit','pending')");
+  const report=await auditConfirmedDepositLedger({pool,schema,clearingAccountId:'1',resolveExpectedDeposits:async keys=>keys.map(eventKey=>({eventKey,expected:null}))});
+  assert.ok(report.findings.some(f=>f.transactionId==='-1'&&f.code==='invalid_deposit_journal_id'));
+  await client.query('CREATE ROLE "'+role+'" NOLOGIN NOSUPERUSER NOBYPASSRLS');
+  await client.query('GRANT USAGE ON SCHEMA "'+schema+'" TO "'+role+'"');
+  await client.query('GRANT SELECT ON "'+schema+'".ledger_transactions TO "'+role+'"');
+  await pool.query('ALTER TABLE ledger_transactions ENABLE ROW LEVEL SECURITY');
+  await client.query('SET ROLE "'+role+'"');
+  const restricted={async connect(){return {query:client.query.bind(client),release(){}};}};
+  await assert.rejects(auditConfirmedDepositLedger({pool:restricted,schema,clearingAccountId:'1',resolveExpectedDeposits:async()=>assert.fail('filtered audit must fail before RPC')}),e=>e.code==='42501');
+ }finally{
+  await client.query('RESET ROLE');
+  await pool.query('ALTER TABLE ledger_transactions DISABLE ROW LEVEL SECURITY');
+  await client.query('DROP OWNED BY "'+role+'"').catch(e=>{if(e.code!=='42704')throw e;});
+  await client.query('DROP ROLE IF EXISTS "'+role+'"');
+  client.release();
+ }
 });
