@@ -2,6 +2,7 @@
 // modifying roles or schema, or performing any financial operation.
 import { verifyRuntimeSchema } from "../src/runtime-schema-policy.js";
 import { resolveDatabaseTls } from "../src/database-tls-policy.js";
+import { restrictedRuntimeConnectionOptions } from "../src/database-session-policy.js";
 import pg from "pg";
 
 const reasons = Object.freeze({
@@ -21,7 +22,8 @@ try {
   pool = new pg.Pool({
     connectionString:process.env.DATABASE_URL,ssl:resolveDatabaseTls(),max:1,
     connectionTimeoutMillis:10000,
-    options:"-c default_transaction_read_only=on -c statement_timeout=10000"
+    options:restrictedRuntimeConnectionOptions(process.env,{force:true}).options+
+      " -c default_transaction_read_only=on -c statement_timeout=10000"
   });
   pool.on("error",()=>{});
   const result = await verifyRuntimeSchema(pool);

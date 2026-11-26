@@ -5,6 +5,7 @@ import {randomUUID} from "node:crypto";
 import pg from "pg";
 import {Bot} from "grammy";
 import {verifyRuntimeSchema} from "./runtime-schema-policy.js";
+import {restrictedRuntimeConnectionOptions} from "./database-session-policy.js";
 import {activeOwnerLockBody} from "./restricted-owner-lock.js";
 import {postHistoryTriggerBody} from "./post-history-trigger-body.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
@@ -271,5 +272,33 @@ test("restricted role verifies runtime inventory without schema creation rights"
  }finally{
   try{await q("RESET SESSION AUTHORIZATION");await q("RESET session_replication_role");if(madeRole)await q("REVOKE SET ON PARAMETER session_replication_role FROM "+role);await q("RESET search_path");if(madeSchema)await q("DROP SCHEMA "+schema+" CASCADE");if(madeRole)await q("DROP ROLE "+role);if(madeAlternate)await q("DROP ROLE "+alternate);}
   finally{client.release(true);await pool.end();}
+ }
+});
+
+test("restricted startup options apply to two independent PostgreSQL pool connections",{skip:!safeTarget()},async()=>{
+ const schema="path_fixture_"+randomUUID().replaceAll("-","");
+ const admin=new pg.Pool({connectionString:url,max:1});
+ let scoped,first,second;
+ try{
+  await admin.query("CREATE SCHEMA "+schema);
+  await admin.query("CREATE TABLE "+schema+".reviewed_fixture(id integer)");
+  scoped=new pg.Pool({connectionString:url,max:2,
+   ...restrictedRuntimeConnectionOptions({DATABASE_URL:url},{force:true,schema})});
+  first=await scoped.connect();second=await scoped.connect();
+  const state=async client=>(await client.query("SELECT current_schemas(true)::text[] AS schemas, pg_backend_pid() AS pid")).rows[0];
+  const left=await state(first),right=await state(second);
+  assert.notEqual(left.pid,right.pid);
+  assert.deepEqual(left.schemas,["pg_catalog",schema]);
+  assert.deepEqual(right.schemas,["pg_catalog",schema]);
+  await first.query("CREATE TEMP TABLE reviewed_fixture(id integer)");
+  const result=await first.query("SELECT to_regclass('reviewed_fixture')=to_regclass($1) AS expected",[schema+".reviewed_fixture"]);
+  assert.equal(result.rows[0].expected,true);
+  assert.deepEqual((await state(first)).schemas.slice(0,2),["pg_catalog",schema]);
+  assert.deepEqual((await state(second)).schemas,["pg_catalog",schema]);
+ }finally{
+  if(first)first.release(true);
+  if(second)second.release(true);
+  if(scoped)await scoped.end();
+  try{await admin.query("DROP SCHEMA IF EXISTS "+schema+" CASCADE");}finally{await admin.end();}
  }
 });

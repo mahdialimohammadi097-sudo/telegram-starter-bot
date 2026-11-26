@@ -1,6 +1,7 @@
 import pg from "pg";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { resolveDatabaseTls } from "./database-tls-policy.js";
+import { restrictedRuntimeConnectionOptions } from "./database-session-policy.js";
 
 const { Pool } = pg;
 
@@ -14,6 +15,7 @@ export const pool = new Pool({
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
   ssl: resolveDatabaseTls(),
+  ...restrictedRuntimeConnectionOptions(),
 });
 
 // pg removes a disconnected idle client; handle its error without crashing
