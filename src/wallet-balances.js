@@ -47,8 +47,8 @@ export async function getWalletBalances(pool, userId) {
       )
      WHERE la.user_id = $1
        AND la.currency = 'USDT'
-     GROUP BY la.account_type
-     ORDER BY la.account_type`,
+     GROUP BY la.id, la.account_type
+     ORDER BY la.account_type, la.id`,
     [userId]
   );
 
@@ -58,8 +58,14 @@ export async function getWalletBalances(pool, userId) {
     PROFIT: null
   };
 
+  // Do not aggregate separate accounts with the same role. A damaged
+  // uniqueness contract must fail closed instead of displaying a combined
+  // amount that cannot be attributed to one canonical wallet account.
+  const seen = new Set();
   for (const row of result.rows) {
     if (Object.hasOwn(balances, row.account_type) || row.account_type === "WITHDRAWAL_HOLD") {
+      if (seen.has(row.account_type)) throw new Error("Wallet account identity is ambiguous");
+      seen.add(row.account_type);
       balances[row.account_type] = row.balance;
     }
   }
