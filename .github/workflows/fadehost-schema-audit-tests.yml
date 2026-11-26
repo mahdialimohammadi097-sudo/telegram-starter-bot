@@ -1,14 +1,7 @@
 name: FadeHost schema audit safety tests
 on:
+  # Release checks must report on every PR, including transitive changes.
   pull_request:
-    paths:
-      - 'scripts/fadehost-schema-audit.js'
-      - 'scripts/fadehost-schema-audit.test.js'
-      - 'src/deposit-schema-audit.js'
-      - 'src/database-tls-policy.js'
-      - 'src/transaction-safety.js'
-      - 'src/diagnostic-safety.js'
-      - '.github/workflows/fadehost-schema-audit-tests.yml'
   push:
     branches:
       - ops/read-only-fadehost-schema-audit

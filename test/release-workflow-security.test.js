@@ -27,3 +27,19 @@ test("rollback rehearsal covers all pull requests and retains the pinned lock an
  assert.match(workflow,/\$GITHUB_WORKSPACE:\/work:ro/);
  assert.doesNotMatch(workflow,/pull_request_target:|contents:\s*write\b|continue-on-error:/);
 });
+
+test("all four supplemental release checks report on every pull request",()=>{
+ for(const [file,job] of [
+  ["catalog-owner-tests.yml","ownership"],
+  ["catalog-owner-postgres.yml","concurrency"],
+  ["fadehost-schema-audit-tests.yml","safe-audit"],
+  ["postgres-restore.yml","restore"]
+ ]){
+  const workflow=read(file);
+  assert.match(workflow,/^  pull_request:\s*\n/m,file);
+  assert.doesNotMatch(workflow,/^\s+paths(?:-ignore)?:/m,file);
+  assert.match(workflow,new RegExp("^  "+job+":\\s*$","m"),file);
+  assert.match(workflow,/permissions:\s*\n\s+contents: read\b/,file);
+  assert.doesNotMatch(workflow,/pull_request_target:|contents:\s*write\b|continue-on-error:/,file);
+ }
+});
