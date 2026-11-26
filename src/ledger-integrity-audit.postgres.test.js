@@ -47,7 +47,7 @@ test("PostgreSQL integrity audit detects internal anomalies even when posted jou
     assert.deepEqual(bad.counts,{journals:"6",posted_journals:"5",entries:"8",
       unresolved_journals:"1",missing_idempotency_keys:"1",duplicate_idempotency_keys:"0",
       invalid_entries:"4",invalid_account_currencies:"0",noncanonical_idempotency_keys:"0",
-      unbalanced_posted_journals:"1",negative_customer_accounts:"1",negative_noncustomer_protected_accounts:"0"});
+      invalid_row_identity_groups:"0",unbalanced_posted_journals:"1",negative_customer_accounts:"1",negative_noncustomer_protected_accounts:"0"});
     assert.equal(bad.custodyVerified,false);
     assert.equal(bad.productionReady,false);
   } finally {
@@ -170,6 +170,38 @@ test("ledger integrity detects negative platform reserve and mixed-case protecte
       INSERT INTO ledger_entries(transaction_id,account_id,entry_type,amount) VALUES (3,3,'debit',3),(3,1,'credit',2),(3,2,'credit',1);
       UPDATE ledger_transactions SET status='posted' WHERE id=3;`);
     assert.equal((await auditLedgerIntegrity(admin,{schema})).clean,true);
+  }finally{
+    if(fixture)await fixture.end();
+    try{await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}finally{await admin.end();}
+  }
+});
+
+test("standalone ledger integrity detects ambiguous primary identities without relying on constraints",{skip:!enabled},async()=>{
+  const schema="ledger_identity_"+randomUUID().replaceAll("-","");
+  const admin=new pg.Pool({connectionString:process.env.DATABASE_URL});
+  let fixture;
+  try{
+    await admin.query('CREATE SCHEMA "'+schema+'"');
+    fixture=new pg.Pool({connectionString:process.env.DATABASE_URL,options:"-c search_path="+schema});
+    // Intentionally unconstrained disposable relations, never production DDL.
+    await fixture.query(`CREATE TABLE ledger_accounts(id bigint,user_id bigint,account_type text,currency text);
+      CREATE TABLE ledger_transactions(id bigint,status text,idempotency_key text);
+      CREATE TABLE ledger_entries(id bigint,transaction_id bigint,account_id bigint,entry_type text,amount numeric,currency text);
+      INSERT INTO ledger_accounts VALUES (1,NULL,'CLEARING','USDT'),(2,NULL,'CLEARING','USDT');
+      INSERT INTO ledger_transactions VALUES (1,'posted','fixture-key');
+      INSERT INTO ledger_entries VALUES (1,1,1,'debit',1,'USDT'),(2,1,2,'credit',1,'USDT');`);
+    const inspect=()=>auditLedgerIntegrity(admin,{schema});
+    assert.equal((await inspect()).clean,true);
+    await fixture.query("UPDATE ledger_entries SET id=1 WHERE id=2");
+    const duplicate=await inspect();
+    assert.equal(duplicate.counts.invalid_row_identity_groups,"1");
+    assert.equal(duplicate.counts.unbalanced_posted_journals,"0");
+    assert.equal(duplicate.clean,false);
+    await fixture.query("INSERT INTO ledger_accounts VALUES (NULL,NULL,'CLEARING','USDT'); INSERT INTO ledger_transactions VALUES (1,'posted','second-key')");
+    const multiple=await inspect();
+    assert.equal(multiple.counts.invalid_row_identity_groups,"3");
+    assert.equal(multiple.clean,false);
+    assert.equal(multiple.productionReady,false);
   }finally{
     if(fixture)await fixture.end();
     try{await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}finally{await admin.end();}

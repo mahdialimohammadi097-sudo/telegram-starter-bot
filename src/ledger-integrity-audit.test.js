@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { auditLedgerIntegrity } from "./ledger-integrity-audit.js";
 
-function fakePool({ bad = false, fail = false, currency = "0", key = "0", shape = true, relationCount = 3, visibility = true, reserve = "0" } = {}) {
+function fakePool({ bad = false, fail = false, currency = "0", key = "0", shape = true, relationCount = 3, visibility = true, reserve = "0", identity = "0" } = {}) {
   const calls = [];
   const row = { journals:"2", posted_journals:"2", entries:"4", unresolved_journals:"0",
     missing_idempotency_keys:"0", duplicate_idempotency_keys:"0", invalid_entries:"0",
     invalid_account_currencies:currency, noncanonical_idempotency_keys:key,
-    unbalanced_posted_journals:"0", negative_customer_accounts:bad?"1":"0", negative_noncustomer_protected_accounts:reserve };
+    invalid_row_identity_groups:identity, unbalanced_posted_journals:"0", negative_customer_accounts:bad?"1":"0", negative_noncustomer_protected_accounts:reserve };
   const client = { async query(sql) {
     calls.push(sql);
     if (sql.startsWith("BEGIN")) return { command:"BEGIN" };
@@ -75,4 +75,14 @@ test("integrity audit treats negative protected noncustomer balances as discrepa
   assert.equal(result.clean,false);
   assert.ok(calls.some(sql=>sql.includes("upper(a.account_type)")&&sql.includes("user_id IS NULL AND balance<0")));
   await assert.rejects(auditLedgerIntegrity(fakePool({reserve:null}).pool),/Incomplete ledger integrity audit/);
+});
+
+test("integrity audit rejects duplicate or missing row identity evidence",async()=>{
+  const {pool,calls}=fakePool({identity:"1"});
+  const result=await auditLedgerIntegrity(pool);
+  assert.equal(result.counts.invalid_row_identity_groups,"1");
+  assert.equal(result.clean,false);
+  const query=calls.find(sql=>sql.includes("WITH journals"));
+  assert.equal((query.match(/HAVING id IS NULL OR count\(\*\)>1/g)||[]).length,3);
+  await assert.rejects(auditLedgerIntegrity(fakePool({identity:null}).pool),/Incomplete ledger integrity audit/);
 });

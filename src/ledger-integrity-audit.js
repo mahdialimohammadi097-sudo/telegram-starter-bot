@@ -3,6 +3,7 @@ import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 const findingKeys = [
   "unresolved_journals", "missing_idempotency_keys", "duplicate_idempotency_keys",
   "invalid_entries", "invalid_account_currencies", "noncanonical_idempotency_keys",
+  "invalid_row_identity_groups",
   "unbalanced_posted_journals", "negative_customer_accounts", "negative_noncustomer_protected_accounts"
 ];
 const countKeys = ["journals", "posted_journals", "entries", ...findingKeys];
@@ -72,6 +73,12 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
         FROM ${s}.ledger_entries e
         LEFT JOIN journals t ON t.id=e.transaction_id
         LEFT JOIN accounts a ON a.id=e.account_id
+      ), invalid_identities AS (
+        SELECT id FROM journals GROUP BY id HAVING id IS NULL OR count(*)>1
+        UNION ALL
+        SELECT id FROM accounts GROUP BY id HAVING id IS NULL OR count(*)>1
+        UNION ALL
+        SELECT id FROM ${s}.ledger_entries GROUP BY id HAVING id IS NULL OR count(*)>1
       ), currency_totals AS (
         SELECT transaction_id, currency, count(*) AS lines,
           sum(amount) FILTER (WHERE entry_type='debit') AS debits,
@@ -107,6 +114,7 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
         (SELECT count(*) FROM accounts WHERE currency IS DISTINCT FROM 'USDT')::text AS invalid_account_currencies,
         (SELECT count(*) FROM journals WHERE idempotency_key ~ '[^[:space:]]'
           AND idempotency_key ~ '^[[:space:]]|[[:space:]]$')::text AS noncanonical_idempotency_keys,
+        (SELECT count(*) FROM invalid_identities)::text AS invalid_row_identity_groups,
         (SELECT count(*) FROM bad_journals)::text AS unbalanced_posted_journals,
         (SELECT count(*) FROM protected_balances WHERE user_id IS NOT NULL AND balance<0)::text AS negative_customer_accounts,
         (SELECT count(*) FROM protected_balances WHERE user_id IS NULL AND balance<0)::text AS negative_noncustomer_protected_accounts
