@@ -56,6 +56,16 @@ export async function inspectDatabaseAccess(client,{schema="public"}={}) {
       count(c.oid) FILTER (WHERE has_any_column_privilege(current_user,c.oid,'UPDATE'))::int AS ledger_tables_updatable,
       count(c.oid) FILTER (WHERE has_table_privilege(current_user,c.oid,'DELETE'))::int AS ledger_tables_deletable,
       count(c.oid) FILTER (WHERE c.relrowsecurity)::int AS ledger_tables_rls_enabled,
+      count(c.oid) FILTER (WHERE c.relrowsecurity AND c.relforcerowsecurity)::int AS ledger_tables_rls_forced,
+      count(c.oid) FILTER (WHERE c.relrowsecurity AND pg_catalog.row_security_active(c.oid))::int AS ledger_tables_rls_active,
+      count(c.oid) FILTER (WHERE EXISTS (
+        SELECT 1 FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid
+      ))::int AS ledger_tables_with_policies,
+      count(c.oid) FILTER (WHERE EXISTS (
+        SELECT 1 FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid
+          AND p.polpermissive AND 0::oid=ANY(p.polroles)
+          AND p.polcmd IN ('*','a','w','d')
+      ))::int AS ledger_tables_public_write_policy,
       count(c.oid) FILTER (WHERE
         has_table_privilege(current_user,c.oid,'INSERT WITH GRANT OPTION,UPDATE WITH GRANT OPTION,DELETE WITH GRANT OPTION,TRUNCATE WITH GRANT OPTION,TRIGGER WITH GRANT OPTION')
         OR has_any_column_privilege(current_user,c.oid,'INSERT WITH GRANT OPTION,UPDATE WITH GRANT OPTION')
@@ -82,11 +92,16 @@ export async function inspectDatabaseAccess(client,{schema="public"}={}) {
     "session_can_assume_ledger_function_owner","ledger_functions_public_execute"];
   const counts = ["ledger_tables_present","ledger_tables_owned","ledger_tables_truncatable","ledger_tables_trigger_privilege",
     "ledger_tables_insertable","ledger_tables_updatable","ledger_tables_deletable","ledger_tables_rls_enabled",
-    "ledger_tables_delegable","ledger_tables_public_write","ledger_tables_session_owner_access"];
+    "ledger_tables_delegable","ledger_tables_public_write","ledger_tables_session_owner_access",
+    "ledger_tables_rls_forced","ledger_tables_rls_active","ledger_tables_with_policies",
+    "ledger_tables_public_write_policy"];
   if (flags.some(key => typeof row[key] !== "boolean") ||
       !Number.isInteger(row.server_major) || row.server_major < 1 ||
       counts.some(key => !Number.isInteger(row[key]) || row[key] < 0 || row[key] > 3) ||
-      counts.slice(1).some(key => row[key] > row.ledger_tables_present) || !row.read_only) {
+      counts.slice(1).some(key => row[key] > row.ledger_tables_present) ||
+      row.ledger_tables_rls_active > row.ledger_tables_rls_enabled ||
+      row.ledger_tables_rls_forced > row.ledger_tables_rls_enabled ||
+      row.ledger_tables_public_write_policy > row.ledger_tables_with_policies || !row.read_only) {
     throw new Error("Database access audit evidence is incomplete or unsafe");
   }
   // Findings describe only this DSN, not every role or the hosting network.

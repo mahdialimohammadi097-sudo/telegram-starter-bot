@@ -78,6 +78,15 @@ test("access audit detects column-level, PUBLIC and delegable ledger privileges"
   await pool.query('GRANT INSERT(amount) ON "'+schema+'".ledger_accounts TO PUBLIC');
   await pool.query('GRANT DELETE ON "'+schema+'".ledger_transactions TO "'+role+'"');
   await pool.query('ALTER TABLE "'+schema+'".ledger_accounts ENABLE ROW LEVEL SECURITY');
+  await pool.query('ALTER TABLE "'+schema+'".ledger_accounts FORCE ROW LEVEL SECURITY');
+  await pool.query('CREATE POLICY public_fixture ON "'+schema+'".ledger_accounts FOR INSERT TO PUBLIC WITH CHECK (true)');
+  await pool.query('CREATE POLICY read_fixture ON "'+schema+'".ledger_entries FOR SELECT TO "'+role+'" USING (true)');
+  const ownerEvidence=await inspect();
+  assert.equal(ownerEvidence.ledger_tables_rls_enabled,1);
+  assert.equal(ownerEvidence.ledger_tables_rls_forced,1);
+  assert.equal(ownerEvidence.ledger_tables_rls_active,0);
+  assert.equal(ownerEvidence.ledger_tables_with_policies,2);
+  assert.equal(ownerEvidence.ledger_tables_public_write_policy,1);
   await pool.query('GRANT SET ON PARAMETER session_replication_role TO "'+role+'"');
   await pool.query('SET ROLE "'+role+'"');
   const excess=await inspect();
@@ -87,9 +96,23 @@ test("access audit detects column-level, PUBLIC and delegable ledger privileges"
   assert.equal(excess.ledger_tables_delegable,1);
   assert.equal(excess.ledger_tables_public_write,1);
   assert.equal(excess.ledger_tables_rls_enabled,1);
+  assert.equal(excess.ledger_tables_rls_forced,1);
+  assert.equal(excess.ledger_tables_rls_active,1);
+  assert.equal(excess.ledger_tables_with_policies,2);
+  assert.equal(excess.ledger_tables_public_write_policy,1);
   assert.equal(excess.can_set_replication_role,true);
   assert.equal(JSON.stringify(excess).includes(role),false);
   assert.equal(JSON.stringify(excess).includes(schema),false);
+  assert.equal(JSON.stringify(excess).includes("public_fixture"),false);
+  await pool.query("RESET ROLE");
+  await pool.query('DROP POLICY public_fixture ON "'+schema+'".ledger_accounts');
+  await pool.query('ALTER TABLE "'+schema+'".ledger_accounts DISABLE ROW LEVEL SECURITY');
+  const after=await inspect();
+  assert.equal(after.ledger_tables_rls_enabled,0);
+  assert.equal(after.ledger_tables_rls_active,0);
+  assert.equal(after.ledger_tables_rls_forced,0);
+  assert.equal(after.ledger_tables_with_policies,1);
+  assert.equal(after.ledger_tables_public_write_policy,0);
  }finally{
   try{
    await pool.query("RESET ROLE");
