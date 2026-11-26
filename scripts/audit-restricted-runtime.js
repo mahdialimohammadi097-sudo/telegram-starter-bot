@@ -17,6 +17,7 @@ const reasons = Object.freeze({
   "Required restricted owner lock is missing or incompatible": "OWNER_LOCK_INCOMPATIBLE"
 });
 let pool;
+let idleFailure=false;
 let report = {audit:"restricted-runtime",operationalInventoryVerified:false,financialActivationReady:false};
 try {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL_NOT_CONFIGURED");
@@ -26,7 +27,7 @@ try {
     options:restrictedRuntimeConnectionOptions(process.env,{force:true}).options+
       " -c default_transaction_read_only=on -c statement_timeout=10000"
   });
-  pool.on("error",()=>{});
+  pool.on("error",()=>{idleFailure=true;});
   const result = await verifyRuntimeSchema(pool);
   report = {...report,...result};
 } catch (error) {
@@ -37,6 +38,10 @@ try {
   if(pool) {
     try {await pool.end();}
     catch {report={audit:"restricted-runtime",operationalInventoryVerified:false,financialActivationReady:false,reason:"CLEANUP_FAILED"};process.exitCode=3;}
+  }
+  if(idleFailure){
+    report={audit:"restricted-runtime",operationalInventoryVerified:false,financialActivationReady:false,reason:"IDLE_CONNECTION_FAILED"};
+    process.exitCode=3;
   }
   process.stdout.write(JSON.stringify(report)+"\n");
 }

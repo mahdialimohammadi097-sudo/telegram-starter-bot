@@ -76,3 +76,6 @@ Exact predecessor 641dfe8 passed six workflows (611 full, 147 focused). The comb
 
 ### Priority 8 database access CLI completion evidence
 Exact predecessor 22746c1 passed six workflows (611 full / 147 focused; zero failed, skipped, cancelled or todo), including the catalog shadow-operator regression. Database-access CLI now registers an idle error listener and emits one sanitized report only after successful cleanup; cleanup or idle failure suppresses a successful stdout report and exits 3. Reports explicitly do not certify financial or production readiness. Process-boundary tests use a mocked pg pool, never real DB credentials or sockets, covering missing/invalid configuration, successful reporting, failed cleanup and idle error. Exact new-head CI required. No operational change.
+
+### Restricted runtime CLI idle-error alignment
+Restricted-runtime diagnostics now invalidate their report if the pool emits an idle error, instead of ignoring it. Two process-boundary tests simulate connection failure followed by idle or cleanup failure, verify fixed sanitized reason codes and no financial readiness. These are failure-path tests; successful restricted runtime inventory is separately exercised by disposable PostgreSQL integration tests. No change to actual runtime role, grants, production database or financial activation. Exact-head CI required.
