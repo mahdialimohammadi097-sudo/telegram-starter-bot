@@ -118,6 +118,7 @@ async function shutdown(signal = "shutdown") {
       console.log("[shutdown] PostgreSQL pool closed.");
     } catch (error) {
       console.error("[shutdown] PostgreSQL pool close failed:", safeDiagnosticCode(error));
+      process.exitCode = 1;
     }
   })();
 

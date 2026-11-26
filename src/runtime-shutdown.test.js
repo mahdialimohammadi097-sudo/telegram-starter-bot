@@ -220,3 +220,16 @@ for (const scenario of ["production bot", "wrong database"]) {
     else assert.doesNotMatch(log,/READ ONLY IDENTITY CHECK/);
   });
 }
+
+test("SIGTERM reports unsuccessful shutdown when PostgreSQL pool close fails", { timeout: 12000 }, async t => {
+  const log = await runUntilShutdown(t, `
+    pg.Pool.prototype.query = async () => { throw new Error("offline database"); };
+    Bot.prototype.stop = async () => {};
+    pg.Pool.prototype.end = async () => {
+      throw Object.assign(new Error("private_fixture_pool_close"), { code: "08006" });
+    };
+  `, { signalOn: "retrying PostgreSQL connection", expectedCode: 1 });
+  assert.match(log, /SIGTERM: stopping/);
+  assert.match(log, /PostgreSQL pool close failed: 08006/);
+  assert.doesNotMatch(log, /PostgreSQL pool closed|private_fixture_pool_close/);
+});
