@@ -71,14 +71,55 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
         row.columns.length===columns.length&&columns.every((name,index)=>row.columns[index]===name))
     }));
     const identityConstraints={checks:identities,compatible:identities.every(x=>x.compatible)};
+    // Validate the reviewed foreign-key links and their internal enforcement
+    // triggers. An empty ledger cannot demonstrate referential integrity.
+    const foreignRows=(await client.query(`
+      SELECT c.relname AS table_name,a.attname AS column_name,
+        target.relname AS target_table,tn.nspname AS target_schema,
+        ta.attname AS target_column,
+        k.convalidated AND NOT k.condeferrable AND NOT k.condeferred
+          AND k.confupdtype='a' AND k.confdeltype='a' AND k.confmatchtype='s'
+          AND target.relkind='r' AND target.relpersistence='p'
+          AND (SELECT count(*) FROM pg_catalog.pg_trigger t
+               WHERE t.tgconstraint=k.oid AND t.tgisinternal)=4
+          AND (SELECT count(*) FROM pg_catalog.pg_trigger t
+               WHERE t.tgconstraint=k.oid AND t.tgisinternal
+                 AND t.tgrelid=c.oid AND t.tgenabled IN ('O','A'))=2
+          AND (SELECT count(*) FROM pg_catalog.pg_trigger t
+               WHERE t.tgconstraint=k.oid AND t.tgisinternal
+                 AND t.tgrelid=target.oid AND t.tgenabled IN ('O','A'))=2
+          AS compatible
+      FROM pg_catalog.pg_constraint k
+      JOIN pg_catalog.pg_class c ON c.oid=k.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_catalog.pg_class target ON target.oid=k.confrelid
+      JOIN pg_catalog.pg_namespace tn ON tn.oid=target.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum=k.conkey[1]
+      JOIN pg_catalog.pg_attribute ta ON ta.attrelid=target.oid AND ta.attnum=k.confkey[1]
+      WHERE n.nspname=$1 AND c.relname IN ('ledger_accounts','ledger_entries')
+        AND k.contype='f' AND pg_catalog.cardinality(k.conkey)=1
+        AND pg_catalog.cardinality(k.confkey)=1
+    `,[schema])).rows;
+    if(!Array.isArray(foreignRows))throw new Error("Incomplete ledger reference evidence");
+    const expectedReferences=[
+      ["ledger_accounts","user_id","users"],
+      ["ledger_entries","transaction_id","ledger_transactions"],
+      ["ledger_entries","account_id","ledger_accounts"]
+    ];
+    const references=expectedReferences.map(([table,column,target])=>({
+      table,column,target,
+      compatible:foreignRows.some(row=>row.table_name===table&&row.column_name===column&&
+        row.target_table===target&&row.target_schema===schema&&row.target_column==="id"&&row.compatible===true)
+    }));
+    const foreignKeys={checks:references,compatible:references.every(x=>x.compatible)};
     const integrity=await inspectLedgerIntegrity(client,{schema});
     const triggers=await inspectLedgerTriggerContract(client,{schema});
     const reviewedBodies=await inspectReviewedLedgerBodies(client,{schema});
     return {
       audit:"ledger-release-evidence",scope:"internal-ledger-and-trigger-shape-only",
       sameSnapshot:true,
-      relations,identityConstraints,integrity,triggers,reviewedBodies,
-      checksPassed:identityConstraints.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
+      relations,identityConstraints,foreignKeys,integrity,triggers,reviewedBodies,
+      checksPassed:identityConstraints.compatible===true&&foreignKeys.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
       custodyVerified:false,financialActivationReady:false,productionReady:false
     };
   });

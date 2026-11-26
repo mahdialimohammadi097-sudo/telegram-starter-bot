@@ -30,6 +30,24 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.deepEqual(release.relations,{inheritanceFree:true,rewriteRuleFree:true});
     assert.equal(release.identityConstraints.checks.length,6);
     assert.equal(release.identityConstraints.compatible,true);
+    assert.equal(release.foreignKeys.checks.length,3);
+    assert.equal(release.foreignKeys.compatible,true);
+    await pool.query("ALTER TABLE ledger_entries DROP CONSTRAINT ledger_entries_account_id_fkey");
+    const missingReference=await collectLedgerReleaseEvidence(admin,{schema});
+    assert.equal(missingReference.integrity.clean,true);
+    assert.equal(missingReference.foreignKeys.compatible,false);
+    assert.equal(missingReference.checksPassed,false);
+    assert.deepEqual(missingReference.foreignKeys.checks.filter(x=>!x.compatible).map(x=>x.column),["account_id"]);
+    await pool.query("ALTER TABLE ledger_entries ADD FOREIGN KEY(account_id) REFERENCES ledger_accounts(id) NOT VALID");
+    assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).foreignKeys.compatible,false);
+    await pool.query("ALTER TABLE ledger_entries VALIDATE CONSTRAINT ledger_entries_account_id_fkey");
+    assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).checksPassed,true);
+    await pool.query("ALTER TABLE ledger_entries DROP CONSTRAINT ledger_entries_account_id_fkey");
+    await pool.query("ALTER TABLE ledger_entries ADD FOREIGN KEY(account_id) REFERENCES ledger_accounts(id) ON DELETE CASCADE");
+    assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).foreignKeys.compatible,false);
+    await pool.query("ALTER TABLE ledger_entries DROP CONSTRAINT ledger_entries_account_id_fkey");
+    await pool.query("ALTER TABLE ledger_entries ADD FOREIGN KEY(account_id) REFERENCES ledger_accounts(id)");
+    assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).checksPassed,true);
     // A clean empty ledger must not hide the loss of replay protection.
     await pool.query("ALTER TABLE ledger_transactions DROP CONSTRAINT ledger_transactions_idempotency_key_key");
     const missingIdentity=await collectLedgerReleaseEvidence(admin,{schema});
