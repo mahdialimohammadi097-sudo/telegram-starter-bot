@@ -3,9 +3,9 @@
 **Status:** Procedure prepared, NOT executed. Do not use production Restore, enable public database access, or activate live financial operations.
 
 ## Observed limitations
-- Existing FadeHost `profino-db`: PostgreSQL 17, private-only, four provider snapshots; latest displayed ID `91d63c6c`. Snapshot existence does not prove restore integrity.
+- Historical panel observation (2026-11-21): existing FadeHost `profino-db` was PostgreSQL 17 and private-only, with four provider snapshots. This is not a current inventory, retention guarantee or export. Snapshot existence does not prove restore integrity.
 - Existing `telegram-bot` has a scheduled-command runner but Terminal is paywalled.
-- A scheduled `command -v pg_dump ...` probe returned `PG_DUMP_NOT_AVAILABLE`. Remove this temporary 15-minute schedule after collecting its result. Preserve the daily `node scripts/cleanup.js` schedule.
+- A scheduled `command -v pg_dump ...` probe returned `PG_DUMP_NOT_AVAILABLE`. This is historical evidence, not an instruction to recreate the probe or change any current schedule. Verify actual schedule state before separately authorized cleanup.
 - GitHub-hosted Actions cannot directly reach a private-only FadeHost DB; do not publish the DB to work around this.
 
 ## Preferred independent backup route
@@ -30,7 +30,7 @@ Create a **new, isolated PostgreSQL 17 database** with no production traffic and
 ```sh
 PGSERVICE=profino_restore_isolated pg_restore --no-owner --no-acl --exit-on-error --single-transaction --dbname=service=profino_restore_isolated profino.dump
 ```
-Check expected schema, row counts, foreign keys, constraints, and ledger reconciliation against a captured source inventory. Keep test credentials separate. Never aim `pg_restore` at the production database. Because this portability drill intentionally omits ownership and ACLs, success does not verify restoration of least-privilege roles, ownership or grants. Reconstruct and verify reviewed role/ACL configuration separately in the isolated target before calling recovery operationally ready. Provider snapshot recovery and a real independent restore remain unverified. Destroy temporary data securely after recording sanitized results.
+Check expected schema, row counts, foreign keys, constraints, and ledger reconciliation against source evidence from the same backup cutoff. A later query against a changing source is not equivalent to the dump snapshot. Capture the source inventory in the same exported PostgreSQL snapshot used by pg_dump, with its exporting read-only transaction kept open until consumers import it, or during a separately authorized verified quiescent interval. If neither is possible, explicitly mark source-to-archive data comparison unverified. Do not claim exact equality from counts alone; privately compare reviewed application-level balances, journal references and other necessary records, never publish row contents or personal identifiers. Keep test credentials separate. Never aim `pg_restore` at the production database. Because this portability drill intentionally omits ownership and ACLs, success does not verify restoration of least-privilege roles, ownership or grants. Reconstruct and verify reviewed role/ACL configuration separately in the isolated target before calling recovery operationally ready. Provider snapshot recovery and a real independent restore remain unverified. Destroy temporary data securely after recording sanitized results.
 
 ## Blocking decisions
 1. Can FadeHost run a temporary private-network utility environment with PostgreSQL 17 client tools?
@@ -39,3 +39,10 @@ Check expected schema, row counts, foreign keys, constraints, and ledger reconci
 4. Does a real end-to-end restore and reconciliation pass?
 
 Until all four are confirmed, mark independent backup/restore **UNVERIFIED**. The presence of provider snapshots is still valuable, but not a substitute for this drill. The migration and live USDT flows remain gated by separate approval and security/accounting checks.
+
+## Hosting continuity checkpoint — 2026-11-26
+Provider communications about post-trial free service availability conflict. Current private access, exact retention, secure export capability and independent restoration remain unverified. Treat the earlier retention deadline as a risk to resolve, not a guaranteed recovery window. A support clarification draft exists outside this public repository; it has not been sent. No payment, provider setting change, public database exposure or in-place restore is authorized. Do not wait for a financial release to preserve an authorized backup. If export is unavailable, retain existing snapshots without deleting or overwriting them and obtain an authorized provider-assisted export route. Never restore over the only copy of data.
+
+Record only a sanitized recovery evidence manifest outside any public repository: source identity verified, snapshot cutoff and time zone, archive format and client/server major versions, encryption and independent custody verified, encrypted artifact checksum verified at the separate destination, isolated target identity and role boundary verified, restore exit result, source comparison scope and result, and outstanding discrepancies. Do not record secrets, paths containing credentials, raw database rows, or actual financial balances in public CI/PR logs. A checksum alone proves neither completeness nor authenticity; verify trusted origin and authenticated encryption before any isolated restore. Use an isolated target without production credentials, network access to production, or access to customer-facing services. Review archive provenance and executable database objects before restoring. Keep ownership/ACL reconstruction as a distinct verified step.
+
+Exact candidate aad5d3f: all six CI workflows passed, 644 full and 155 focused tests, including the separate disposable PostgreSQL owner rehearsal (Node 22 job 139918094653). This establishes synthetic recovery and test behavior only. No new operational access or backup execution occurred. The remaining live gates are unchanged; no financial activation, production DDL, deployment or expense.
