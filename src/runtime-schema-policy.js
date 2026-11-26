@@ -47,6 +47,10 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
     const result = await client.query(
 `
       SELECT c.relname AS table_name, a.attname AS column_name,
+        c.relkind='r' AND c.relpersistence='p' AS ordinary_permanent,
+        NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid
+        ) AS reviewed_row_security,
         pg_catalog.to_regclass(pg_catalog.quote_ident(c.relname)) = c.oid AS resolves_expected,
         pg_catalog.has_schema_privilege(current_user, n.oid, 'USAGE') AS schema_usage,
         pg_catalog.has_table_privilege(current_user, c.oid, 'SELECT') AS can_select,
@@ -67,6 +71,11 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
         const matching = result.rows.filter(row => row.table_name === table && row.column_name === column);
         if (matching.length !== 1) throw new Error("Required runtime schema object missing");
         const row = matching[0];
+        // The reviewed non-financial runtime has no row filtering contract.
+        // Reject a different topology or any unreviewed policy, even dormant.
+        if (row.ordinary_permanent !== true || row.reviewed_row_security !== true) {
+          throw new Error("Runtime relation topology or row security incompatible");
+        }
         if (row.resolves_expected !== true || row.schema_usage !== true || row.can_select !== true) {
           throw new Error("Runtime schema access or resolution mismatch");
         }

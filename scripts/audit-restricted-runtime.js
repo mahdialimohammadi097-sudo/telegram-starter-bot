@@ -8,6 +8,7 @@ import pg from "pg";
 const reasons = Object.freeze({
   "Required runtime schema object missing": "OBJECT_MISSING",
   "Runtime schema access or resolution mismatch": "ACCESS_MISMATCH",
+  "Runtime relation topology or row security incompatible": "RELATION_POLICY_INCOMPATIBLE",
   "Runtime role has excessive operational or ledger access": "EXCESSIVE_TABLE_PRIVILEGE",
   "Runtime generated ID sequence missing or incompatible": "SEQUENCE_INCOMPATIBLE",
   "Runtime role has excessive database privileges": "EXCESSIVE_DATABASE_PRIVILEGE",

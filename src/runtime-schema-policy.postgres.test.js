@@ -98,6 +98,21 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await q("SET session_replication_role = origin");
   await q("SET SESSION AUTHORIZATION "+role);
   assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
+  // A role can hold the right grants and still have rows hidden by a policy.
+  await q("RESET SESSION AUTHORIZATION");
+  for(const [change,restore] of [
+   ["ALTER TABLE admin_users ENABLE ROW LEVEL SECURITY","ALTER TABLE admin_users DISABLE ROW LEVEL SECURITY"],
+   ["ALTER TABLE ledger_entries FORCE ROW LEVEL SECURITY","ALTER TABLE ledger_entries NO FORCE ROW LEVEL SECURITY"],
+   ["CREATE POLICY dormant_fixture ON users USING (false)","DROP POLICY dormant_fixture ON users"]
+  ]){
+   await q(change);
+   await q("SET SESSION AUTHORIZATION "+role);
+   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/relation topology or row security incompatible/);
+   await q("RESET SESSION AUTHORIZATION");
+   await q(restore);
+  }
+  await q("SET SESSION AUTHORIZATION "+role);
+  assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
   await assert.rejects(q("CREATE TABLE "+schema+".forbidden(id int)"),e=>e.code==="42501");
   await assert.rejects(q("UPDATE users SET telegram_id=123 WHERE id=1"),e=>e.code==="42501");
   await assert.rejects(q("INSERT INTO ledger_entries(id) VALUES (1)"),e=>e.code==="42501");
