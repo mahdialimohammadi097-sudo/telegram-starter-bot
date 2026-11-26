@@ -12,7 +12,12 @@ const expected = Object.freeze([
 
 export async function auditLedgerTriggerContract(pool,{schema="public"}={}) {
   if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) throw new Error("Invalid ledger schema");
-  return runReadOnlyDepositAudit(pool,async client=>{
+  return runReadOnlyDepositAudit(pool,client=>inspectLedgerTriggerContract(client,{schema}));
+}
+
+// Internal inspection; caller must hold a verified read-only snapshot.
+export async function inspectLedgerTriggerContract(client,{schema="public"}={}) {
+  if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) throw new Error("Invalid ledger schema");
     const {rows}=await client.query(`
       SELECT c.relname AS table_name,t.tgname AS trigger_name,t.tgenabled,
              t.tgtype::int AS trigger_type,t.tgdeferrable,t.tginitdeferred,
@@ -43,5 +48,4 @@ export async function auditLedgerTriggerContract(pool,{schema="public"}={}) {
     });
     return {scope:"ledger-trigger-catalog-shape-only",checks,compatible:checks.every(c=>c.compatible),
       functionBodiesVerified:false,productionReady:false};
-  });
 }

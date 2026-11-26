@@ -13,8 +13,13 @@ export async function auditLedgerIntegrity(pool, { schema = "public" } = {}) {
   if (typeof schema !== "string" || !/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) {
     throw new TypeError("Invalid ledger audit schema");
   }
+  return runReadOnlyDepositAudit(pool, client => inspectLedgerIntegrity(client,{schema}));
+}
+
+// Internal inspection; caller must hold a verified read-only snapshot.
+export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
+  if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) throw new TypeError("Invalid ledger audit schema");
   const s = '"' + schema + '"';
-  return runReadOnlyDepositAudit(pool, async client => {
     // row_security=off fails instead of silently omitting RLS-filtered rows.
     const security = await client.query("SET LOCAL row_security = off");
     const searchPath = await client.query("SET LOCAL search_path = pg_catalog");
@@ -83,5 +88,4 @@ export async function auditLedgerIntegrity(pool, { schema = "public" } = {}) {
     return { scope: "internal-ledger-integrity-only", counts,
       clean: findingKeys.every(k => counts[k] === "0"),
       custodyVerified: false, productionReady: false };
-  });
 }

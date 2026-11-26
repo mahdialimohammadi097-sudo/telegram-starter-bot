@@ -20,9 +20,12 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(clean.checks.length,4);
     assert.equal(clean.functionBodiesVerified,false);
     assert.equal(clean.productionReady,false);
-    const release=await collectLedgerReleaseEvidence(admin,{schema});
+    let connections=0;
+    const countedPool={async connect(){connections++;return admin.connect();}};
+    const release=await collectLedgerReleaseEvidence(countedPool,{schema});
+    assert.equal(connections,1);
     assert.equal(release.checksPassed,true);
-    assert.equal(release.sameSnapshot,false);
+    assert.equal(release.sameSnapshot,true);
     assert.equal(release.financialActivationReady,false);
     assert.equal(release.productionReady,false);
     await pool.query("ALTER TABLE ledger_entries DISABLE TRIGGER protect_posted_ledger_entries");
@@ -45,4 +48,18 @@ test("ledger catalog audit detects disabled or missing financial guards without 
 });
 test("ledger catalog audit rejects invalid schema before opening connection",async()=>{
   await assert.rejects(auditLedgerTriggerContract({connect(){assert.fail("must not connect");}},{schema:"public;invalid"}),/Invalid ledger schema/);
+});
+
+test("combined ledger release evidence rejects incomplete or non-table relations",{skip:!enabled},async()=>{
+  const schema="ledger_relation_"+randomUUID().replaceAll("-","");
+  const admin=new pg.Pool({connectionString:process.env.DATABASE_URL});
+  try{
+    await admin.query('CREATE SCHEMA "'+schema+'"');
+    await admin.query('CREATE VIEW "'+schema+'".ledger_accounts AS SELECT 1 AS id');
+    await admin.query('CREATE TABLE "'+schema+'".ledger_transactions(id bigint)');
+    await admin.query('CREATE TABLE "'+schema+'".ledger_entries(id bigint)');
+    await assert.rejects(collectLedgerReleaseEvidence(admin,{schema}),/three permanent ordinary tables/);
+  }finally{
+    try{await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}finally{await admin.end();}
+  }
 });
