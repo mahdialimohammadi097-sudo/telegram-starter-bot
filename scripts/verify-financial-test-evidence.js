@@ -29,7 +29,9 @@ export const criticalTests=Object.freeze([
   "standalone ledger integrity rejects enabled, forced and dormant row security policies even for an elevated audit role",
   "ledger integrity detects negative platform reserve and mixed-case protected customer accounts",
   "standalone ledger integrity detects ambiguous primary identities without relying on constraints",
-  "owner rehearsal uses a separate marked PostgreSQL database and rejects replay or missing marker"
+  "owner rehearsal uses a separate marked PostgreSQL database and rejects replay or missing marker",
+  "legacy assignment audit counts collisions and requires the exact live unique index in PostgreSQL",
+  "legacy assignment audit fails closed when RLS would hide wallet collisions"
 ]);
 
 export const startupTests=Object.freeze([
@@ -46,7 +48,14 @@ export const fullAuditTests=Object.freeze([
   "integrity audit rejects duplicate or missing row identity evidence",
   "manual ledger catalog export uses a bounded catalog-first read-only snapshot",
   "owner rehearsal requires exact intermediate reservation movement and rejects cancelled replay",
-  "owner rehearsal publishes success only after isolated connection cleanup"
+  "owner rehearsal publishes success only after isolated connection cleanup",
+  "financial ingestion gate cannot be enabled by configuration",
+  "financial posting remains disabled and no RPC is called",
+  "rejects deposits beyond reviewed PostgreSQL numeric capacity before posting",
+  "owner rehearsal requires explicit independent test TLS policy before any database connection",
+  "owner dbschema connection failure returns only sanitized diagnostics in both languages",
+  "admin language fallback suppresses malformed diagnostic codes and raw errors",
+  "SIGTERM reports unsuccessful shutdown when PostgreSQL pool close fails"
 ]);
 
 export function verifyFinancialTestEvidence(tap, {full=false}={}) {

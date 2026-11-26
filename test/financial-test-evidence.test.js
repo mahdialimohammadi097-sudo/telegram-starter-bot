@@ -113,3 +113,21 @@ test("financial CI evidence rejects truncated or inconsistent noncritical assert
     complete.replace(line,"  "+line)
   ]) assert.throws(()=>verifyFinancialTestEvidence(tap),/Incomplete or inconsistent flat TAP assertions/);
 });
+
+test("release evidence pins the latest isolation, financial boundary and shutdown regressions",()=>{
+ const requiredPostgres=["legacy assignment audit counts collisions and requires the exact live unique index in PostgreSQL","legacy assignment audit fails closed when RLS would hide wallet collisions"];
+ const requiredFull=["financial ingestion gate cannot be enabled by configuration","financial posting remains disabled and no RPC is called","rejects deposits beyond reviewed PostgreSQL numeric capacity before posting","owner rehearsal requires explicit independent test TLS policy before any database connection","owner dbschema connection failure returns only sanitized diagnostics in both languages","admin language fallback suppresses malformed diagnostic codes and raw errors","SIGTERM reports unsuccessful shutdown when PostgreSQL pool close fails"];
+ const fullNames=[...names,...startupTests,...fullAuditTests];
+ const fullTap=fullNames.map((name,i)=>"ok "+(i+1)+" - "+name).join("\n")+
+   "\n# tests "+fullNames.length+"\n# pass "+fullNames.length+"\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";
+ for(const [required,list,tap,options] of [[requiredPostgres,criticalTests,success,{}],[requiredFull,fullAuditTests,fullTap,{full:true}]]){
+  for(const name of required){
+   assert.ok(list.includes(name),name);
+   const line=tap.split("\n").find(value=>value.endsWith(" - "+name));
+   assert.ok(line,name);
+   for(const altered of [line.replace(name,"unrelated fixture"),line+" # SKIP",line+"\n"+line]){
+    assert.throws(()=>verifyFinancialTestEvidence(tap.replace(line,altered),options),/Missing or ambiguous critical test evidence/);
+   }
+  }
+ }
+});
