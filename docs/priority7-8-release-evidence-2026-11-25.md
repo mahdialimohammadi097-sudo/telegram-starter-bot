@@ -32,3 +32,7 @@
 Keep financial functions disabled. Do not request or expose credentials. Do not turn public database access on, restore over production, run review fixtures on live data, or use a test run as permission for money movement. No production or financial change was made by this checkpoint. No new cost incurred.
 
 Next free work: review current production access evidence and reconcile remaining code-level release gaps without altering the deployed service. When the exact target revision changes, refresh all CI evidence. The remaining operational gates may require provider access or an isolated restore target; do not bypass paid-plan restrictions.
+
+## Operator ledger evidence command (review candidate only)
+
+After an authorized private execution path and exact candidate availability are confirmed, `node scripts/audit-ledger-release.js` runs the existing ledger integrity and trigger-shape audits. It emits one sanitized JSON report, uses a bounded read-only transaction for each component, and reports `sameSnapshot:false`. Exit 0 means both limited checks passed, 2 means a finding, 3 means unavailable/cleanup failure. All results keep financialActivationReady and productionReady false. This is not a backup, a function-body/role audit, custody verification or release authorization. No production execution has taken place.

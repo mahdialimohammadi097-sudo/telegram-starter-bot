@@ -5,6 +5,7 @@ import {readFile} from "node:fs/promises";
 import pg from "pg";
 import {isDisposablePostgresTarget} from "../test-support/disposable-postgres-target.js";
 import {auditLedgerTriggerContract} from "./ledger-trigger-contract-audit.js";
+import {collectLedgerReleaseEvidence} from "./ledger-release-audit.js";
 const enabled=isDisposablePostgresTarget(process.env.DATABASE_URL,"profino_test");
 test("ledger catalog audit detects disabled or missing financial guards without mutating them",{skip:!enabled},async()=>{
   const schema="ledger_trigger_"+randomUUID().replaceAll("-","");
@@ -19,9 +20,18 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(clean.checks.length,4);
     assert.equal(clean.functionBodiesVerified,false);
     assert.equal(clean.productionReady,false);
+    const release=await collectLedgerReleaseEvidence(admin,{schema});
+    assert.equal(release.checksPassed,true);
+    assert.equal(release.sameSnapshot,false);
+    assert.equal(release.financialActivationReady,false);
+    assert.equal(release.productionReady,false);
     await pool.query("ALTER TABLE ledger_entries DISABLE TRIGGER protect_posted_ledger_entries");
     const disabled=await auditLedgerTriggerContract(admin,{schema});
     assert.equal(disabled.compatible,false);
+    const blocked=await collectLedgerReleaseEvidence(admin,{schema});
+    assert.equal(blocked.integrity.clean,true);
+    assert.equal(blocked.checksPassed,false);
+    assert.equal(blocked.financialActivationReady,false);
     assert.deepEqual(disabled.checks.filter(c=>!c.compatible).map(c=>c.name),["protect_posted_ledger_entries"]);
     await pool.query("ALTER TABLE ledger_entries ENABLE TRIGGER protect_posted_ledger_entries");
     await pool.query("DROP TRIGGER ledger_transactions_balance_check ON ledger_transactions");
