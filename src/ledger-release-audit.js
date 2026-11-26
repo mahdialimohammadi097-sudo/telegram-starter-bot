@@ -2,6 +2,7 @@
 // This does not authorize production financial activity.
 import {inspectLedgerIntegrity} from "./ledger-integrity-audit.js";
 import {inspectLedgerTriggerContract} from "./ledger-trigger-contract-audit.js";
+import {inspectReviewedLedgerBodies} from "./ledger-reviewed-bodies.js";
 import {runReadOnlyDepositAudit} from "./read-only-deposit-audit.js";
 
 export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
@@ -18,11 +19,12 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
     }
     const integrity=await inspectLedgerIntegrity(client,{schema});
     const triggers=await inspectLedgerTriggerContract(client,{schema});
+    const reviewedBodies=await inspectReviewedLedgerBodies(client,{schema});
     return {
       audit:"ledger-release-evidence",scope:"internal-ledger-and-trigger-shape-only",
       sameSnapshot:true,
-      integrity,triggers,
-      checksPassed:integrity.clean===true&&triggers.compatible===true,
+      integrity,triggers,reviewedBodies,
+      checksPassed:integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
       custodyVerified:false,financialActivationReady:false,productionReady:false
     };
   });

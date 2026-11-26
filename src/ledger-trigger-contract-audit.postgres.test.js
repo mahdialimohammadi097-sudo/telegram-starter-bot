@@ -26,6 +26,8 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(connections,1);
     assert.equal(release.checksPassed,true);
     assert.equal(release.sameSnapshot,true);
+    assert.equal(release.reviewedBodies.match,true);
+    assert.equal(release.reviewedBodies.functionResolutionVerified,false);
     assert.equal(release.financialActivationReady,false);
     assert.equal(release.productionReady,false);
     await pool.query("ALTER TABLE ledger_entries DISABLE TRIGGER protect_posted_ledger_entries");
@@ -37,6 +39,13 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(blocked.financialActivationReady,false);
     assert.deepEqual(disabled.checks.filter(c=>!c.compatible).map(c=>c.name),["protect_posted_ledger_entries"]);
     await pool.query("ALTER TABLE ledger_entries ENABLE TRIGGER protect_posted_ledger_entries");
+    await pool.query("CREATE OR REPLACE FUNCTION validate_posted_transaction(p_transaction_id bigint) RETURNS void LANGUAGE plpgsql AS $ BEGIN RETURN; END; $");
+    const altered=await collectLedgerReleaseEvidence(admin,{schema});
+    assert.equal(altered.integrity.clean,true);
+    assert.equal(altered.triggers.compatible,true);
+    assert.equal(altered.reviewedBodies.match,false);
+    assert.equal(altered.checksPassed,false);
+    assert.deepEqual(altered.reviewedBodies.checks.filter(c=>!c.match).map(c=>c.name),["validate_posted_transaction"]);
     await pool.query("DROP TRIGGER ledger_transactions_balance_check ON ledger_transactions");
     const missing=await auditLedgerTriggerContract(admin,{schema});
     assert.equal(missing.compatible,false);
