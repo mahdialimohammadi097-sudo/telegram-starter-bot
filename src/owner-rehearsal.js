@@ -63,7 +63,21 @@ export function registerOwnerRehearsal(bot, {
       if (!user) throw new Error("Active test owner is missing");
       const before = reconciliationSnapshot(await balances(sandbox, user.id));
       const request = await reserve(sandbox, user.id, "owner-rehearsal:" + ctx.message.message_id, "1");
-      await cancel(sandbox, user.id, request.id);
+      // A previously cancelled request is a replay, not a fresh rehearsal.
+      // Never certify success merely because the final balance is unchanged.
+      if (request.status !== "reserved") throw new Error("Fresh test reservation not confirmed");
+      try {
+        const held = reconciliationSnapshot(await balances(sandbox, user.id));
+        const units = toUsdtUnitsExact("1");
+        if (exactBalanceUnits(request.amount) !== units ||
+            held.available !== before.available - units || held.hold !== before.hold + units) {
+          throw new Error("Test reservation movement not reconciled");
+        }
+      } finally {
+        // Always attempt to release a confirmed synthetic reservation even
+        // when its intermediate evidence is unavailable or inconsistent.
+        await cancel(sandbox, user.id, request.id);
+      }
       const after = reconciliationSnapshot(await balances(sandbox, user.id));
       // The sandbox owner must be dedicated to this rehearsal while it runs.
       if (before.available !== after.available || before.hold !== after.hold) {

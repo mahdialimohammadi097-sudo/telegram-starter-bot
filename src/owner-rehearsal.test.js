@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { registerOwnerRehearsal } from "./owner-rehearsal.js";
 
-function setup({ name = "profino_test", marker = "isolated-staging", databaseMarker = true, configured = true, testUrl = "postgresql://localhost/profino_test", snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "5" }] } = {}) {
+function setup({ name = "profino_test", marker = "isolated-staging", databaseMarker = true, configured = true, testUrl = "postgresql://localhost/profino_test", reservation = { id: "12", amount: "1", status: "reserved" }, snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "4", WITHDRAWAL_HOLD: "1" }, { AVAILABLE: "5" }] } = {}) {
   let reads = 0;
   const calls = [];
   let handler;
@@ -18,10 +18,10 @@ function setup({ name = "profino_test", marker = "isolated-staging", databaseMar
     ownerId: 10, getLanguage: async () => "fa",
     env: configured ? { PROFINO_TEST_DATABASE_URL: testUrl, PROFINO_TEST_DATABASE_NAME: "profino_test" } : {},
     createPool: () => sandbox,
-    balances: async pool => { assert.equal(pool, sandbox); return snapshots[reads++]; },
+    balances: async pool => { assert.equal(pool, sandbox); const snapshot = snapshots[reads++]; if(snapshot instanceof Error)throw snapshot; return snapshot; },
     reserve: async (pool, id, key, amount) => {
       assert.equal(pool, sandbox); assert.equal(id, "9"); assert.equal(key, "owner-rehearsal:32");
-      assert.equal(amount, "1"); calls.push("reserve"); return { id: "12" };
+      assert.equal(amount, "1"); calls.push("reserve"); return reservation;
     },
     cancel: async pool => { assert.equal(pool, sandbox); calls.push("cancel"); }
   });
@@ -57,7 +57,7 @@ test("production database, missing isolation marker and absent configuration fai
 test("exact reconciliation accepts PostgreSQL decimal zero padding", async () => {
   const s = setup({ snapshots: [
     { AVAILABLE: "5.000000000000000000" },
-    { AVAILABLE: "5.0", WITHDRAWAL_HOLD: "0.000000000000000000" }
+    { AVAILABLE: "4.000000000000000000", WITHDRAWAL_HOLD: "1.000000000000000000" }, { AVAILABLE: "5.0", WITHDRAWAL_HOLD: "0.000000000000000000" }
   ] });
   await s.handler(s.ctx);
   assert.match(s.messages[0], /موفق/);
@@ -76,9 +76,29 @@ test("nonrepresentable starting balances fail before any synthetic writes", asyn
 
 test("reconciliation cannot hide small changes behind display rounding", async () => {
   for (const snapshot of [{ AVAILABLE: "5.000000001" }, { AVAILABLE: "5", WITHDRAWAL_HOLD: "0.000000001" }, { AVAILABLE: "5.00000001" }]) {
-    const s = setup({ snapshots: [{ AVAILABLE: "5" }, snapshot] });
+    const s = setup({ snapshots: [{ AVAILABLE: "5" }, { AVAILABLE: "4", WITHDRAWAL_HOLD: "1" }, snapshot] });
     await s.handler(s.ctx);
     assert.ok(s.calls.includes("cancel"));
     assert.match(s.messages[0], /کامل نشد/);
   }
+});
+
+test("owner rehearsal requires exact intermediate reservation movement and rejects cancelled replay",async()=>{
+  for(const config of [
+    {snapshots:[{AVAILABLE:"5"},{AVAILABLE:"5"},{AVAILABLE:"5"}]},
+    {snapshots:[{AVAILABLE:"5"},{AVAILABLE:"4",WITHDRAWAL_HOLD:"0.9"},{AVAILABLE:"5"}]},
+    {snapshots:[{AVAILABLE:"5"},new Error("fixture read failed")]},
+    {reservation:{id:"12",amount:"2",status:"reserved"}},
+    {reservation:{id:"12",amount:"1",status:"cancelled"}}
+  ]){
+    const s=setup(config);
+    await s.handler(s.ctx);
+    assert.match(s.messages[0],/کامل نشد/);
+    assert.ok(s.calls.includes("reserve"));
+    assert.equal(s.calls.includes("cancel"),config.reservation?.status!=="cancelled");
+    assert.equal(s.calls.at(-1),"closed");
+  }
+  const s=setup({snapshots:[{AVAILABLE:"5",WITHDRAWAL_HOLD:"2"},{AVAILABLE:"4",WITHDRAWAL_HOLD:"3"},{AVAILABLE:"5",WITHDRAWAL_HOLD:"2"}]});
+  await s.handler(s.ctx);
+  assert.match(s.messages[0],/موفق/);
 });
