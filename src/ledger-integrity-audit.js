@@ -33,6 +33,25 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
         state.rows[0].search_path !== "pg_catalog") {
       throw new Error("Ledger audit settings incompatible");
     }
+    // A standalone scan must not report a clean ledger when a view hides
+    // rows or table inheritance silently expands the audited relations.
+    const shape = await client.query(`
+      SELECT count(*)::int AS relation_count,
+        COALESCE(bool_and(c.relkind='r' AND c.relpersistence='p'
+          AND NOT c.relispartition
+          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i
+            WHERE i.inhrelid=c.oid OR i.inhparent=c.oid)
+          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_rewrite rw
+            WHERE rw.ev_class=c.oid)),false) AS relation_shape_compatible
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname=$1
+        AND c.relname IN ('ledger_accounts','ledger_transactions','ledger_entries')
+    `,[schema]);
+    if(shape.rows?.length!==1 || shape.rows[0].relation_count!==3 ||
+       shape.rows[0].relation_shape_compatible!==true){
+      throw new Error("Ledger integrity requires three permanent ordinary relations without inheritance or rewrite rules");
+    }
     const { rows } = await client.query(`
       WITH journals AS (
         SELECT id, status, idempotency_key FROM ${s}.ledger_transactions

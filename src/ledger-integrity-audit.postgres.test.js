@@ -87,3 +87,31 @@ test("ledger integrity detects blank and padded identities, unused non-USDT acco
     try{await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}finally{await admin.end();}
   }
 });
+
+test("standalone ledger integrity refuses views, unlogged relations, inheritance and rewrite rules", {skip:!enabled},async()=>{
+  const schema="ledger_shape_"+randomUUID().replaceAll("-","");
+  const admin=new pg.Pool({connectionString:process.env.DATABASE_URL});
+  let fixture;
+  try{
+    await admin.query('CREATE SCHEMA "'+schema+'"');
+    fixture=new pg.Pool({connectionString:process.env.DATABASE_URL,options:"-c search_path="+schema});
+    await fixture.query("CREATE TABLE ledger_accounts(id bigint); CREATE TABLE ledger_transactions(id bigint); CREATE VIEW ledger_entries AS SELECT 1 AS id WHERE false");
+    const reject=()=>assert.rejects(auditLedgerIntegrity(admin,{schema}),/requires three permanent ordinary relations/);
+    await reject();
+    await fixture.query("DROP VIEW ledger_entries; CREATE UNLOGGED TABLE ledger_entries(id bigint)");
+    await reject();
+    await fixture.query("DROP TABLE ledger_entries; DROP TABLE ledger_accounts; DROP TABLE ledger_transactions");
+    await fixture.query(await readFile(new URL("../test/fixtures/ledger-contract.sql",import.meta.url),"utf8"));
+    assert.equal((await auditLedgerIntegrity(admin,{schema})).clean,true);
+    await fixture.query("CREATE TABLE inherited_fixture() INHERITS (ledger_accounts)");
+    await reject();
+    await fixture.query("DROP TABLE inherited_fixture");
+    await fixture.query("CREATE RULE fixture_rule AS ON DELETE TO ledger_accounts DO INSTEAD NOTHING");
+    await reject();
+    await fixture.query("DROP RULE fixture_rule ON ledger_accounts");
+    assert.equal((await auditLedgerIntegrity(admin,{schema})).clean,true);
+  }finally{
+    if(fixture)await fixture.end();
+    try{await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}finally{await admin.end();}
+  }
+});
