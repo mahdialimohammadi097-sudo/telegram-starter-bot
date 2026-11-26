@@ -5,7 +5,7 @@ import net from "node:net";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-async function runUntilShutdown(t, clientSetup, { signalOn, mode = "polling" } = {}) {
+async function runUntilShutdown(t, clientSetup, { signalOn, mode = "polling", overrides = {}, expectedCode = 0 } = {}) {
   const root = new URL("../", import.meta.url);
   const probe = net.createServer();
   probe.listen(0, "127.0.0.1");
@@ -26,7 +26,8 @@ async function runUntilShutdown(t, clientSetup, { signalOn, mode = "polling" } =
     cwd: fileURLToPath(root),
     env: { ...process.env, PORT: String(port), TELEGRAM_MODE: mode,
       WEBHOOK_URL: "https://example.invalid", WEBHOOK_SECRET: "fixture",
-      TELEGRAM_BOT_TOKEN: "offline", DATABASE_URL: "postgres://localhost/offline" },
+      TELEGRAM_BOT_TOKEN: "offline", DATABASE_URL: "postgres://localhost/offline",
+      PROFINO_SIMULATION_MODE: "", ...overrides },
     stdio: ["ignore", "pipe", "pipe"]
   });
   t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
@@ -44,7 +45,7 @@ async function runUntilShutdown(t, clientSetup, { signalOn, mode = "polling" } =
   const [code, signal] = await once(child, "close");
   if (signalOn) assert.ok(signalled, log);
   assert.equal(signal, null, log);
-  assert.equal(code, 0, log);
+  assert.equal(code, expectedCode, log);
   return log;
 }
 
@@ -187,3 +188,35 @@ test("startup report failure never logs untrusted Telegram error_code data", { t
   assert.match(log, /startup report could not be delivered: UNAVAILABLE/);
   assert.doesNotMatch(log, /private_fixture_code|private_fixture_message/);
 });
+
+for (const scenario of ["production bot", "wrong database"]) {
+  test("misconfigured staging " + scenario + " cannot reach schema preparation or Telegram writes", {timeout:12000}, async t=>{
+    const log=await runUntilShutdown(t, `
+      const scenario=${JSON.stringify(scenario)};
+      pg.Pool.prototype.query=async sql=>{
+        if(sql.includes("AS server_time"))return {rows:[{server_time:new Date()}]};
+        if(sql.includes("pg_catalog.pg_db_role_setting") && scenario==="wrong database"){
+          console.log("READ ONLY IDENTITY CHECK");
+          return {rows:[{database_name:"wrong_database",environment:"isolated-staging",database_marker:true}]};
+        }
+        console.error("UNEXPECTED SQL");
+        throw new Error("unexpected database operation");
+      };
+      pg.Pool.prototype.connect=async()=>{console.error("UNEXPECTED SQL CONNECTION");throw new Error("unexpected connection");};
+      Api.prototype.getMe=async()=>({id:7,username:scenario==="production bot"?"PROFINO1bot":"fixture_staging_bot"});
+      for(const method of ["sendMessage","deleteWebhook","setWebhook"]){
+        Api.prototype[method]=async()=>{console.error("UNEXPECTED TELEGRAM WRITE");throw new Error("unexpected Telegram operation");};
+      }
+      Bot.prototype.start=async()=>{console.error("UNEXPECTED POLLING");};
+      Bot.prototype.stop=async()=>{};
+    `,{expectedCode:1,overrides:{
+      PROFINO_SIMULATION_MODE:"isolated-staging",PROFINO_DEPLOYMENT_ENV:"staging",
+      PROFINO_STAGING_BOT_USERNAME:"fixture_staging_bot",PROFINO_STAGING_DATABASE_NAME:"profino_staging_it"
+    }});
+    assert.match(log,/could not start/);
+    assert.match(log,/PostgreSQL pool closed/);
+    assert.doesNotMatch(log,/UNEXPECTED|schema preparation completed/);
+    if(scenario==="wrong database")assert.match(log,/READ ONLY IDENTITY CHECK/);
+    else assert.doesNotMatch(log,/READ ONLY IDENTITY CHECK/);
+  });
+}

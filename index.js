@@ -256,13 +256,6 @@ async function main() {
   console.log("[database] PostgreSQL connected successfully.");
   console.log("[database] server time:", dbResult.server_time);
 
-  await prepareRuntimeSchema({
-    pool, ensurePostHistorySchema, ensureAdminOpsSchema,
-    isStopping: () => shuttingDown
-  });
-  if (shuttingDown) return;
-  console.log("[startup] runtime schema preparation completed.");
-
   const me = await retryUntilAvailable(() => bot.api.getMe(), "Telegram API authentication");
   if (shuttingDown) return;
   botUsername = me.username;
@@ -271,6 +264,17 @@ async function main() {
 
   // Never register financial simulation handlers before verifying bot identity and isolated DB.
   const simulationHandlers = await createStagingSimulationHandlers(pool, process.env, me.username);
+  if (shuttingDown) return;
+
+  // Authenticate and reject mismatched staging identities before any legacy
+  // runtime schema preparation (which can perform DDL).
+  await prepareRuntimeSchema({
+    pool, ensurePostHistorySchema, ensureAdminOpsSchema,
+    isStopping: () => shuttingDown
+  });
+  if (shuttingDown) return;
+  console.log("[startup] runtime schema preparation completed.");
+
   registerCommands(bot, simulationHandlers);
 
   await sendStartupReport(me.username);

@@ -7,8 +7,10 @@ test("runtime injects guarded simulation handlers only after authenticated bot i
   const identity = source.indexOf("bot.api.getMe()");
   const guarded = source.indexOf("createStagingSimulationHandlers(pool, process.env, me.username)");
   const wired = source.indexOf("registerCommands(bot, simulationHandlers)");
+  const prepare = source.indexOf("await prepareRuntimeSchema({");
   assert.ok(identity >= 0, "runtime must authenticate Telegram identity");
   assert.ok(guarded > identity, "staging isolation must be verified after authentication");
-  assert.ok(wired > guarded, "commands must receive only verified staging handlers");
+  assert.ok(prepare > guarded, "schema preparation must follow the isolation preflight");
+  assert.ok(wired > prepare, "commands must receive only verified staging handlers after schema preparation");
   assert.equal(source.includes("registerCommands(bot);"), false, "unwired runtime is not a functional staging journey");
 });
