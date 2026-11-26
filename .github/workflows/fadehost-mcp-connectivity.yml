@@ -57,7 +57,7 @@ jobs:
           tools=rpc("tools/list",{},2).get("tools")
           if not isinstance(tools,list): raise SystemExit("FAIL: tool discovery")
           names={t.get("name") for t in tools if isinstance(t,dict)}
-          for name in ("list_bots","list_app_deployments","list_app_schedules","list_backups","run_app_command","list_databases","get_database","list_private_networks"):
+          for name in ("list_bots","get_bot","get_app","get_app_deployment","list_app_deployments","list_app_schedules","list_backups","run_app_command","list_databases","get_database","list_private_networks"):
               print("Capability",name+":",name in names)
           if "list_bots" not in names: raise SystemExit("FAIL: inventory unavailable")
           result=rpc("tools/call",{"name":"list_bots","arguments":{}},3)
@@ -80,6 +80,43 @@ jobs:
           bot_id=matches[0].get("id")
           if not isinstance(bot_id,str) or not bot_id.startswith("bot_"):
               raise SystemExit("FAIL: service identifier unavailable")
+          # Query only an explicitly discovered, service-scoped read-only detail
+          # method with a single recognized required string identifier.
+          service_details=[matches[0]]
+          for method in ("get_bot","get_app"):
+              spec=[t for t in tools if isinstance(t,dict) and t.get("name")==method]
+              if len(spec)!=1: continue
+              contract=spec[0].get("inputSchema",{})
+              props=contract.get("properties",{})
+              required=contract.get("required",[])
+              if not isinstance(props,dict) or not isinstance(required,list): continue
+              desc=str(spec[0].get("description","")).lower()
+              if any(word in desc for word in ("paid plan","requires starter","upgrade required","paid tier","additional charge","billable")):
+                  print("Scoped service detail",method+": paid restriction; not attempted")
+                  continue
+              allowed=("app","app_id","appId","bot","bot_id","botId","id")
+              if len(required)!=1 or required[0] not in allowed or not isinstance(props.get(required[0]),dict) or props[required[0]].get("type")!="string":
+                  print("Scoped service detail",method+": unsupported contract")
+                  continue
+              try:
+                  detail=rpc("tools/call",{"name":method,"arguments":{required[0]:bot_id}},9 if method=="get_bot" else 10)
+              except SystemExit:
+                  print("Scoped service detail",method+": unsuccessful")
+                  continue
+              obj=detail.get("structuredContent")
+              if obj is None:
+                  for part in detail.get("content",[]):
+                      if isinstance(part,dict) and part.get("type")=="text":
+                          try: obj=json.loads(part.get("text",""));break
+                          except (ValueError,TypeError): pass
+              if isinstance(obj,dict):
+                  possible=[obj]+[obj[k] for k in ("bot","app","data") if isinstance(obj.get(k),dict)]
+                  valid=[v for v in possible if v.get("id")==bot_id and v.get("name")=="telegram-bot"]
+                  if len(valid)==1:
+                      service_details.append(valid[0])
+                      print("Scoped service detail",method+": confirmed")
+                  else:
+                      print("Scoped service detail",method+": identity unconfirmed")
           for method in ("list_app_deployments","list_app_schedules"):
               if method not in names:
                   print("Read-only access",method+": unavailable")
@@ -108,7 +145,17 @@ jobs:
                       # Inventory membership alone is not a running revision.
                       # Only use explicit current/active deployment identifiers,
                       # and never print provider IDs, commit values or raw metadata.
-                      refs={matches[0].get(k) for k in ("current_deployment_id","currentDeploymentId","active_deployment_id","activeDeploymentId") if isinstance(matches[0].get(k),str) and matches[0].get(k)}
+                      refs={detail[k] for detail in service_details for k in ("current_deployment_id","currentDeploymentId","active_deployment_id","activeDeploymentId") if isinstance(detail.get(k),str) and detail[k]}
+                      for detail in service_details:
+                          for k in ("current_deployment","currentDeployment","active_deployment","activeDeployment"):
+                              item=detail.get(k)
+                              if isinstance(item,dict) and isinstance(item.get("id"),str) and item["id"]:
+                                  refs.add(item["id"])
+                      # Explicit boolean active/current flags are diagnostic only:
+                      # do not equate successful historical builds with running code.
+                      flagged=[d for d in value if isinstance(d,dict) and any(d.get(k) is True for k in ("is_active","isActive","is_current","isCurrent"))]
+                      print("Deployment rows with explicit active/current flag:",len(flagged))
+                      print("Explicit service deployment reference count:",len(refs))
                       active=[d for d in value if isinstance(d,dict) and isinstance(d.get("id"),str) and d["id"] in refs]
                       known={"e0d7509","e0d7509b43605493beb6a20485d5d17ce0ef8e16"}
                       print("Explicit active deployment resolved:",len(refs)==1 and len(active)==1)
@@ -184,6 +231,11 @@ jobs:
                   identifiers=[k for k in ("app","app_id","appId","bot","bot_id","botId") if k in props and isinstance(props[k],dict) and props[k].get("type")=="string"]
                   print("Backup service identifier field recognized:",len(identifiers)==1)
                   print("Backup requires other fields:",bool(required-set(identifiers)))
+                  # Only allowlisted schema field names, never parameter values,
+                  # descriptions, defaults, resource identifiers or raw metadata.
+                  allowed_fields={"app","app_id","appId","bot","bot_id","botId","database","database_id","databaseId","resource","resource_id","resourceId","resource_type","resourceType","type","id","project","project_id","projectId"}
+                  print("Recognized required backup fields:",",".join(sorted(required&allowed_fields)) or "none")
+                  print("Other required backup field count:",len(required-allowed_fields))
                   try:
                       if len(identifiers)!=1 or required-set(identifiers):
                           raise SystemExit("Unsupported scoped inventory contract")
