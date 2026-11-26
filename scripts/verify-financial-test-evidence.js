@@ -32,7 +32,8 @@ export const criticalTests=Object.freeze([
   "owner rehearsal uses a separate marked PostgreSQL database and rejects replay or missing marker",
   "legacy assignment audit counts collisions and requires the exact live unique index in PostgreSQL",
   "legacy assignment audit fails closed when RLS would hide wallet collisions",
-  "PostgreSQL 17 distinguishes session markers from an independently marked test database"
+  "PostgreSQL 17 distinguishes session markers from an independently marked test database",
+  "manual deposit catalogs inspect historical ownership on PostgreSQL despite caller catalog shadowing"
 ]);
 
 export const startupTests=Object.freeze([
