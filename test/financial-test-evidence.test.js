@@ -90,3 +90,9 @@ test("full release evidence requires owner rehearsal cleanup verification",()=>{
    "\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";
  assert.throws(()=>verifyFinancialTestEvidence(tap.replace(name,"unrelated fixture"),{full:true}),/Missing or ambiguous critical test evidence/);
 });
+
+test("release evidence requires the real PostgreSQL owner rehearsal regression",()=>{
+ const name="owner rehearsal uses a separate marked PostgreSQL database and rejects replay or missing marker";
+ assert.ok(criticalTests.includes(name));
+ assert.throws(()=>verifyFinancialTestEvidence(success.replace(name,"unrelated fixture")),/Missing or ambiguous critical test evidence/);
+});

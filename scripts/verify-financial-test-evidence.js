@@ -28,7 +28,8 @@ export const criticalTests=Object.freeze([
   "standalone ledger integrity refuses views, unlogged relations, inheritance and rewrite rules",
   "standalone ledger integrity rejects enabled, forced and dormant row security policies even for an elevated audit role",
   "ledger integrity detects negative platform reserve and mixed-case protected customer accounts",
-  "standalone ledger integrity detects ambiguous primary identities without relying on constraints"
+  "standalone ledger integrity detects ambiguous primary identities without relying on constraints",
+  "owner rehearsal uses a separate marked PostgreSQL database and rejects replay or missing marker"
 ]);
 
 export const startupTests=Object.freeze([
