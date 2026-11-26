@@ -129,6 +129,11 @@ jobs:
           done
           test "$(grep -c '^\["table",' "$RUNNER_TEMP/wallet_schema_reference.catalog")" -eq 3
           diff -u "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/wallet_drill_restored.catalog"
+          # Disposable session only: an implicit temp-first path must not shadow catalog relations.
+          { printf '%s\n' 'CREATE TEMP TABLE pg_class (fixture integer);' 'CREATE TEMP TABLE pg_namespace (fixture integer);'; cat scripts/ledger-catalog.sql; } |
+            docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d wallet_schema_reference > "$RUNNER_TEMP/shadow.catalog"
+          cmp "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/shadow.catalog"
+          echo "Ledger catalog ignores session temporary catalog shadows."
           node scripts/build-ledger-comparison.mjs "$RUNNER_TEMP/wallet_drill_source.catalog" "$RUNNER_TEMP/wallet_schema_reference.catalog" "$RUNNER_TEMP/compare-ledger.sql"
           for db in wallet_drill_source wallet_drill_restored; do
             docker exec -i "$PG_CONTAINER" psql -XqAt -v ON_ERROR_STOP=1 -U postgres -d "$db" \

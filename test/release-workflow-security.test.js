@@ -43,3 +43,13 @@ test("all four supplemental release checks report on every pull request",()=>{
   assert.doesNotMatch(workflow,/pull_request_target:|contents:\s*write\b|continue-on-error:/,file);
  }
 });
+
+test("manual ledger catalog export uses a bounded catalog-first read-only snapshot",()=>{
+ const sql=readFileSync(new URL("../scripts/ledger-catalog.sql",import.meta.url),"utf8");
+ assert.match(sql,/BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;/);
+ assert.match(sql,/SET LOCAL statement_timeout = '10s';/);
+ assert.match(sql,/SET LOCAL lock_timeout = '3s';/);
+ assert.match(sql,/SET LOCAL search_path = pg_catalog, pg_temp;/);
+ assert.doesNotMatch(sql,/SET LOCAL search_path[^;]*public/);
+ assert.match(read("validate.yml"),/cmp "\$RUNNER_TEMP\/wallet_schema_reference\.catalog" "\$RUNNER_TEMP\/shadow\.catalog"/);
+});

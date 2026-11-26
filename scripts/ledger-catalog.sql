@@ -1,7 +1,10 @@
 -- Run with psql -XqAt -v ON_ERROR_STOP=1 -f scripts/ledger-catalog.sql.
 -- Compare outputs from PostgreSQL 17 databases using the public schema.
-BEGIN READ ONLY;
-SET LOCAL search_path = pg_catalog, public;
+-- Regenerate both reference catalogs with this exact script revision; deparse qualification can differ.
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '10s';
+SET LOCAL lock_timeout = '3s';
+SET LOCAL search_path = pg_catalog, pg_temp;
 WITH ledger AS (
   SELECT c.oid, c.relname FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
