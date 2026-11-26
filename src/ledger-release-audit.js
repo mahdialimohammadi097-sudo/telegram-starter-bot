@@ -34,6 +34,61 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
     if(!relations.inheritanceFree||!relations.rewriteRuleFree){
       throw new Error("Ledger relations contain unreviewed inheritance or rewrite rules");
     }
+    // Compare the historical reviewed column contract before interpreting any
+    // amounts. Floating point, unexpected precision and nullable required
+    // columns must not silently qualify a clean empty ledger.
+    const columnRows=(await client.query(`
+      SELECT c.relname AS table_name,a.attname AS column_name,
+        pg_catalog.format_type(a.atttypid,a.atttypmod) AS data_type,
+        a.attnotnull AS not_null,a.attgenerated='' AS ordinary,
+        tn.nspname='pg_catalog' AS builtin
+      FROM pg_catalog.pg_attribute a
+      JOIN pg_catalog.pg_class c ON c.oid=a.attrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_catalog.pg_type t ON t.oid=a.atttypid
+      JOIN pg_catalog.pg_namespace tn ON tn.oid=t.typnamespace
+      WHERE n.nspname=$1 AND c.relname IN ('ledger_accounts','ledger_transactions','ledger_entries')
+        AND a.attnum>0 AND NOT a.attisdropped
+    `,[schema])).rows;
+    if(!Array.isArray(columnRows))throw new Error("Incomplete ledger column evidence");
+    const expectedColumns={
+      ledger_accounts:[
+        ["id","bigint",true],["user_id","bigint",false],
+        ["account_code","character varying(100)",true],
+        ["account_type","character varying(30)",true],
+        ["currency","character varying(10)",true],
+        ["created_at","timestamp with time zone",true]
+      ],
+      ledger_transactions:[
+        ["id","bigint",true],["transaction_type","character varying(30)",true],
+        ["reference_id","character varying(100)",false],
+        ["idempotency_key","character varying(150)",null],
+        ["description","text",false],["status","character varying(20)",true],
+        ["created_at","timestamp with time zone",true]
+      ],
+      ledger_entries:[
+        ["id","bigint",true],["transaction_id","bigint",true],["account_id","bigint",true],
+        ["entry_type","character varying(10)",true],["amount","numeric(36,18)",true],
+        ["currency","character varying(10)",true],["created_at","timestamp with time zone",true]
+      ]
+    };
+    const columnChecks=Object.entries(expectedColumns).flatMap(([table,columns])=>
+      columns.map(([column,type,notNull])=>{
+        const matches=columnRows.filter(x=>x.table_name===table&&x.column_name===column);
+        const row=matches[0];
+        return {table,column,compatible:matches.length===1&&row.data_type===type&&
+          row.builtin===true&&row.ordinary===true&&typeof row.not_null==="boolean"&&
+          (notNull===null||row.not_null===notNull)};
+      }));
+    const columnContract={
+      checks:columnChecks,compatible:columnChecks.every(x=>x.compatible),
+      // Historical fixtures allow null idempotency keys. Record this gap
+      // separately; a matching fixture is not a production release gate.
+      idempotencyNotNull:columnRows.some(x=>x.table_name==="ledger_transactions"&&
+        x.column_name==="idempotency_key"&&x.not_null===true),
+      storagePrecision:36,storageScale:18
+    };
+    if(!columnContract.compatible)throw new Error("Ledger column contract incompatible");
     // A clean current snapshot is insufficient if duplicate identities are
     // not constrained by the database. Inspect immediate, valid, nonpartial
     // constraint-backed unique indexes, not merely their names.
@@ -112,14 +167,32 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
         row.target_table===target&&row.target_schema===schema&&row.target_column==="id"&&row.compatible===true)
     }));
     const foreignKeys={checks:references,compatible:references.every(x=>x.compatible)};
+    // Require the reviewed positive-amount CHECK, not just its name or
+    // the absence of invalid amounts today. Limit accepted deparse forms
+    // to the fixed historical expression, allowing formatting differences.
+    const amountChecks=(await client.query(`
+      SELECT k.convalidated,k.connoinherit,
+        pg_catalog.pg_get_expr(k.conbin,k.conrelid,false) AS expression
+      FROM pg_catalog.pg_constraint k
+      JOIN pg_catalog.pg_class c ON c.oid=k.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attname='amount'
+      WHERE n.nspname=$1 AND c.relname='ledger_entries' AND k.contype='c'
+        AND pg_catalog.cardinality(k.conkey)=1 AND k.conkey[1]=a.attnum
+    `,[schema])).rows;
+    if(!Array.isArray(amountChecks))throw new Error("Incomplete amount constraint evidence");
+    const positiveAmount=amountChecks.some(x=>x.convalidated===true&&x.connoinherit===false&&
+      typeof x.expression==="string"&&
+      ["amount>0::numeric","amount>0"].includes(x.expression.replace(/[()\\s]/g,"")));
+    const amountConstraint={positiveAmount,compatible:positiveAmount};
     const integrity=await inspectLedgerIntegrity(client,{schema});
     const triggers=await inspectLedgerTriggerContract(client,{schema});
     const reviewedBodies=await inspectReviewedLedgerBodies(client,{schema});
     return {
       audit:"ledger-release-evidence",scope:"internal-ledger-and-trigger-shape-only",
       sameSnapshot:true,
-      relations,identityConstraints,foreignKeys,integrity,triggers,reviewedBodies,
-      checksPassed:identityConstraints.compatible===true&&foreignKeys.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
+      relations,columnContract,identityConstraints,foreignKeys,amountConstraint,integrity,triggers,reviewedBodies,
+      checksPassed:columnContract.compatible===true&&identityConstraints.compatible===true&&foreignKeys.compatible===true&&amountConstraint.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
       custodyVerified:false,financialActivationReady:false,productionReady:false
     };
   });
