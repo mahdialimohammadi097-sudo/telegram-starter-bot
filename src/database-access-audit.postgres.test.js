@@ -99,3 +99,50 @@ test("access audit detects column-level, PUBLIC and delegable ledger privileges"
   }finally{await pool.end();}
  }
 });
+
+test("access audit distinguishes session role paths, callable privileged routines and ledger function ownership",{skip:!safeTarget()},async()=>{
+ const suffix=randomUUID().replaceAll("-","");
+ const schema="paths_"+suffix, login="login_"+suffix, owner="owner_"+suffix;
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const inspect=()=>runReadOnlyDepositAudit(pool,client=>inspectDatabaseAccess(client,{schema}));
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE ROLE "'+login+'" NOLOGIN');
+  await pool.query('CREATE ROLE "'+owner+'" NOLOGIN');
+  await pool.query('GRANT USAGE ON SCHEMA "'+schema+'" TO "'+login+'"');
+  await pool.query('GRANT USAGE,CREATE ON SCHEMA "'+schema+'" TO "'+owner+'"');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_accounts(id bigint)');
+  await pool.query('ALTER TABLE "'+schema+'".ledger_accounts OWNER TO "'+owner+'"');
+  await pool.query('CREATE FUNCTION "'+schema+'".validate_posted_transaction(bigint) RETURNS void LANGUAGE plpgsql AS \'BEGIN RETURN; END;\'');
+  await pool.query('ALTER FUNCTION "'+schema+'".validate_posted_transaction(bigint) OWNER TO "'+owner+'"');
+  await pool.query('CREATE FUNCTION "'+schema+'".privileged_fixture() RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog AS \'SELECT 1\'');
+  await pool.query('SET SESSION AUTHORIZATION "'+login+'"');
+  const before=await inspect();
+  assert.equal(before.session_role_matches,true);
+  assert.equal(before.session_can_assume_other_role,false);
+  assert.equal(before.session_can_assume_ledger_function_owner,false);
+  assert.equal(before.ledger_tables_session_owner_access,0);
+  assert.equal(before.ledger_functions_public_execute,true);
+  assert.equal(before.schema_callable_security_definer,true);
+  await pool.query("RESET SESSION AUTHORIZATION");
+  await pool.query('REVOKE EXECUTE ON FUNCTION "'+schema+'".privileged_fixture() FROM PUBLIC');
+  await pool.query('REVOKE EXECUTE ON FUNCTION "'+schema+'".validate_posted_transaction(bigint) FROM PUBLIC');
+  await pool.query('GRANT "'+owner+'" TO "'+login+'" WITH INHERIT FALSE');
+  await pool.query('SET SESSION AUTHORIZATION "'+login+'"');
+  const after=await inspect();
+  assert.equal(after.session_can_assume_other_role,true);
+  assert.equal(after.session_can_assume_ledger_function_owner,true);
+  assert.equal(after.ledger_tables_session_owner_access,1);
+  assert.equal(after.ledger_functions_public_execute,false);
+  assert.equal(after.schema_callable_security_definer,false);
+  assert.equal(JSON.stringify(after).includes(owner),false);
+  assert.equal(JSON.stringify(after).includes(login),false);
+ }finally{
+  try{
+   await pool.query("RESET SESSION AUTHORIZATION");
+   await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+   await pool.query('DROP ROLE IF EXISTS "'+login+'"');
+   await pool.query('DROP ROLE IF EXISTS "'+owner+'"');
+  }finally{await pool.end();}
+ }
+});
