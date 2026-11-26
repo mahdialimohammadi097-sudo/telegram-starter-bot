@@ -41,7 +41,7 @@ test("owner rehearsal uses a separate marked PostgreSQL database and rejects rep
     let handler;
     registerOwnerRehearsal({command(command,fn){assert.equal(command,"admintest");handler=fn;}},{
       productionPool:admin,ownerId:7001,getLanguage:async()=>"en",
-      env:{PROFINO_TEST_DATABASE_URL:url.href,PROFINO_TEST_DATABASE_NAME:database}
+      env:{PROFINO_TEST_DATABASE_URL:url.href,PROFINO_TEST_DATABASE_NAME:database,PROFINO_TEST_DB_TLS_MODE:"disable"}
     });
     const ctx={from:{id:7001},chat:{type:"private",id:7001},message:{message_id:32},
       reply:async text=>messages.push(text)};

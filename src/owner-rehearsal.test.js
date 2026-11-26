@@ -2,12 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { registerOwnerRehearsal } from "./owner-rehearsal.js";
 
-function setup({ name = "profino_test", marker = "isolated-staging", databaseMarker = true, configured = true, testUrl = "postgresql://localhost/profino_test", reservation = { id: "12", amount: "1", status: "reserved" }, closeError = false, idleError = false, cancelError = false, snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "4", WITHDRAWAL_HOLD: "1" }, { AVAILABLE: "5" }] } = {}) {
+function setup({ name = "profino_test", marker = "isolated-staging", databaseMarker = true, configured = true, tlsMode = "disable", testUrl = "postgresql://localhost/profino_test", reservation = { id: "12", amount: "1", status: "reserved" }, closeError = false, idleError = false, cancelError = false, snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "4", WITHDRAWAL_HOLD: "1" }, { AVAILABLE: "5" }] } = {}) {
   let reads = 0;
   const calls = [];
   let handler;
   let idleListener;
   const replyStates = [];
+  const poolConfigs = [];
   const sandbox = {
     on(event, fn) { assert.equal(event, "error"); idleListener = fn; },
     async query(sql) {
@@ -23,8 +24,8 @@ function setup({ name = "profino_test", marker = "isolated-staging", databaseMar
   registerOwnerRehearsal({ command(name, fn) { assert.equal(name, "admintest"); handler = fn; } }, {
     productionPool: { async query() { calls.push("production-read"); return { rows: [{ name: "profino-db" }] }; } },
     ownerId: 10, getLanguage: async () => "fa",
-    env: configured ? { PROFINO_TEST_DATABASE_URL: testUrl, PROFINO_TEST_DATABASE_NAME: "profino_test" } : {},
-    createPool: () => sandbox,
+    env: configured ? { PROFINO_TEST_DATABASE_URL: testUrl, PROFINO_TEST_DATABASE_NAME: "profino_test", PROFINO_TEST_DB_TLS_MODE: tlsMode } : {},
+    createPool: config => { poolConfigs.push(config); return sandbox; },
     balances: async pool => { assert.equal(pool, sandbox); const snapshot = snapshots[reads++]; if(snapshot instanceof Error)throw snapshot; return snapshot; },
     reserve: async (pool, id, key, amount) => {
       assert.equal(pool, sandbox); assert.equal(id, "9"); assert.equal(key, "owner-rehearsal:32");
@@ -35,7 +36,7 @@ function setup({ name = "profino_test", marker = "isolated-staging", databaseMar
   const messages = [];
   const ctx = { from: { id: 10 }, chat: { id: 10, type: "private" }, message: { message_id: 32 },
     reply: async text => { replyStates.push(calls.at(-1)); messages.push(text); } };
-  return { handler, ctx, calls, messages, replyStates };
+  return { handler, ctx, calls, messages, replyStates, poolConfigs };
 }
 test("same-bot owner rehearsal routes its writes exclusively to the isolated database", async () => {
   const s = setup();
@@ -126,5 +127,22 @@ test("owner rehearsal publishes success only after isolated connection cleanup",
     await s.handler(s.ctx);
     assert.equal(s.calls.filter(call=>call==="production-read").length,2);
     assert.doesNotMatch(s.messages[1],/در حال اجراست/);
+  }
+});
+
+test("owner rehearsal requires explicit independent test TLS policy before any database connection", async () => {
+  for (const tlsMode of [null, "", "require", "verify-ca", "prefer"]) {
+    const s = setup({ tlsMode });
+    await s.handler(s.ctx);
+    assert.deepEqual(s.calls, []);
+    assert.deepEqual(s.poolConfigs, []);
+    assert.match(s.messages[0], /TLS/);
+  }
+  for (const tlsMode of ["verify-full", "disable"]) {
+    const s = setup({ tlsMode });
+    await s.handler(s.ctx);
+    assert.match(s.messages[0], /موفق/);
+    assert.equal(s.poolConfigs.length, 1);
+    assert.deepEqual(s.poolConfigs[0].ssl, tlsMode === "disable" ? false : { rejectUnauthorized: true });
   }
 });

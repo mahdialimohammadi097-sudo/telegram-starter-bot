@@ -39,6 +39,10 @@ export function registerOwnerRehearsal(bot, {
     if (!env.PROFINO_TEST_DATABASE_URL || !env.PROFINO_TEST_DATABASE_NAME) {
       return say("Admin test database is not configured.", "دیتابیس آزمون مدیر هنوز تنظیم نشده است.");
     }
+    // Do not silently downgrade an independently configured test connection.
+    if (!["disable", "verify-full"].includes(env.PROFINO_TEST_DB_TLS_MODE)) {
+      return say("Admin test TLS mode must be explicitly configured.", "حالت TLS دیتابیس آزمون مدیر باید صریحاً تنظیم شود.");
+    }
     if (running) return say("An admin test is already running.", "آزمون مدیر در حال اجراست.");
     running = true;
     let sandbox;
@@ -50,7 +54,7 @@ export function registerOwnerRehearsal(bot, {
       sandbox = createPool({
         connectionString: env.PROFINO_TEST_DATABASE_URL, max: 1,
         ssl: resolveDatabaseTls({ DATABASE_URL: env.PROFINO_TEST_DATABASE_URL,
-          PROFINO_DB_TLS_MODE: env.PROFINO_TEST_DB_TLS_MODE ?? "disable",
+          PROFINO_DB_TLS_MODE: env.PROFINO_TEST_DB_TLS_MODE,
           PROFINO_DB_TLS_CA_PEM: env.PROFINO_TEST_DB_TLS_CA_PEM }),
         connectionTimeoutMillis: 10000, query_timeout: 15000
       });
