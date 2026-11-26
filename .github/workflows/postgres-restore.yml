@@ -19,10 +19,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # Exact reviewed main base for PR #226; re-review this pin if main advances.
       - name: Check out pinned rollback reference
         uses: actions/checkout@v4
         with:
-          ref: aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f
+          ref: e0d7509b43605493beb6a20485d5d17ce0ef8e16
           path: rollback-reference
           persist-credentials: false
       - name: Verify matching dependency locks

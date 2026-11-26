@@ -19,7 +19,7 @@ test("rollback rehearsal covers all pull requests and retains the pinned lock an
  const workflow=read("postgres-restore.yml");
  assert.match(workflow,/^  pull_request:\s*\n  workflow_dispatch:/m);
  assert.doesNotMatch(workflow,/^\s+paths(?:-ignore)?:/m);
- assert.match(workflow,/ref: aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f\b/);
+ assert.match(workflow,/ref: e0d7509b43605493beb6a20485d5d17ce0ef8e16\b/);
  assert.match(workflow,/cmp package-lock\.json rollback-reference\/package-lock\.json/);
  assert.match(workflow,/permissions:\s*\n\s+contents: read\b/);
  assert.equal((workflow.match(/persist-credentials: false/g)||[]).length,2);
