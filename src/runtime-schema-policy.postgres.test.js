@@ -69,12 +69,33 @@ test("restricted role verifies runtime inventory without schema creation rights"
   for(const name of ["users","scheduled_posts","scheduled_post_history","admin_audit_logs"]){
    await q("GRANT USAGE ON SEQUENCE "+name+"_id_seq TO "+role);
   }
+  // Use the reviewed effective resolution path after fixture creation.
+  await q("SET search_path TO pg_catalog,"+schema);
   const adapter={connect:async()=>({query:q,release(error){assert.equal(error,undefined);}})};
   await q("SET ROLE "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive database privileges/);
   await q("RESET ROLE");
   await q("SET SESSION AUTHORIZATION "+role);
   assert.equal((await q("SELECT has_schema_privilege(current_user,$1,'CREATE') AS allowed",[schema])).rows[0].allowed,false);
+  assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
+  // Existing table resolution alone is insufficient if another namespace is visible.
+  await q("SET search_path TO "+schema+",pg_catalog");
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive database privileges/);
+  await q("SET search_path TO pg_catalog,"+schema+",public");
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive database privileges/);
+  await q("SET search_path TO pg_catalog,"+schema);
+  await q("RESET SESSION AUTHORIZATION");
+  await q("GRANT SET ON PARAMETER session_replication_role TO "+role);
+  await q("SET SESSION AUTHORIZATION "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive database privileges/);
+  await q("RESET SESSION AUTHORIZATION");
+  await q("REVOKE SET ON PARAMETER session_replication_role FROM "+role);
+  await q("SET session_replication_role = replica");
+  await q("SET SESSION AUTHORIZATION "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive database privileges/);
+  await q("RESET SESSION AUTHORIZATION");
+  await q("SET session_replication_role = origin");
+  await q("SET SESSION AUTHORIZATION "+role);
   assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
   await assert.rejects(q("CREATE TABLE "+schema+".forbidden(id int)"),e=>e.code==="42501");
   await assert.rejects(q("UPDATE users SET telegram_id=123 WHERE id=1"),e=>e.code==="42501");
@@ -239,16 +260,16 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/trigger missing or incompatible/);
   await q("RESET SESSION AUTHORIZATION");
   await q("ALTER TABLE scheduled_posts ENABLE TRIGGER trg_scheduled_post_history");
-  await q("CREATE OR REPLACE FUNCTION profino_log_scheduled_post_history() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$");
+  await q("CREATE OR REPLACE FUNCTION "+schema+".profino_log_scheduled_post_history() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$");
   await q("SET SESSION AUTHORIZATION "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/trigger missing or incompatible/);
   await q("RESET SESSION AUTHORIZATION");
-  await q("CREATE OR REPLACE FUNCTION profino_log_scheduled_post_history() RETURNS trigger LANGUAGE plpgsql AS $history$"+postHistoryTriggerBody+"$history$");
+  await q("CREATE OR REPLACE FUNCTION "+schema+".profino_log_scheduled_post_history() RETURNS trigger LANGUAGE plpgsql AS $history$"+postHistoryTriggerBody+"$history$");
   await q("ALTER TABLE admin_preferences DROP COLUMN updated_at");
   await q("SET SESSION AUTHORIZATION "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/object missing/);
  }finally{
-  try{await q("RESET SESSION AUTHORIZATION");await q("RESET search_path");if(madeSchema)await q("DROP SCHEMA "+schema+" CASCADE");if(madeRole)await q("DROP ROLE "+role);if(madeAlternate)await q("DROP ROLE "+alternate);}
+  try{await q("RESET SESSION AUTHORIZATION");await q("RESET session_replication_role");if(madeRole)await q("REVOKE SET ON PARAMETER session_replication_role FROM "+role);await q("RESET search_path");if(madeSchema)await q("DROP SCHEMA "+schema+" CASCADE");if(madeRole)await q("DROP ROLE "+role);if(madeAlternate)await q("DROP ROLE "+alternate);}
   finally{client.release(true);await pool.end();}
  }
 });
