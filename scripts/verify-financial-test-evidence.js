@@ -22,12 +22,28 @@ export const criticalTests=Object.freeze([
   "ledger integrity detects blank and padded identities, unused non-USDT accounts and non-finite amounts",
   "ledger catalog audit detects disabled or missing financial guards without mutating them",
   "combined ledger release evidence rejects incomplete or non-table relations",
-  "wallet balance rejects duplicate account roles instead of combining them"
+  "wallet balance rejects duplicate account roles instead of combining them",
+  "access catalog audit resists caller name-operator shadowing without changing session identity",
+  "access audit distinguishes unexpected named relations from permanent ordinary ledger tables",
+  "standalone ledger integrity refuses views, unlogged relations, inheritance and rewrite rules",
+  "standalone ledger integrity rejects enabled, forced and dormant row security policies even for an elevated audit role",
+  "ledger integrity detects negative platform reserve and mixed-case protected customer accounts",
+  "standalone ledger integrity detects ambiguous primary identities without relying on constraints"
 ]);
 
 export const startupTests=Object.freeze([
   "misconfigured staging production bot cannot reach schema preparation or Telegram writes",
   "misconfigured staging wrong database cannot reach schema preparation or Telegram writes"
+]);
+
+export const fullAuditTests=Object.freeze([
+  "database access diagnostic publishes one report after path-drift",
+  "database access diagnostic publishes one report after incompatible-shape",
+  "integrity audit rejects absent or incompatible relations before financial row inspection",
+  "integrity audit rejects unknown or unreviewed row visibility before reading financial rows",
+  "integrity audit treats negative protected noncustomer balances as discrepancies",
+  "integrity audit rejects duplicate or missing row identity evidence",
+  "manual ledger catalog export uses a bounded catalog-first read-only snapshot"
 ]);
 
 export function verifyFinancialTestEvidence(tap, {full=false}={}) {
@@ -45,7 +61,7 @@ export function verifyFinancialTestEvidence(tap, {full=false}={}) {
     throw new Error("Financial test evidence is not entirely successful");
   }
   if(lines.some(line=>/^\s*not ok\b/.test(line))) throw new Error("Failed TAP assertion");
-  const required=[...criticalTests, "staging preflight rejects permissive or unvalidated withdrawal state constraints", ...(full?startupTests:[])];
+  const required=[...criticalTests, "staging preflight rejects permissive or unvalidated withdrawal state constraints", ...(full?[...startupTests,...fullAuditTests]:[])];
   for(const name of required){
     // Require a top-level positive assertion with the complete expected name.
     // A directive such as # SKIP or a mere diagnostic does not count.

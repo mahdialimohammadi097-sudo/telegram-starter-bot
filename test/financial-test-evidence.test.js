@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {criticalTests,startupTests,verifyFinancialTestEvidence} from "../scripts/verify-financial-test-evidence.js";
+import {criticalTests,startupTests,fullAuditTests,verifyFinancialTestEvidence} from "../scripts/verify-financial-test-evidence.js";
 
 const names=[...criticalTests,"staging preflight rejects permissive or unvalidated withdrawal state constraints"];
 const success=names.map((name,i)=>"ok "+(i+1)+" - "+name).join("\n")+
@@ -32,7 +32,7 @@ test("financial CI evidence rejects absent, duplicated, skipped or non-successfu
 
 test("full release evidence also requires both offline startup isolation regressions",()=>{
   assert.throws(()=>verifyFinancialTestEvidence(success,{full:true}));
-  const fullNames=[...names,...startupTests];
+  const fullNames=[...names,...startupTests,...fullAuditTests];
   const tap=fullNames.map((name,i)=>"ok "+(i+1)+" - "+name).join("\n")+
     "\n# tests "+fullNames.length+"\n# pass "+fullNames.length+
     "\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";
@@ -48,5 +48,25 @@ test("financial release evidence cannot omit any newly required database securit
   assert.ok(line);
   assert.throws(()=>verifyFinancialTestEvidence(success.replace(line,"ok 999 - unrelated fixture")),/Missing or ambiguous critical test evidence/);
   assert.throws(()=>verifyFinancialTestEvidence(success.replace(line,line+" # SKIP")),/Missing or ambiguous critical test evidence/);
+ }
+});
+
+// Pin these names independently of the exported lists, so removing a required
+// regression from the verifier itself cannot silently weaken the gate.
+test("release evidence requires the latest ledger and catalog audit regressions",()=>{
+ const requiredPostgres=["access catalog audit resists caller name-operator shadowing without changing session identity","access audit distinguishes unexpected named relations from permanent ordinary ledger tables","standalone ledger integrity refuses views, unlogged relations, inheritance and rewrite rules","standalone ledger integrity rejects enabled, forced and dormant row security policies even for an elevated audit role","ledger integrity detects negative platform reserve and mixed-case protected customer accounts","standalone ledger integrity detects ambiguous primary identities without relying on constraints"];
+ const requiredFull=["database access diagnostic publishes one report after path-drift","database access diagnostic publishes one report after incompatible-shape","integrity audit rejects absent or incompatible relations before financial row inspection","integrity audit rejects unknown or unreviewed row visibility before reading financial rows","integrity audit treats negative protected noncustomer balances as discrepancies","integrity audit rejects duplicate or missing row identity evidence","manual ledger catalog export uses a bounded catalog-first read-only snapshot"];
+ const fullNames=[...names,...startupTests,...fullAuditTests];
+ const fullTap=fullNames.map((name,i)=>"ok "+(i+1)+" - "+name).join("\n")+
+   "\n# tests "+fullNames.length+"\n# pass "+fullNames.length+"\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";
+ for(const [required,list,tap,options] of [[requiredPostgres,criticalTests,success,{}],[requiredFull,fullAuditTests,fullTap,{full:true}]]){
+  for(const name of required){
+   assert.ok(list.includes(name),name);
+   const line=tap.split("\n").find(value=>value.endsWith(" - "+name));
+   assert.ok(line,name);
+   for(const altered of [line.replace(name,"unrelated fixture"),line+" # SKIP",line+"\n"+line]){
+    assert.throws(()=>verifyFinancialTestEvidence(tap.replace(line,altered),options),/Missing or ambiguous critical test evidence/);
+   }
+  }
  }
 });
