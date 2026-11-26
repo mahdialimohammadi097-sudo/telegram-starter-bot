@@ -27,14 +27,26 @@ export function guardRestrictedPoolCheckouts(pool,{schema="public"}={}){
   async function checkedConnect(){
     const client=await connect();
     try{
+      // New clients can initially report null; after a completed probe only
+      // an idle ReadyForQuery status is accepted. Never probe an open transaction.
+      const before=client.getTransactionStatus();
+      if(before!==null&&before!=="I")throw new Error("Unsafe transaction state");
       const {rows}=await client.query(`
         SELECT current_user=session_user AS same_role,
           pg_catalog.current_schemas(true)::text[]=ARRAY['pg_catalog'::text,$1::text] AS safe_path,
           pg_catalog.current_setting('session_replication_role')='origin' AS origin_mode
       `,[schema]);
-      if(rows?.length!==1||rows[0].same_role!==true||rows[0].safe_path!==true||rows[0].origin_mode!==true){
+      if(rows?.length!==1||rows[0].same_role!==true||rows[0].safe_path!==true||rows[0].origin_mode!==true||client.getTransactionStatus()!=="I"){
         throw new Error("Restricted runtime connection settings incompatible");
       }
+      const release=client.release.bind(client);
+      client.release=function(error){
+        // Destroy an unfinished/aborted session rather than implicitly
+        // committing or reusing it. The driver closes the connection.
+        let idle=false;
+        try{idle=client.getTransactionStatus()==="I";}catch{}
+        return release(error||!idle||undefined);
+      };
       return client;
     }catch{
       client.release(true);

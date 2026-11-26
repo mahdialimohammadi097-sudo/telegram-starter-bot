@@ -20,18 +20,35 @@ test("restricted startup rejects URL option overrides and unsafe schema without 
 test("checkout guard validates promise and callback consumers and destroys drifted connections",async()=>{
  const calls=[];
  let safe=true;
- const client={async query(sql,params){assert.match(sql,/current_schemas/);assert.deepEqual(params,["public"]);return {rows:[{same_role:true,safe_path:safe,origin_mode:true}]}},release(discard){calls.push(discard);}};
- const pool={async connect(){return client;}};
+ const client={getTransactionStatus(){return "I";},async query(sql,params){assert.match(sql,/current_schemas/);assert.deepEqual(params,["public"]);return {rows:[{same_role:true,safe_path:safe,origin_mode:true}]}},release(discard){calls.push(discard);}};
+ const pool={async connect(){client.release=discard=>calls.push(discard);return client;}};
  guardRestrictedPoolCheckouts(pool);
  assert.equal(await pool.connect(),client);
+ client.release();
  await new Promise((resolve,reject)=>pool.connect((error,value,release)=>{
    if(error)return reject(error);
-   assert.equal(value,client);assert.equal(release,client.release);resolve();
+   assert.equal(value,client);assert.equal(release,client.release);release();resolve();
  }));
  safe=false;
  await assert.rejects(pool.connect(),/settings incompatible/);
  await new Promise(resolve=>pool.connect((error,value)=>{
    assert.match(error.message,/settings incompatible/);assert.equal(value,undefined);resolve();
  }));
- assert.deepEqual(calls,[true,true]);
+ assert.deepEqual(calls,[undefined,undefined,true,true]);
+});
+
+test("checkout and release discard non-idle and unverified transaction states",async()=>{
+ let status="T",queries=0;const discarded=[];
+ const client={getTransactionStatus(){return status;},async query(){queries++;status="I";return {rows:[{same_role:true,safe_path:true,origin_mode:true}]} }};
+ const pool={async connect(){client.release=reason=>discarded.push(reason);return client;}};
+ guardRestrictedPoolCheckouts(pool);
+ for(const state of ["T","E",undefined]){
+  status=state;
+  await assert.rejects(pool.connect(),/settings incompatible/);
+ }
+ assert.equal(queries,0);
+ status=null;const fresh=await pool.connect();assert.equal(queries,1);
+ status="T";fresh.release();
+ status="I";const healthy=await pool.connect();healthy.release();
+ assert.deepEqual(discarded,[true,true,true,true,undefined]);
 });

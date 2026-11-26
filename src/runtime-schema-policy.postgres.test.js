@@ -331,3 +331,35 @@ test("restricted checkout rejects reused session drift before application querie
   try{await admin.query("DROP SCHEMA IF EXISTS "+schema+" CASCADE");}finally{await admin.end();}
  }
 });
+
+test("restricted pool discards unfinished and aborted transactions without committing",{skip:!safeTarget()},async()=>{
+ const schema="tx_guard_"+randomUUID().replaceAll("-","");
+ const admin=new pg.Pool({connectionString:url,max:1});
+ let scoped,client;
+ try{
+  await admin.query("CREATE SCHEMA "+schema);
+  await admin.query("CREATE TABLE "+schema+".fixture(id integer)");
+  scoped=new pg.Pool({connectionString:url,max:1,...restrictedRuntimeConnectionOptions({DATABASE_URL:url},{force:true,schema})});
+  guardRestrictedPoolCheckouts(scoped,{schema});
+  for(const aborted of [false,true]){
+   client=await scoped.connect();
+   const pid=(await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+   await client.query("BEGIN");
+   await client.query("INSERT INTO fixture VALUES (1)");
+   if(aborted)await assert.rejects(client.query("SELECT 1/0"),e=>e.code==="22012");
+   client.release();client=undefined;
+   const result=(await scoped.query("SELECT pg_backend_pid() AS pid,(SELECT count(*)::int FROM fixture) AS count")).rows[0];
+   assert.notEqual(result.pid,pid);
+   assert.equal(result.count,0);
+  }
+  client=await scoped.connect();
+  const pid=(await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+  await client.query("BEGIN");await client.query("INSERT INTO fixture VALUES (2)");await client.query("COMMIT");
+  client.release();client=undefined;
+  assert.deepEqual((await scoped.query("SELECT pg_backend_pid() AS pid,(SELECT count(*)::int FROM fixture) AS count")).rows[0],{pid,count:1});
+ }finally{
+  if(client)client.release(true);
+  if(scoped)await scoped.end();
+  try{await admin.query("DROP SCHEMA IF EXISTS "+schema+" CASCADE");}finally{await admin.end();}
+ }
+});

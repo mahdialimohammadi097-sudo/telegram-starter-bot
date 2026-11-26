@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "grammy": "^1.30.0",
-    "pg": "^8.16.3"
+    "pg": "^8.23.1"
   },
   "license": "MIT"
 }
