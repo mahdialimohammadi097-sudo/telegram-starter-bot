@@ -14,3 +14,16 @@ test("manual dependency verification has no repository-writing capability",()=>{
 test("testnet receipt inspection does not retain checkout credentials",()=>{
  assert.match(read("testnet-receipt.yml"),/persist-credentials: false\b/);
 });
+
+test("rollback rehearsal covers all pull requests and retains the pinned lock and isolated execution",()=>{
+ const workflow=read("postgres-restore.yml");
+ assert.match(workflow,/^  pull_request:\s*\n  workflow_dispatch:/m);
+ assert.doesNotMatch(workflow,/^\s+paths(?:-ignore)?:/m);
+ assert.match(workflow,/ref: aeefcc9f2b94e54f164b9e3af89ff7e10a10b89f\b/);
+ assert.match(workflow,/cmp package-lock\.json rollback-reference\/package-lock\.json/);
+ assert.match(workflow,/permissions:\s*\n\s+contents: read\b/);
+ assert.equal((workflow.match(/persist-credentials: false/g)||[]).length,2);
+ assert.match(workflow,/docker run --rm --network none --user postgres/);
+ assert.match(workflow,/\$GITHUB_WORKSPACE:\/work:ro/);
+ assert.doesNotMatch(workflow,/pull_request_target:|contents:\s*write\b|continue-on-error:/);
+});

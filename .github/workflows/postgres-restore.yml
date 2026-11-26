@@ -3,23 +3,9 @@ name: PostgreSQL 17 restore drill
 on:
   push:
     branches: [feature/integrated-postgres-matrix]
+  # Transitive runtime dependencies can affect rollback compatibility.
+  # Run on every PR rather than relying on an incomplete path inventory.
   pull_request:
-    paths:
-      - .github/workflows/postgres-restore.yml
-      - scripts/test-postgres-restore.sh
-      - scripts/check-rollback-audit.mjs
-      - scripts/check-rollback-posts.mjs
-      - scripts/check-preview-shutdown.mjs
-      - scripts/check-publication-shutdown.mjs
-      - index.js
-      - src/scheduler.js
-      - src/admin-ops.js
-      - src/admin-language.js
-      - src/post-management.js
-      - src/post-schedule.js
-      - src/post-history.js
-      - src/database.js
-      - package*.json
   workflow_dispatch:
 
 permissions:
