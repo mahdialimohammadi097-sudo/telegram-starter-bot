@@ -98,6 +98,36 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
       storagePrecision:36,storageScale:18
     };
     if(!columnContract.compatible)throw new Error("Ledger column contract incompatible");
+    // The historical schema uses three independently owned BIGSERIAL IDs.
+    // A valid primary key alone does not establish safe ID generation.
+    const sequenceRows=(await client.query(`
+      SELECT c.relname AS table_name,
+        sn.nspname=$1 AND a.attidentity='' AND a.atttypid='pg_catalog.int8'::regtype
+          AND s.relpersistence='p' AND q.seqtypid='pg_catalog.int8'::regtype
+          AND q.seqincrement=1 AND q.seqmin=1 AND q.seqmax=9223372036854775807
+          AND q.seqstart=1 AND NOT q.seqcycle
+          AND pg_catalog.pg_get_expr(ad.adbin,ad.adrelid)=
+            pg_catalog.format('nextval(%L::regclass)',s.oid::regclass::text)
+          AS compatible
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attname='id'
+      JOIN pg_catalog.pg_depend d ON d.refclassid='pg_catalog.pg_class'::regclass
+        AND d.refobjid=c.oid AND d.refobjsubid=a.attnum
+        AND d.classid='pg_catalog.pg_class'::regclass AND d.objsubid=0 AND d.deptype='a'
+      JOIN pg_catalog.pg_class s ON s.oid=d.objid AND s.relkind='S'
+      JOIN pg_catalog.pg_namespace sn ON sn.oid=s.relnamespace
+      JOIN pg_catalog.pg_sequence q ON q.seqrelid=s.oid
+      LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid=c.oid AND ad.adnum=a.attnum
+      WHERE n.nspname=$1 AND c.relname IN ('ledger_accounts','ledger_transactions','ledger_entries')
+    `,[schema])).rows;
+    if(!Array.isArray(sequenceRows))throw new Error("Incomplete ledger sequence evidence");
+    const sequenceChecks=Object.keys(expectedColumns).map(table=>{
+      const matches=sequenceRows.filter(row=>row.table_name===table);
+      return {table,compatible:matches.length===1&&matches[0].compatible===true};
+    });
+    const generatedIds={checks:sequenceChecks,compatible:sequenceChecks.every(x=>x.compatible),
+      currentSequencePositionVerified:false};
     // A clean current snapshot is insufficient if duplicate identities are
     // not constrained by the database. Inspect immediate, valid, nonpartial
     // constraint-backed unique indexes, not merely their names.
@@ -234,8 +264,8 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
     return {
       audit:"ledger-release-evidence",scope:"internal-ledger-and-trigger-shape-only",
       sameSnapshot:true,
-      relations,columnContract,identityConstraints,foreignKeys,amountConstraint,valueConstraints,integrity,triggers,reviewedBodies,
-      checksPassed:columnContract.compatible===true&&identityConstraints.compatible===true&&foreignKeys.compatible===true&&amountConstraint.compatible===true&&valueConstraints.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
+      relations,columnContract,generatedIds,identityConstraints,foreignKeys,amountConstraint,valueConstraints,integrity,triggers,reviewedBodies,
+      checksPassed:columnContract.compatible===true&&generatedIds.compatible===true&&identityConstraints.compatible===true&&foreignKeys.compatible===true&&amountConstraint.compatible===true&&valueConstraints.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
       custodyVerified:false,financialActivationReady:false,productionReady:false
     };
   });
