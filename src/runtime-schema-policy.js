@@ -134,9 +134,10 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
       reviewedSequenceOids.push(row.sequence_oid);
     }
     const privileges = await client.query(
-      `SELECT current_user = session_user AS same_session_role,
-        pg_catalog.current_schemas(true)::text[] = ARRAY['pg_catalog'::text,$1::text] AS reviewed_search_path,
-        pg_catalog.current_setting('session_replication_role') = 'origin' AS origin_replication_role,
+      `SELECT current_user OPERATOR(pg_catalog.=) session_user AS same_session_role,
+        pg_catalog.current_schemas(true)::pg_catalog.text[] OPERATOR(pg_catalog.=)
+          ARRAY['pg_catalog'::pg_catalog.text,$1::pg_catalog.text] AS reviewed_search_path,
+        pg_catalog.current_setting('session_replication_role') OPERATOR(pg_catalog.=) 'origin' AS origin_replication_role,
         pg_catalog.has_parameter_privilege(current_user,'session_replication_role','SET') AS replication_role_set,
         EXISTS (SELECT 1 FROM pg_catalog.pg_roles r
           WHERE r.rolname <> current_user AND pg_catalog.pg_has_role(current_user,r.oid,'MEMBER')) AS alternate_role,

@@ -62,3 +62,6 @@ The five verified serial/identity generators must also be permanent, noncycling,
 
 ### Unreviewed sequence access (2026-11-26)
 The restricted inventory now identifies the exact five reviewed sequence OIDs and rejects effective USAGE, UPDATE or ownership on every other sequence in the application schema. USAGE permits nextval and UPDATE permits setval independently of table grants. Disposable tests cover direct USAGE/UPDATE and inherited PUBLIC USAGE, followed by restoration. Read-only sequence SELECT is not prohibited by this specific rule; other schemas, actual grants and live sequence positions remain separate release gates. No production permissions or sequence values changed. Exact-head CI required.
+
+### Restricted session comparison integrity (2026-11-26)
+Checkout and inventory session identity, effective schema order and replication-mode equality now explicitly use pg_catalog operators and catalog text types. A disposable PostgreSQL fixture installs a schema-local text-array equality that falsely reports a drifted path as correct using ordinary equality; the pinned comparison must reject the session and discard the connection. This is narrowly scoped to these session comparisons, not certification of every SQL operator or arbitrary untrusted schema. No production grants, DDL or runtime configuration changed. Exact-head CI required.

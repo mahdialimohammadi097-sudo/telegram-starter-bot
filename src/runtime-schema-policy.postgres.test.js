@@ -390,6 +390,22 @@ test("restricted checkout rejects reused session drift before application querie
   client.release();client=undefined;
   await assert.rejects(scoped.connect(),/Restricted runtime connection settings incompatible/);
   assert.equal((await scoped.query("SELECT 1 AS value")).rows[0].value,1);
+  // An exact-match user-defined array equality can override a polymorphic
+  // catalog operator. Prove the spoof works, then require the pinned check
+  // to discard this connection instead of accepting its drifted path.
+  await admin.query(`CREATE FUNCTION "${schema}".spoof_array_equal(pg_catalog.text[],pg_catalog.text[])
+    RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT true';
+    CREATE OPERATOR "${schema}".= (LEFTARG=pg_catalog.text[],RIGHTARG=pg_catalog.text[],FUNCTION="${schema}".spoof_array_equal)`);
+  client=await scoped.connect();
+  await client.query(`SET search_path="${schema}",pg_catalog`);
+  const spoof=await client.query(`SELECT pg_catalog.current_schemas(true)::pg_catalog.text[] =
+    ARRAY['pg_catalog'::pg_catalog.text,$1::pg_catalog.text] AS spoofed,
+    pg_catalog.current_schemas(true)::pg_catalog.text[] OPERATOR(pg_catalog.=)
+    ARRAY['pg_catalog'::pg_catalog.text,$1::pg_catalog.text] AS actual`,[schema]);
+  assert.deepEqual(spoof.rows,[{spoofed:true,actual:false}]);
+  client.release();client=undefined;
+  await assert.rejects(scoped.connect(),/Restricted runtime connection settings incompatible/);
+  assert.equal((await scoped.query("SELECT 1 AS value")).rows[0].value,1);
  }finally{
   if(client)client.release(true);
   if(scoped)await scoped.end();

@@ -33,9 +33,10 @@ export function guardRestrictedPoolCheckouts(pool,{schema="public"}={}){
       const before=client.getTransactionStatus();
       if(before!==null&&before!=="I")throw new Error("Unsafe transaction state");
       const {rows}=await client.query(`
-        SELECT current_user=session_user AS same_role,
-          pg_catalog.current_schemas(true)::text[]=ARRAY['pg_catalog'::text,$1::text] AS safe_path,
-          pg_catalog.current_setting('session_replication_role')='origin' AS origin_mode
+        SELECT current_user OPERATOR(pg_catalog.=) session_user AS same_role,
+          pg_catalog.current_schemas(true)::pg_catalog.text[] OPERATOR(pg_catalog.=)
+            ARRAY['pg_catalog'::pg_catalog.text,$1::pg_catalog.text] AS safe_path,
+          pg_catalog.current_setting('session_replication_role') OPERATOR(pg_catalog.=) 'origin' AS origin_mode
       `,[schema]);
       if(rows?.length!==1||rows[0].same_role!==true||rows[0].safe_path!==true||rows[0].origin_mode!==true||client.getTransactionStatus()!=="I"){
         throw new Error("Restricted runtime connection settings incompatible");
