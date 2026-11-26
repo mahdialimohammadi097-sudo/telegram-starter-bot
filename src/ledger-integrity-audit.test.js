@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { auditLedgerIntegrity } from "./ledger-integrity-audit.js";
 
-function fakePool({ bad = false, fail = false } = {}) {
+function fakePool({ bad = false, fail = false, currency = "0", key = "0" } = {}) {
   const calls = [];
   const row = { journals:"2", posted_journals:"2", entries:"4", unresolved_journals:"0",
     missing_idempotency_keys:"0", duplicate_idempotency_keys:"0", invalid_entries:"0",
+    invalid_account_currencies:currency, noncanonical_idempotency_keys:key,
     unbalanced_posted_journals:"0", negative_customer_accounts:bad?"1":"0" };
   const client = { async query(sql) {
     calls.push(sql);
@@ -34,6 +35,9 @@ test("audit uses one read-only snapshot, count strings and never certifies custo
 test("audit reports discrepancies and rejects malformed count evidence",async()=>{
   const bad=fakePool({bad:true});
   assert.equal((await auditLedgerIntegrity(bad.pool)).clean,false);
+  assert.equal((await auditLedgerIntegrity(fakePool({currency:"1"}).pool)).clean,false);
+  assert.equal((await auditLedgerIntegrity(fakePool({key:"1"}).pool)).clean,false);
+  await assert.rejects(auditLedgerIntegrity(fakePool({currency:"-1"}).pool),/Incomplete ledger integrity audit/);
   const invalid=fakePool({fail:true});
   await assert.rejects(auditLedgerIntegrity(invalid.pool),/Incomplete ledger integrity audit/);
   assert.equal(invalid.calls.at(-2),"ROLLBACK");

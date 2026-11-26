@@ -2,7 +2,8 @@ import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 
 const findingKeys = [
   "unresolved_journals", "missing_idempotency_keys", "duplicate_idempotency_keys",
-  "invalid_entries", "unbalanced_posted_journals", "negative_customer_accounts"
+  "invalid_entries", "invalid_account_currencies", "noncanonical_idempotency_keys",
+  "unbalanced_posted_journals", "negative_customer_accounts"
 ];
 const countKeys = ["journals", "posted_journals", "entries", ...findingKeys];
 
@@ -67,7 +68,7 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
         (SELECT count(*) FROM journals WHERE status='posted')::text AS posted_journals,
         (SELECT count(*) FROM entries)::text AS entries,
         (SELECT count(*) FROM journals WHERE status IS DISTINCT FROM 'posted')::text AS unresolved_journals,
-        (SELECT count(*) FROM journals WHERE idempotency_key IS NULL OR btrim(idempotency_key)='')::text AS missing_idempotency_keys,
+        (SELECT count(*) FROM journals WHERE idempotency_key IS NULL OR idempotency_key !~ '[^[:space:]]')::text AS missing_idempotency_keys,
         (SELECT count(*) FROM (SELECT idempotency_key FROM journals
            WHERE idempotency_key IS NOT NULL GROUP BY idempotency_key HAVING count(*)>1) d)::text AS duplicate_idempotency_keys,
         (SELECT count(*) FROM entries WHERE journal_exists IS NULL OR account_exists IS NULL
@@ -75,6 +76,9 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
           OR entry_type IS NULL OR entry_type NOT IN ('debit','credit')
           OR amount IS NULL OR amount::text IN ('NaN','Infinity','-Infinity')
           OR amount<=0 OR amount<>trunc(amount,8))::text AS invalid_entries,
+        (SELECT count(*) FROM accounts WHERE currency IS DISTINCT FROM 'USDT')::text AS invalid_account_currencies,
+        (SELECT count(*) FROM journals WHERE idempotency_key ~ '[^[:space:]]'
+          AND idempotency_key ~ '^[[:space:]]|[[:space:]]$')::text AS noncanonical_idempotency_keys,
         (SELECT count(*) FROM bad_journals)::text AS unbalanced_posted_journals,
         (SELECT count(*) FROM customer_balances WHERE balance<0)::text AS negative_customer_accounts
     `);

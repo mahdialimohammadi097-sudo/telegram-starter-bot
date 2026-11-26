@@ -46,11 +46,44 @@ test("PostgreSQL integrity audit detects internal anomalies even when posted jou
     assert.equal(bad.clean,false);
     assert.deepEqual(bad.counts,{journals:"6",posted_journals:"5",entries:"8",
       unresolved_journals:"1",missing_idempotency_keys:"1",duplicate_idempotency_keys:"0",
-      invalid_entries:"4",unbalanced_posted_journals:"1",negative_customer_accounts:"1"});
+      invalid_entries:"4",invalid_account_currencies:"0",noncanonical_idempotency_keys:"0",
+      unbalanced_posted_journals:"1",negative_customer_accounts:"1"});
     assert.equal(bad.custodyVerified,false);
     assert.equal(bad.productionReady,false);
   } finally {
     if(fixture) await fixture.end();
     try { await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); } finally { await admin.end(); }
+  }
+});
+
+test("ledger integrity detects blank and padded identities, unused non-USDT accounts and non-finite amounts",{skip:!enabled},async()=>{
+  const schema="ledger_values_"+randomUUID().replaceAll("-","");
+  const admin=new pg.Pool({connectionString:process.env.DATABASE_URL});
+  let fixture;
+  try{
+    await admin.query('CREATE SCHEMA "'+schema+'"');
+    fixture=new pg.Pool({connectionString:process.env.DATABASE_URL,options:"-c search_path="+schema});
+    await fixture.query(await readFile(new URL("../test/fixtures/ledger-contract.sql",import.meta.url),"utf8"));
+    await fixture.query("INSERT INTO ledger_accounts(id,account_code,account_type,currency) VALUES (1,'fixture-a','CLEARING','USDT'),(2,'fixture-b','CLEARING','USDT'),(3,'unused','CLEARING','USDC')");
+    const unused=await auditLedgerIntegrity(admin,{schema});
+    assert.equal(unused.counts.invalid_account_currencies,"1");
+    assert.equal(unused.counts.invalid_entries,"0");
+    assert.equal(unused.clean,false);
+    await fixture.query("DELETE FROM ledger_accounts WHERE id=3");
+    assert.equal((await auditLedgerIntegrity(admin,{schema})).clean,true);
+    await fixture.query("INSERT INTO ledger_transactions(id,transaction_type,idempotency_key) VALUES (1,'fixture',$1),(2,'fixture',$2),(3,'fixture','nan-fixture')",["\t\n"," padded "]);
+    await fixture.query("INSERT INTO ledger_entries(transaction_id,account_id,entry_type,amount) VALUES (3,1,'debit','NaN'),(3,2,'credit','NaN')");
+    await fixture.query("UPDATE ledger_transactions SET status='posted' WHERE id=3");
+    const bad=await auditLedgerIntegrity(admin,{schema});
+    assert.equal(bad.counts.missing_idempotency_keys,"1");
+    assert.equal(bad.counts.noncanonical_idempotency_keys,"1");
+    assert.equal(bad.counts.invalid_entries,"2");
+    assert.equal(bad.counts.invalid_account_currencies,"0");
+    assert.equal(bad.clean,false);
+    assert.equal(bad.productionReady,false);
+    assert.equal(bad.custodyVerified,false);
+  }finally{
+    if(fixture)await fixture.end();
+    try{await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}finally{await admin.end();}
   }
 });
