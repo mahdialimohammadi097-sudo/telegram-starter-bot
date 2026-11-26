@@ -11,7 +11,17 @@ export const criticalTests=Object.freeze([
   "synthetic payout receipt confirmation recovers after a lost commit without a second send",
   "offline recovery rejects a corrupted held-account reference before transport access",
   "withdrawal schema rejects invalid state combinations and duplicate identities in PostgreSQL",
-  "one read-only snapshot reconciles simulated deposit, investment and withdrawal lifecycle"
+  "one read-only snapshot reconciles simulated deposit, investment and withdrawal lifecycle",
+  "restricted role verifies runtime inventory without schema creation rights",
+  "restricted startup options apply to two independent PostgreSQL pool connections",
+  "restricted checkout rejects reused session drift before application queries",
+  "restricted pool discards unfinished and aborted transactions without committing",
+  "access audit detects column-level, PUBLIC and delegable ledger privileges",
+  "access audit distinguishes session role paths, callable privileged routines and ledger function ownership",
+  "PostgreSQL audit verifies effective settings and cannot write ordinary tables",
+  "ledger integrity detects blank and padded identities, unused non-USDT accounts and non-finite amounts",
+  "ledger catalog audit detects disabled or missing financial guards without mutating them",
+  "combined ledger release evidence rejects incomplete or non-table relations"
 ]);
 
 export const startupTests=Object.freeze([

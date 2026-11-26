@@ -39,3 +39,14 @@ test("full release evidence also requires both offline startup isolation regress
   assert.deepEqual(verifyFinancialTestEvidence(tap,{full:true}),{tests:String(fullNames.length),critical:fullNames.length});
   assert.throws(()=>verifyFinancialTestEvidence(tap.replace(startupTests[0],"unrelated test"),{full:true}));
 });
+
+test("financial release evidence cannot omit any newly required database security regression",()=>{
+ const required=["restricted role verifies runtime inventory without schema creation rights","restricted startup options apply to two independent PostgreSQL pool connections","restricted checkout rejects reused session drift before application queries","restricted pool discards unfinished and aborted transactions without committing","access audit detects column-level, PUBLIC and delegable ledger privileges","access audit distinguishes session role paths, callable privileged routines and ledger function ownership","PostgreSQL audit verifies effective settings and cannot write ordinary tables","ledger integrity detects blank and padded identities, unused non-USDT accounts and non-finite amounts","ledger catalog audit detects disabled or missing financial guards without mutating them","combined ledger release evidence rejects incomplete or non-table relations"];
+ for(const name of required){
+  assert.ok(criticalTests.includes(name));
+  const line=success.split("\n").find(value=>value.endsWith(" - "+name));
+  assert.ok(line);
+  assert.throws(()=>verifyFinancialTestEvidence(success.replace(line,"ok 999 - unrelated fixture")),/Missing or ambiguous critical test evidence/);
+  assert.throws(()=>verifyFinancialTestEvidence(success.replace(line,line+" # SKIP")),/Missing or ambiguous critical test evidence/);
+ }
+});
