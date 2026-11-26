@@ -71,6 +71,14 @@ export function verifyFinancialTestEvidence(tap, {full=false}={}) {
     const matches=lines.filter(line=>line.replace(/^ok [1-9][0-9]* - /,"")===name && /^ok [1-9][0-9]* - /.test(line));
     if(matches.length!==1) throw new Error("Missing or ambiguous critical test evidence: "+name);
   }
+  // The reviewed Node reporter produces a flat, top-level TAP stream.
+  // Reject truncated, repeated or out-of-order assertions even when the
+  // final totals and all mandatory test names happen to be present.
+  const assertions=lines.filter(line=>/^ok\b/.test(line));
+  if(BigInt(assertions.length)!==totals.tests || assertions.some((line,index)=>{
+    const match=/^ok ([1-9][0-9]*) - .+$/.exec(line);
+    return !match || BigInt(match[1])!==BigInt(index+1) || /\s#\s*(?:SKIP|TODO)\b/i.test(line);
+  })) throw new Error("Incomplete or inconsistent flat TAP assertions");
   return {tests:String(totals.tests),critical:required.length};
 }
 

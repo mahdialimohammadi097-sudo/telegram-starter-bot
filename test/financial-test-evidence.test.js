@@ -96,3 +96,20 @@ test("release evidence requires the real PostgreSQL owner rehearsal regression",
  assert.ok(criticalTests.includes(name));
  assert.throws(()=>verifyFinancialTestEvidence(success.replace(name,"unrelated fixture")),/Missing or ambiguous critical test evidence/);
 });
+
+test("financial CI evidence rejects truncated or inconsistent noncritical assertions",()=>{
+  const number=names.length+1;
+  const line="ok "+number+" - ordinary regression";
+  const complete=success.replace("# tests "+names.length,line+"\n# tests "+number)
+    .replace("# pass "+names.length,"# pass "+number);
+  assert.deepEqual(verifyFinancialTestEvidence(complete),{tests:String(number),critical:names.length});
+  for(const tap of [
+    complete.replace(line+"\n",""),
+    complete.replace(line,line+"\n"+line),
+    complete.replace(line,"ok "+(number+1)+" - ordinary regression"),
+    complete.replace(line,"ok 1 - ordinary regression"),
+    complete.replace(line,line+" # SKIP"),
+    complete.replace(line,line+" # TODO"),
+    complete.replace(line,"  "+line)
+  ]) assert.throws(()=>verifyFinancialTestEvidence(tap),/Incomplete or inconsistent flat TAP assertions/);
+});
