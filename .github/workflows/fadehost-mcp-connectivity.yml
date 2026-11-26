@@ -54,9 +54,28 @@ jobs:
           init=rpc("initialize",{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"PROFINO read-only probe","version":"1.0"}},1)
           if not isinstance(init.get("protocolVersion"),str): raise SystemExit("FAIL: initialization")
           print("PASS: authenticated initialization")
-          tools=rpc("tools/list",{},2).get("tools")
+          # Enumerate advertised capability names only, including alternate names.
+          # Never print descriptions, arguments, provider data or credential values.
+          import re
+          page=rpc("tools/list",{},2)
+          tools=page.get("tools")
           if not isinstance(tools,list): raise SystemExit("FAIL: tool discovery")
-          names={t.get("name") for t in tools if isinstance(t,dict)}
+          cursors=set()
+          for i in range(4):
+              cursor=page.get("nextCursor")
+              if not cursor: break
+              if not isinstance(cursor,str) or cursor in cursors:
+                  raise SystemExit("FAIL: invalid discovery cursor")
+              cursors.add(cursor)
+              page=rpc("tools/list",{"cursor":cursor},100+i)
+              extra=page.get("tools")
+              if not isinstance(extra,list): raise SystemExit("FAIL: tool discovery page")
+              tools.extend(extra)
+          print("Capability inventory complete:",not bool(page.get("nextCursor")))
+          names={t.get("name") for t in tools if isinstance(t,dict) and isinstance(t.get("name"),str)}
+          for name in sorted(names):
+              if re.fullmatch(r"[a-z][a-z0-9_]{1,79}",name) and re.search(r"database|postgres|sql|network|backup|schedule|bot|app|deploy|firewall|environment|secret|token",name):
+                  print("Advertised capability:",name)
           for name in ("list_bots","get_bot","get_app","get_app_deployment","list_app_deployments","list_app_schedules","list_backups","run_app_command","list_databases","get_database","list_private_networks"):
               print("Capability",name+":",name in names)
           if "list_bots" not in names: raise SystemExit("FAIL: inventory unavailable")
