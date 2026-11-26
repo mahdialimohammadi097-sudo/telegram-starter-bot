@@ -28,6 +28,20 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(release.checksPassed,true);
     assert.equal(release.sameSnapshot,true);
     assert.deepEqual(release.relations,{inheritanceFree:true,rewriteRuleFree:true});
+    assert.equal(release.identityConstraints.checks.length,6);
+    assert.equal(release.identityConstraints.compatible,true);
+    // A clean empty ledger must not hide the loss of replay protection.
+    await pool.query("ALTER TABLE ledger_transactions DROP CONSTRAINT ledger_transactions_idempotency_key_key");
+    const missingIdentity=await collectLedgerReleaseEvidence(admin,{schema});
+    assert.equal(missingIdentity.integrity.clean,true);
+    assert.equal(missingIdentity.identityConstraints.compatible,false);
+    assert.equal(missingIdentity.checksPassed,false);
+    assert.deepEqual(missingIdentity.identityConstraints.checks.filter(x=>!x.compatible).map(x=>x.columns),[["idempotency_key"]]);
+    await pool.query("ALTER TABLE ledger_transactions ADD UNIQUE(idempotency_key) DEFERRABLE INITIALLY DEFERRED");
+    assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).identityConstraints.compatible,false);
+    await pool.query("ALTER TABLE ledger_transactions DROP CONSTRAINT ledger_transactions_idempotency_key_key");
+    await pool.query("ALTER TABLE ledger_transactions ADD UNIQUE(idempotency_key)");
+    assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).checksPassed,true);
     // Empty extra relations and rules must be detected independently of row integrity.
     await pool.query("CREATE TABLE extra_ledger_child () INHERITS (ledger_entries)");
     await assert.rejects(collectLedgerReleaseEvidence(admin,{schema}),/unreviewed inheritance or rewrite rules/);

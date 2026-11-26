@@ -34,14 +34,51 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
     if(!relations.inheritanceFree||!relations.rewriteRuleFree){
       throw new Error("Ledger relations contain unreviewed inheritance or rewrite rules");
     }
+    // A clean current snapshot is insufficient if duplicate identities are
+    // not constrained by the database. Inspect immediate, valid, nonpartial
+    // constraint-backed unique indexes, not merely their names.
+    const identityRows=(await client.query(`
+      SELECT c.relname AS table_name,k.contype,
+        ARRAY(SELECT a.attname::text
+          FROM pg_catalog.unnest(k.conkey) WITH ORDINALITY AS key(attnum,pos)
+          JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum=key.attnum
+          ORDER BY key.pos) AS columns,
+        k.convalidated AND NOT k.condeferrable AND NOT k.condeferred
+          AND i.indisunique AND i.indisvalid AND i.indisready AND i.indislive
+          AND i.indimmediate AND i.indpred IS NULL AND i.indexprs IS NULL
+          AND i.indrelid=c.oid AND i.indnkeyatts=pg_catalog.cardinality(k.conkey)
+          AND (k.contype<>'p' OR i.indisprimary) AS compatible
+      FROM pg_catalog.pg_constraint k
+      JOIN pg_catalog.pg_class c ON c.oid=k.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_catalog.pg_index i ON i.indexrelid=k.conindid
+      WHERE n.nspname=$1 AND c.relname IN ('ledger_accounts','ledger_transactions','ledger_entries')
+        AND k.contype IN ('p','u')
+    `,[schema])).rows;
+    if(!Array.isArray(identityRows))throw new Error("Incomplete ledger identity evidence");
+    const expected=[
+      ["ledger_accounts","p",["id"]],
+      ["ledger_transactions","p",["id"]],
+      ["ledger_entries","p",["id"]],
+      ["ledger_accounts","u",["account_code"]],
+      ["ledger_accounts","u",["user_id","account_type","currency"]],
+      ["ledger_transactions","u",["idempotency_key"]]
+    ];
+    const identities=expected.map(([table,type,columns])=>({
+      table,type,columns,
+      compatible:identityRows.some(row=>row.table_name===table&&row.contype===type&&
+        row.compatible===true&&Array.isArray(row.columns)&&
+        row.columns.length===columns.length&&columns.every((name,index)=>row.columns[index]===name))
+    }));
+    const identityConstraints={checks:identities,compatible:identities.every(x=>x.compatible)};
     const integrity=await inspectLedgerIntegrity(client,{schema});
     const triggers=await inspectLedgerTriggerContract(client,{schema});
     const reviewedBodies=await inspectReviewedLedgerBodies(client,{schema});
     return {
       audit:"ledger-release-evidence",scope:"internal-ledger-and-trigger-shape-only",
       sameSnapshot:true,
-      relations,integrity,triggers,reviewedBodies,
-      checksPassed:integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
+      relations,identityConstraints,integrity,triggers,reviewedBodies,
+      checksPassed:identityConstraints.compatible===true&&integrity.clean===true&&triggers.compatible===true&&reviewedBodies.match===true,
       custodyVerified:false,financialActivationReady:false,productionReady:false
     };
   });
