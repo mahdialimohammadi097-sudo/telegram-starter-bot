@@ -2,6 +2,8 @@
 
 Review candidate for the existing @PROFINO1bot and @PROFINO1 channel. Node.js / grammY, PostgreSQL 17, USDT. The existing FadeHost service is `telegram-bot`; pushes to `main` trigger automatic deployment.
 
+Public-facing management and support label: **PROFINO Management**. This brand label does not replace required legal entity, operator, licensing, or customer disclosures, nor does it assert independently verified registration.
+
 **Review only. NO-GO for real funds.** Do not create a second bot, deploy this candidate, apply production migrations, or activate financial operations on the strength of CI results.
 
 ## Free, isolated validation

@@ -848,7 +848,7 @@ export function registerCommands(bot, { openTestInvestment, inspectTestQueue, re
     if (choice === "Support") {
       const keyboard = new Keyboard().text("My Account").text("Referral Program").row()
         .text("My Wallet").text("Transaction History").row().text("⬅ Main Menu").resized();
-      return ctx.reply("SUPPORT\n\nSend /start to create or reopen your account.\n" +
+      return ctx.reply("PROFINO Management — SUPPORT\n\nSend /start to create or reopen your account.\n" +
         "Choose My Wallet to check your balance, or Transaction History to see recent entries.\n" +
         "Choose Referral Program to find your invite link.", { reply_markup: keyboard });
     }
