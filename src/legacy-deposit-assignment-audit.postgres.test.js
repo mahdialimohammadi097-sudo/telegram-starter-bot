@@ -68,6 +68,15 @@ test("legacy assignment audit counts collisions and requires the exact live uniq
       await assert.rejects(pool.query(`INSERT INTO ${table} VALUES (11,103,'active','deposit')`), { code:"23505" });
       await pool.query('DROP INDEX "' + schema + '".reviewed_candidate');
     }
+    // An unlogged table can lose all wallet assignments after a crash.
+    // Even an otherwise valid immediate unique index is insufficient.
+    await pool.query(`CREATE UNIQUE INDEX reviewed_candidate ON ${table}(wallet_id) WHERE status='active' AND assignment_type='deposit'`);
+    assert.equal((await audit()).ready,true);
+    await pool.query(`ALTER TABLE ${table} SET UNLOGGED`);
+    await assert.rejects(audit(), /Unsupported assignment relation/);
+    await pool.query(`ALTER TABLE ${table} SET LOGGED`);
+    assert.equal((await audit()).ready,true);
+    await pool.query('DROP INDEX "' + schema + '".reviewed_candidate');
     await pool.query(`ALTER TABLE ${table} ALTER COLUMN wallet_id DROP NOT NULL`);
     await assert.rejects(audit(), /nullable wallet key/);
   } finally {

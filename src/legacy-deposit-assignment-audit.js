@@ -62,7 +62,7 @@ async function inspectLegacyAssignments(client, schema) {
            ) AS wallet_not_null
     FROM pg_catalog.pg_class t
     JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace
-    WHERE n.nspname=$1 AND t.relname='user_wallet_assignments' AND t.relkind='r'
+    WHERE n.nspname=$1 AND t.relname='user_wallet_assignments' AND t.relkind='r' AND t.relpersistence='p'
   `, [schema]);
   if (table.rows?.length !== 1 || table.rows[0].standalone !== true ||
       table.rows[0].wallet_not_null !== true) {
