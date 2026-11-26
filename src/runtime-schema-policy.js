@@ -102,6 +102,8 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
     const sequences = await client.query(`
       SELECT c.relname AS table_name, a.attidentity, d.deptype,
         sn.nspname AS sequence_schema,
+        s.relpersistence='p' AND q.seqincrement=1 AND NOT q.seqcycle
+          AND q.seqmin>=1 AND q.seqstart>=q.seqmin AS reviewed_sequence_policy,
         pg_catalog.pg_get_expr(ad.adbin,ad.adrelid) =
           pg_catalog.format('nextval(%L::regclass)',s.oid::regclass::text) AS serial_default,
         pg_catalog.has_sequence_privilege(current_user,s.oid,'USAGE') AS can_use,
@@ -114,6 +116,7 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
         AND d.refobjsubid=a.attnum AND d.classid='pg_catalog.pg_class'::regclass AND d.deptype IN ('a','i')
       JOIN pg_catalog.pg_class s ON s.oid=d.objid AND s.relkind='S'
       JOIN pg_catalog.pg_namespace sn ON sn.oid=s.relnamespace
+      JOIN pg_catalog.pg_sequence q ON q.seqrelid=s.oid
       LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid=c.oid AND ad.adnum=a.attnum
       WHERE n.nspname=$1 AND c.relname=ANY($2::text[])
     `, [schema,generatedIdTables]);
@@ -123,7 +126,7 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
       const identity = ["a","d"].includes(row?.attidentity) && row.deptype==="i";
       const serial = row?.attidentity==="" && row.deptype==="a" && row.serial_default===true && row.can_use===true;
       if (matches?.length!==1 || row.sequence_schema!==schema || (!identity && !serial) ||
-          row.owner_access!==false || row.excessive_access!==false) {
+          row.reviewed_sequence_policy!==true || row.owner_access!==false || row.excessive_access!==false) {
         throw new Error("Runtime generated ID sequence missing or incompatible");
       }
     }

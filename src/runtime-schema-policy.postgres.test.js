@@ -269,6 +269,22 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/generated ID sequence missing or incompatible/);
   await q("RESET SESSION AUTHORIZATION");
   await q("REVOKE UPDATE ON SEQUENCE users_id_seq FROM "+role);
+  // Ownership and privileges can remain correct despite an unsafe generator
+  // policy. Exercise both the serial and identity fixtures.
+  for(const [change,restore] of [
+   ["ALTER SEQUENCE users_id_seq CYCLE","ALTER SEQUENCE users_id_seq NO CYCLE"],
+   ["ALTER SEQUENCE ledger_accounts_id_seq INCREMENT BY 2","ALTER SEQUENCE ledger_accounts_id_seq INCREMENT BY 1"],
+   ["ALTER SEQUENCE admin_audit_logs_id_seq MINVALUE 0","ALTER SEQUENCE admin_audit_logs_id_seq MINVALUE 1"]
+  ]){
+   await q(change);
+   await q("SET SESSION AUTHORIZATION "+role);
+   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/generated ID sequence missing or incompatible/);
+   await q("RESET SESSION AUTHORIZATION");
+   await q(restore);
+  }
+  await q("SET SESSION AUTHORIZATION "+role);
+  assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
+  await q("RESET SESSION AUTHORIZATION");
   await q("REVOKE INSERT(action) ON admin_audit_logs FROM "+role);
   await q("SET SESSION AUTHORIZATION "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/access or resolution mismatch/);
