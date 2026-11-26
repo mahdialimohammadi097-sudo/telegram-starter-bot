@@ -115,8 +115,8 @@ test("financial CI evidence rejects truncated or inconsistent noncritical assert
 });
 
 test("release evidence pins the latest isolation, financial boundary and shutdown regressions",()=>{
- const requiredPostgres=["legacy assignment audit counts collisions and requires the exact live unique index in PostgreSQL","legacy assignment audit fails closed when RLS would hide wallet collisions"];
- const requiredFull=["financial ingestion gate cannot be enabled by configuration","financial posting remains disabled and no RPC is called","rejects deposits beyond reviewed PostgreSQL numeric capacity before posting","owner rehearsal requires explicit independent test TLS policy before any database connection","owner dbschema connection failure returns only sanitized diagnostics in both languages","admin language fallback suppresses malformed diagnostic codes and raw errors","SIGTERM reports unsuccessful shutdown when PostgreSQL pool close fails"];
+ const requiredPostgres=["legacy assignment audit counts collisions and requires the exact live unique index in PostgreSQL","legacy assignment audit fails closed when RLS would hide wallet collisions","PostgreSQL 17 distinguishes session markers from an independently marked test database"];
+ const requiredFull=["financial ingestion gate cannot be enabled by configuration","financial posting remains disabled and no RPC is called","rejects deposits beyond reviewed PostgreSQL numeric capacity before posting","owner rehearsal requires explicit independent test TLS policy before any database connection","owner dbschema connection failure returns only sanitized diagnostics in both languages","admin language fallback suppresses malformed diagnostic codes and raw errors","SIGTERM reports unsuccessful shutdown when PostgreSQL pool close fails","simulation rejects a session-only staging marker before schema access"];
  const fullNames=[...names,...startupTests,...fullAuditTests];
  const fullTap=fullNames.map((name,i)=>"ok "+(i+1)+" - "+name).join("\n")+
    "\n# tests "+fullNames.length+"\n# pass "+fullNames.length+"\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";

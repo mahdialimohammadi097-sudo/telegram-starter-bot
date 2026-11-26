@@ -31,7 +31,8 @@ export const criticalTests=Object.freeze([
   "standalone ledger integrity detects ambiguous primary identities without relying on constraints",
   "owner rehearsal uses a separate marked PostgreSQL database and rejects replay or missing marker",
   "legacy assignment audit counts collisions and requires the exact live unique index in PostgreSQL",
-  "legacy assignment audit fails closed when RLS would hide wallet collisions"
+  "legacy assignment audit fails closed when RLS would hide wallet collisions",
+  "PostgreSQL 17 distinguishes session markers from an independently marked test database"
 ]);
 
 export const startupTests=Object.freeze([
@@ -55,7 +56,8 @@ export const fullAuditTests=Object.freeze([
   "owner rehearsal requires explicit independent test TLS policy before any database connection",
   "owner dbschema connection failure returns only sanitized diagnostics in both languages",
   "admin language fallback suppresses malformed diagnostic codes and raw errors",
-  "SIGTERM reports unsuccessful shutdown when PostgreSQL pool close fails"
+  "SIGTERM reports unsuccessful shutdown when PostgreSQL pool close fails",
+  "simulation rejects a session-only staging marker before schema access"
 ]);
 
 export function verifyFinancialTestEvidence(tap, {full=false}={}) {
