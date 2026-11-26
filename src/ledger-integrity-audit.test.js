@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { auditLedgerIntegrity } from "./ledger-integrity-audit.js";
 
-function fakePool({ bad = false, fail = false, currency = "0", key = "0", shape = true, relationCount = 3, visibility = true } = {}) {
+function fakePool({ bad = false, fail = false, currency = "0", key = "0", shape = true, relationCount = 3, visibility = true, reserve = "0" } = {}) {
   const calls = [];
   const row = { journals:"2", posted_journals:"2", entries:"4", unresolved_journals:"0",
     missing_idempotency_keys:"0", duplicate_idempotency_keys:"0", invalid_entries:"0",
     invalid_account_currencies:currency, noncanonical_idempotency_keys:key,
-    unbalanced_posted_journals:"0", negative_customer_accounts:bad?"1":"0" };
+    unbalanced_posted_journals:"0", negative_customer_accounts:bad?"1":"0", negative_noncustomer_protected_accounts:reserve };
   const client = { async query(sql) {
     calls.push(sql);
     if (sql.startsWith("BEGIN")) return { command:"BEGIN" };
@@ -65,4 +65,14 @@ test("integrity audit rejects unknown or unreviewed row visibility before readin
     assert.equal(calls.some(sql=>sql.includes("WITH journals")),false);
     assert.equal(calls.at(-2),"ROLLBACK");
   }
+});
+
+test("integrity audit treats negative protected noncustomer balances as discrepancies",async()=>{
+  const {pool,calls}=fakePool({reserve:"1"});
+  const result=await auditLedgerIntegrity(pool);
+  assert.equal(result.counts.negative_customer_accounts,"0");
+  assert.equal(result.counts.negative_noncustomer_protected_accounts,"1");
+  assert.equal(result.clean,false);
+  assert.ok(calls.some(sql=>sql.includes("upper(a.account_type)")&&sql.includes("user_id IS NULL AND balance<0")));
+  await assert.rejects(auditLedgerIntegrity(fakePool({reserve:null}).pool),/Incomplete ledger integrity audit/);
 });

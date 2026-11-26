@@ -3,7 +3,7 @@ import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 const findingKeys = [
   "unresolved_journals", "missing_idempotency_keys", "duplicate_idempotency_keys",
   "invalid_entries", "invalid_account_currencies", "noncanonical_idempotency_keys",
-  "unbalanced_posted_journals", "negative_customer_accounts"
+  "unbalanced_posted_journals", "negative_customer_accounts", "negative_noncustomer_protected_accounts"
 ];
 const countKeys = ["journals", "posted_journals", "entries", ...findingKeys];
 
@@ -83,13 +83,13 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
           OR EXISTS (SELECT 1 FROM currency_totals c WHERE c.transaction_id=j.id
             AND (c.lines<2 OR c.debits IS NULL OR c.credits IS NULL OR c.debits<>c.credits))
         )
-      ), customer_balances AS (
-        SELECT a.id, sum(CASE WHEN e.entry_type='credit' THEN e.amount
+      ), protected_balances AS (
+        SELECT a.id, a.user_id, sum(CASE WHEN e.entry_type='credit' THEN e.amount
                           WHEN e.entry_type='debit' THEN -e.amount ELSE 0 END) AS balance
         FROM accounts a JOIN entries e ON e.account_id=a.id
-        WHERE a.user_id IS NOT NULL AND a.account_type IN ('AVAILABLE','INVESTED','WITHDRAWAL_HOLD')
+        WHERE upper(a.account_type) IN ('AVAILABLE','INVESTED','WITHDRAWAL_HOLD')
           AND a.currency='USDT' AND e.currency='USDT' AND e.journal_status='posted'
-        GROUP BY a.id
+        GROUP BY a.id,a.user_id
       )
       SELECT
         (SELECT count(*) FROM journals)::text AS journals,
@@ -108,7 +108,8 @@ export async function inspectLedgerIntegrity(client,{schema="public"}={}) {
         (SELECT count(*) FROM journals WHERE idempotency_key ~ '[^[:space:]]'
           AND idempotency_key ~ '^[[:space:]]|[[:space:]]$')::text AS noncanonical_idempotency_keys,
         (SELECT count(*) FROM bad_journals)::text AS unbalanced_posted_journals,
-        (SELECT count(*) FROM customer_balances WHERE balance<0)::text AS negative_customer_accounts
+        (SELECT count(*) FROM protected_balances WHERE user_id IS NOT NULL AND balance<0)::text AS negative_customer_accounts,
+        (SELECT count(*) FROM protected_balances WHERE user_id IS NULL AND balance<0)::text AS negative_noncustomer_protected_accounts
     `);
     if (rows?.length !== 1 || countKeys.some(k => typeof rows[0][k] !== "string" ||
         !/^(0|[1-9][0-9]*)$/.test(rows[0][k])) ||
