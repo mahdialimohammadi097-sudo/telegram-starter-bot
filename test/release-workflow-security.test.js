@@ -53,3 +53,17 @@ test("manual ledger catalog export uses a bounded catalog-first read-only snapsh
  assert.doesNotMatch(sql,/SET LOCAL search_path[^;]*public/);
  assert.match(read("validate.yml"),/cmp "\$RUNNER_TEMP\/wallet_schema_reference\.catalog" "\$RUNNER_TEMP\/shadow\.catalog"/);
 });
+
+test("legacy integration workflows enforce complete financial evidence and reset both disposable databases",()=>{
+ for(const [file,fullTap] of [["integration-validator.yml","profino-tests"],["integration-postgres-matrix.yml","profino-matrix"]]){
+  const workflow=read(file);
+  assert.ok(workflow.includes('node scripts/verify-financial-test-evidence.js "$RUNNER_TEMP/'+fullTap+'.tap" --full'),file);
+  assert.ok(workflow.includes('node scripts/verify-financial-test-evidence.js "$RUNNER_TEMP/profino-focused.tap"'),file);
+  assert.match(workflow,/for db in profino_test catalog_rehearsal; do/,file);
+  assert.match(workflow,/psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1/,file);
+  assert.match(workflow,/npm run pretest:postgres/,file);
+  assert.match(workflow,/node --test --test-reporter=tap src\/\*\.postgres\.test\.js/,file);
+  assert.match(workflow,/set -euo pipefail/,file);
+  assert.doesNotMatch(workflow,/continue-on-error:|pull_request_target:|contents:\s*write\b/,file);
+ }
+});

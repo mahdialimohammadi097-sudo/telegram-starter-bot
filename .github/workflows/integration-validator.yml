@@ -76,18 +76,26 @@ jobs:
       - name: Unit and PostgreSQL integration tests
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/profino-tests.tap"
-          grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/profino-tests.tap"
-          # Some gated suites intentionally skip without their dedicated rehearsal target.
-          # Require the deposit evidence migration test itself to run and pass.
-          grep -Eq '^ok [0-9]+ - staged evidence migration creates constrained table and refuses existing relations$' "$RUNNER_TEMP/profino-tests.tap"
-      - name: Reset isolated catalog rehearsal database before focused tests
+          node scripts/verify-financial-test-evidence.js "$RUNNER_TEMP/profino-tests.tap" --full
+      - name: Reset disposable databases before focused PostgreSQL tests
         env:
           PGPASSWORD: postgres
+        shell: bash
         run: |
-          # CI-only disposable database; never use the production DATABASE_URL.
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE catalog_rehearsal WITH (FORCE)'
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
+          set -euo pipefail
+          # Only fixed disposable localhost CI databases; never use a production URL.
+          for db in profino_test catalog_rehearsal; do
+            psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "DROP DATABASE IF EXISTS $db WITH (FORCE)"
+            psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "CREATE DATABASE $db"
+          done
       - name: Focused PostgreSQL tests
-        run: npm run test:postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run pretest:postgres
+          node --test --test-reporter=tap src/*.postgres.test.js | tee "$RUNNER_TEMP/profino-focused.tap"
+          node scripts/verify-financial-test-evidence.js "$RUNNER_TEMP/profino-focused.tap"

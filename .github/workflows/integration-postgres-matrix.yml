@@ -60,19 +60,26 @@ jobs:
         run: |
           set -euo pipefail
           npm test -- --test-reporter=tap | tee "$RUNNER_TEMP/profino-matrix.tap"
-          node scripts/verify-financial-test-evidence.js "$RUNNER_TEMP/profino-matrix.tap"
-      - name: Reset isolated catalog database before focused PostgreSQL tests
+          node scripts/verify-financial-test-evidence.js "$RUNNER_TEMP/profino-matrix.tap" --full
+      - name: Reset disposable databases before focused PostgreSQL tests
         if: matrix.node-version == 22
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE catalog_rehearsal WITH (FORCE)'
-          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE catalog_rehearsal'
+          set -euo pipefail
+          # Only fixed disposable localhost CI databases; never use a production URL.
+          for db in profino_test catalog_rehearsal; do
+            psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "DROP DATABASE IF EXISTS $db WITH (FORCE)"
+            psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+              -c "CREATE DATABASE $db"
+          done
       - name: Focused PostgreSQL tests
         if: matrix.node-version == 22
         shell: bash
         run: |
           set -euo pipefail
+          npm run pretest:postgres
           node --test --test-reporter=tap src/*.postgres.test.js | tee "$RUNNER_TEMP/profino-focused.tap"
           node scripts/verify-financial-test-evidence.js "$RUNNER_TEMP/profino-focused.tap"
       - name: Restore and replay synthetic wallet activity on PostgreSQL 17
