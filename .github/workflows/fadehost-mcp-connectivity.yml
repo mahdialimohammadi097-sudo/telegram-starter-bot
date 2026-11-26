@@ -105,6 +105,23 @@ jobs:
                           if isinstance(v,list): return any(revision_match(x) for x in v)
                           return False
                       print("Known main revision in deployment inventory:",revision_match(value))
+                      # Inventory membership alone is not a running revision.
+                      # Only use explicit current/active deployment identifiers,
+                      # and never print provider IDs, commit values or raw metadata.
+                      refs={matches[0].get(k) for k in ("current_deployment_id","currentDeploymentId","active_deployment_id","activeDeploymentId") if isinstance(matches[0].get(k),str) and matches[0].get(k)}
+                      active=[d for d in value if isinstance(d,dict) and isinstance(d.get("id"),str) and d["id"] in refs]
+                      known={"e0d7509","e0d7509b43605493beb6a20485d5d17ce0ef8e16"}
+                      print("Explicit active deployment resolved:",len(refs)==1 and len(active)==1)
+                      if len(refs)==1 and len(active)==1:
+                          item=active[0]
+                          revisions={item[k] for k in ("commit_sha","commitSha","git_commit_sha","gitCommitSha","revision","sha") if isinstance(item.get(k),str) and item[k]}
+                          commit=item.get("commit")
+                          if isinstance(commit,dict) and isinstance(commit.get("sha"),str) and commit["sha"]:
+                              revisions.add(commit["sha"])
+                          print("Active deployment revision field recognized:",bool(revisions))
+                          print("Active deployment matches known main:",bool(revisions) and revisions.issubset(known))
+                      else:
+                          print("Active deployment revision: unverified")
                   if method=="list_app_schedules":
                       print("Schema audit schedule present:",any(isinstance(v,dict) and v.get("command")=="node scripts/fadehost-schema-audit.js" for v in value))
               else:
