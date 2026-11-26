@@ -43,6 +43,11 @@ test("ledger catalog audit detects disabled or missing financial guards without 
       assert.equal((await drifted.query("SELECT 'a'::name = 'a'::name AS equal")).rows[0].equal,false);
       const adapter={connect:async()=>({query:drifted.query.bind(drifted),release(error){assert.equal(error,undefined);}})};
       assert.equal((await collectLedgerReleaseEvidence(adapter,{schema})).checksPassed,true);
+      const standalone=await auditLedgerTriggerContract(adapter,{schema});
+      assert.equal(standalone.compatible,true);
+      assert.equal(standalone.checks.length,4);
+      assert.equal(standalone.functionBodiesVerified,false);
+      assert.equal(standalone.productionReady,false);
       // SET LOCAL must not permanently change the caller's search path.
       assert.equal((await drifted.query("SELECT 'a'::name = 'a'::name AS equal")).rows[0].equal,false);
     }finally{

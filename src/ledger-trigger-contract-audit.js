@@ -1,4 +1,4 @@
-import {runReadOnlyDepositAudit} from "./read-only-deposit-audit.js";
+import {runCatalogReadOnlyDepositAudit} from "./read-only-deposit-audit.js";
 
 // Catalog shape evidence only: enabled triggers and expected event/timing,
 // relation and function binding. This does not authenticate function bodies
@@ -12,7 +12,7 @@ const expected = Object.freeze([
 
 export async function auditLedgerTriggerContract(pool,{schema="public"}={}) {
   if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) throw new Error("Invalid ledger schema");
-  return runReadOnlyDepositAudit(pool,client=>inspectLedgerTriggerContract(client,{schema}));
+  return runCatalogReadOnlyDepositAudit(pool,client=>inspectLedgerTriggerContract(client,{schema}));
 }
 
 // Internal inspection; caller must hold a verified read-only snapshot.

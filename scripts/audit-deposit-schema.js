@@ -1,7 +1,7 @@
 // Operator-only, read-only readiness report. Never auto-runs in the bot.
 // DATABASE_URL must be a deliberately supplied least-privilege read-only DSN.
 import pg from "pg";
-import {runReadOnlyDepositAudit} from "../src/read-only-deposit-audit.js";
+import {runCatalogReadOnlyDepositAudit} from "../src/read-only-deposit-audit.js";
 import {auditCombinedDepositPreflight} from "../src/legacy-deposit-assignment-audit.js";
 import {resolveDatabaseTls} from "../src/database-tls-policy.js";
 import {safeDiagnosticCode} from "../src/diagnostic-safety.js";
@@ -20,7 +20,7 @@ try {
  pool.on("error",()=>{idleConnectionFailed=true;});
  const result=audit==="combined-deposit-preflight"
    ? await auditCombinedDepositPreflight(pool)
-   : await runReadOnlyDepositAudit(pool);
+   : await runCatalogReadOnlyDepositAudit(pool);
  // Do not publish a successful report before connection cleanup succeeds.
  await pool.end();
  pool=undefined;
