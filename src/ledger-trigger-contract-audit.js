@@ -33,7 +33,7 @@ export async function inspectLedgerTriggerContract(client,{schema="public"}={}) 
       JOIN pg_catalog.pg_namespace fn ON fn.oid=p.pronamespace
       JOIN pg_catalog.pg_language l ON l.oid=p.prolang
       WHERE n.nspname=$1 AND c.relkind='r' AND NOT t.tgisinternal
-        AND c.relname IN ('ledger_transactions','ledger_entries')
+        AND c.relname IN ('ledger_accounts','ledger_transactions','ledger_entries')
     `,[schema]);
     if(!Array.isArray(rows)) throw new Error("Incomplete ledger trigger evidence");
     const checks=expected.map(e=>{
@@ -46,6 +46,10 @@ export async function inspectLedgerTriggerContract(client,{schema="public"}={}) 
         x.trigger_result===true&&x.prosecdef===false&&x.prokind==="f"&&x.lanname==="plpgsql";
       return {name:e.name,present:matches.length===1,compatible};
     });
-    return {scope:"ledger-trigger-catalog-shape-only",checks,compatible:checks.every(c=>c.compatible),
+    // Any additional non-internal trigger, even disabled, needs independent review.
+    // Report only a count, never arbitrary database object names or function text.
+    const unexpectedTriggerCount=rows.filter(r=>!expected.some(e=>e.table===r.table_name&&e.name===r.trigger_name)).length;
+    return {scope:"ledger-trigger-catalog-shape-only",checks,unexpectedTriggerCount,
+      compatible:unexpectedTriggerCount===0&&checks.every(c=>c.compatible),
       functionBodiesVerified:false,productionReady:false};
 }

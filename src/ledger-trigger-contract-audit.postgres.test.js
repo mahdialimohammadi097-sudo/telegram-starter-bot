@@ -18,6 +18,7 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     const clean=await auditLedgerTriggerContract(admin,{schema});
     assert.equal(clean.compatible,true);
     assert.equal(clean.checks.length,4);
+    assert.equal(clean.unexpectedTriggerCount,0);
     assert.equal(clean.functionBodiesVerified,false);
     assert.equal(clean.productionReady,false);
     let connections=0;
@@ -30,6 +31,22 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(release.reviewedBodies.functionResolutionVerified,false);
     assert.equal(release.financialActivationReady,false);
     assert.equal(release.productionReady,false);
+    // A reviewed trigger set must not silently accept additional executable hooks.
+    await pool.query("CREATE TRIGGER extra_account_hook BEFORE UPDATE ON ledger_accounts FOR EACH ROW EXECUTE FUNCTION protect_posted_transaction()");
+    await pool.query("CREATE TRIGGER extra_entry_hook BEFORE UPDATE ON ledger_entries FOR EACH ROW EXECUTE FUNCTION protect_posted_entries()");
+    await pool.query("ALTER TABLE ledger_accounts DISABLE TRIGGER extra_account_hook");
+    const extra=await collectLedgerReleaseEvidence(admin,{schema});
+    assert.equal(extra.integrity.clean,true);
+    assert.equal(extra.reviewedBodies.match,true);
+    assert.equal(extra.triggers.checks.every(c=>c.compatible),true);
+    assert.equal(extra.triggers.unexpectedTriggerCount,2);
+    assert.equal(extra.triggers.compatible,false);
+    assert.equal(extra.checksPassed,false);
+    assert.equal(extra.financialActivationReady,false);
+    assert.equal(JSON.stringify(extra).includes("extra_account_hook"),false);
+    await pool.query("DROP TRIGGER extra_account_hook ON ledger_accounts");
+    await pool.query("DROP TRIGGER extra_entry_hook ON ledger_entries");
+    assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).checksPassed,true);
     await pool.query("ALTER TABLE ledger_entries DISABLE TRIGGER protect_posted_ledger_entries");
     const disabled=await auditLedgerTriggerContract(admin,{schema});
     assert.equal(disabled.compatible,false);
