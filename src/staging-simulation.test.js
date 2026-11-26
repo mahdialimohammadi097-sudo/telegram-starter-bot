@@ -188,7 +188,9 @@ test("simulation rejects a session-only staging marker before schema access", as
   const pool = { async query(sql) {
     calls++;
     assert.match(sql, /pg_catalog\.pg_db_role_setting/);
-    assert.match(sql, /s\.setrole = 0/);
+    assert.match(sql, /s\.setrole OPERATOR\(pg_catalog\.=\) 0::pg_catalog\.oid/);
+    assert.match(sql, /pg_catalog\.current_database\(\)/);
+    assert.match(sql, /pg_catalog\.current_setting\('profino\.environment', true\)/);
     return { rows: [{ environment: "isolated-staging", database_name: "profino_staging_it", database_marker: false }] };
   } };
   await assert.rejects(createStagingSimulationHandlers(pool, {
