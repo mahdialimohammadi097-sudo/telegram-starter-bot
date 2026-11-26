@@ -17,7 +17,14 @@ test("rejects invalid or zero amounts",()=>{
 test("rejects amounts outside uint256 before ledger conversion",()=>{
  const max=(1n<<256n)-1n;
  const scale=10000000000n;
- assert.match(bep20BaseUnitsToLedgerAmount((max-max%scale).toString()),/^\d+\.\d{8}$/);
+ assert.throws(()=>bep20BaseUnitsToLedgerAmount((max-max%scale).toString()),/ledger numeric capacity/);
  assert.throws(()=>bep20BaseUnitsToLedgerAmount(((max/scale+1n)*scale).toString()),/uint256/);
  assert.throws(()=>bep20BaseUnitsToLedgerAmount("9".repeat(10000)),/Invalid base units/);
+});
+
+test("rejects deposits beyond reviewed PostgreSQL numeric capacity before posting",()=>{
+ const maxUnits=10n**26n-1n, scale=10n**10n;
+ assert.equal(bep20BaseUnitsToLedgerAmount((maxUnits*scale).toString()),"999999999999999999.99999999");
+ assert.throws(()=>bep20BaseUnitsToLedgerAmount(((maxUnits+1n)*scale).toString()),/ledger numeric capacity/);
+ assert.throws(()=>bep20BaseUnitsToLedgerAmount(((maxUnits+2n)*scale).toString()),/ledger numeric capacity/);
 });
