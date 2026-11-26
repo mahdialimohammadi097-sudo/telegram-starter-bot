@@ -88,6 +88,7 @@ export function createBscDepositEvidenceReader({ rpcUrl, fetchImpl = fetch, time
       throw new Error("Transfer evidence changed during inspection");
     }
     const ledgerAmount = bep20BaseUnitsToLedgerAmount(evidence.amountBaseUnits);
-    return Object.freeze({ ...evidence, ledgerAmount });
+    // Preserve the canonical hash required by the durable evidence store.
+    return Object.freeze({ ...evidence, blockHash: canonical.hash.toLowerCase(), ledgerAmount });
   };
 }

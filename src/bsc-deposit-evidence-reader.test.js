@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createBscDepositEvidenceReader } from "./bsc-deposit-evidence-reader.js";
+import { persistVerifiedDepositEvidence } from "./verified-deposit-evidence-store.js";
 const a="0x"+"a".repeat(40),b="0x"+"b".repeat(40),c="0x"+"c".repeat(40),tx="0x"+"d".repeat(64),bh="0x"+"e".repeat(64);
 const topic="0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const t=x=>"0x"+x.slice(2).padStart(64,"0");
@@ -119,4 +120,17 @@ test("zero configured addresses fail before contacting RPC",async()=>{
  const {inspect,calls}=reader();
  for(const changed of [{depositAddress:zero},{tokenContract:zero}]) await assert.rejects(inspect(tx,"0x0",{...policy,...changed}),/address configuration/);
  assert.deepEqual(calls,[]);
+});
+
+test("verified reader output matches the durable evidence store contract",async()=>{
+ const evidence=await reader().inspect(tx,"0x0",policy);
+ assert.equal(evidence.blockHash,bh);
+ assert.equal(evidence.blockNumber,"109");
+ assert.equal(Object.isFrozen(evidence),true);
+ let calls=0;
+ const fixture={async query(sql,values){calls++;assert.match(sql,/INSERT INTO verified_deposit_evidence/);
+  assert.deepEqual(values,["bsc:56:"+tx+":0",bh,"109",a,b,"1000000000000000000"]);
+  return {rowCount:1};}};
+ assert.deepEqual(await persistVerifiedDepositEvidence(fixture,evidence),{inserted:true,eventKey:evidence.eventKey});
+ assert.equal(calls,1);
 });
