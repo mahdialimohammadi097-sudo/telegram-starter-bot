@@ -48,6 +48,10 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
 `
       SELECT c.relname AS table_name, a.attname AS column_name,
         c.relkind='r' AND c.relpersistence='p' AS ordinary_permanent,
+        NOT EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i
+          WHERE i.inhrelid=c.oid OR i.inhparent=c.oid) AS standalone_relation,
+        NOT EXISTS (SELECT 1 FROM pg_catalog.pg_rewrite rw
+          WHERE rw.ev_class=c.oid) AS rewrite_free,
         NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT EXISTS (
           SELECT 1 FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid
         ) AS reviewed_row_security,
@@ -73,7 +77,8 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
         const row = matching[0];
         // The reviewed non-financial runtime has no row filtering contract.
         // Reject a different topology or any unreviewed policy, even dormant.
-        if (row.ordinary_permanent !== true || row.reviewed_row_security !== true) {
+        if (row.ordinary_permanent !== true || row.standalone_relation !== true ||
+            row.rewrite_free !== true || row.reviewed_row_security !== true) {
           throw new Error("Runtime relation topology or row security incompatible");
         }
         if (row.resolves_expected !== true || row.schema_usage !== true || row.can_select !== true) {
