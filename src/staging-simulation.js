@@ -49,26 +49,8 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
   }
   // The older ledger review branch supports only reserved/cancelled. Refuse to
   // activate against that incompatible schema instead of silently losing payout state.
-  const { rows: [compatibility] } = await pool.query(`
-    SELECT EXISTS (
-      SELECT 1 FROM pg_attribute
-      WHERE attrelid = 'simulation_withdrawals'::regclass
-        AND attname IN ('submitted_hash', 'simulation_payload', 'destination',
-                        'payout_event', 'payout_id', 'clearing_id', 'status')
-        AND attnum > 0 AND NOT attisdropped
-      GROUP BY attrelid HAVING COUNT(*) = 7
-    ) AS extended_columns,
-    EXISTS (
-      SELECT 1 FROM pg_constraint c
-      WHERE c.conrelid = 'simulation_withdrawals'::regclass
-        AND c.contype = 'c'
-        AND pg_get_constraintdef(c.oid) LIKE '%reserved%'
-        AND pg_get_constraintdef(c.oid) LIKE '%cancelled%'
-        AND pg_get_constraintdef(c.oid) LIKE '%pending_receipt%'
-        AND pg_get_constraintdef(c.oid) LIKE '%paid%'
-    ) AS payout_state_constraint
-  `);
-  if (!compatibility?.extended_columns || !compatibility.payout_state_constraint) {
+  const compatibility = await inspectStagingWithdrawalSchema(pool);
+  if (compatibility?.extended_columns !== true || compatibility.payout_state_constraint !== true) {
     throw new Error("Incompatible staging withdrawal schema; migration review required");
   }
   return {
@@ -80,4 +62,34 @@ export async function createStagingSimulationHandlers(pool, env = process.env, a
     listTestHolds: userId => listReservedWithdrawals(pool, userId),
     testWithdrawalReview: simulationWithdrawalReview(pool)
   };
+}
+
+// A constraint merely mentioning the four names or marked NOT VALID does
+// not prove the reviewed state restriction.
+export async function inspectStagingWithdrawalSchema(pool) {
+  const {rows}=await pool.query(`
+    WITH target AS (
+      SELECT c.oid FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      WHERE c.oid=pg_catalog.to_regclass('simulation_withdrawals')
+        AND n.nspname=pg_catalog.current_schema() AND c.relkind='r' AND c.relpersistence='p'
+    ), expected(name,type) AS (VALUES
+      ('submitted_hash','text'),('simulation_payload','bytea'),('destination','text'),
+      ('payout_event','text'),('payout_id','bigint'),('clearing_id','bigint'),('status','text')
+    )
+    SELECT EXISTS (
+      SELECT 1 FROM target t JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid
+      JOIN expected e ON a.attname=e.name AND pg_catalog.format_type(a.atttypid,a.atttypmod)=e.type
+      WHERE a.attnum>0 AND NOT a.attisdropped AND (e.name<>'status' OR a.attnotnull)
+      GROUP BY t.oid HAVING COUNT(*) = 7
+    ) AS extended_columns,
+    EXISTS (
+      SELECT 1 FROM target t JOIN pg_catalog.pg_constraint c ON c.conrelid=t.oid
+      JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid AND a.attname='status'
+      WHERE c.contype='c' AND c.convalidated AND c.conkey=ARRAY[a.attnum]::smallint[]
+        AND pg_catalog.regexp_replace(pg_catalog.pg_get_expr(c.conbin,c.conrelid),'[[:space:]()]','','g') =
+          'status=ANYARRAY[''reserved''::text,''cancelled''::text,''pending_receipt''::text,''paid''::text]'
+    ) AS payout_state_constraint
+  `);
+  if(rows?.length!==1)throw new Error("Incompatible staging withdrawal schema; migration review required");
+  return rows[0];
 }

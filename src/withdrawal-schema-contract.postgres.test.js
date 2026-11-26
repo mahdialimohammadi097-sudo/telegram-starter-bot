@@ -106,3 +106,22 @@ test("withdrawal schema rejects invalid state combinations and duplicate identit
     // payload and posted journal identity need the separately reviewed guards.
   }finally{await client.query("ROLLBACK");client.release();}
 });
+
+test("staging preflight rejects permissive or unvalidated withdrawal state constraints",{skip:!enabled},async()=>{
+  const {inspectStagingWithdrawalSchema}=await import("./staging-simulation.js");
+  const client=await pool.connect();
+  try{
+    await client.query("BEGIN");
+    assert.deepEqual(await inspectStagingWithdrawalSchema(client),{extended_columns:true,payout_state_constraint:true});
+    await client.query("ALTER TABLE simulation_withdrawals DROP CONSTRAINT simulation_withdrawals_status_check");
+    await client.query("ALTER TABLE simulation_withdrawals ADD CONSTRAINT fake_state CHECK (status IN ('reserved','cancelled','pending_receipt','paid') OR true)");
+    assert.equal((await inspectStagingWithdrawalSchema(client)).payout_state_constraint,false);
+    await client.query("ALTER TABLE simulation_withdrawals DROP CONSTRAINT fake_state");
+    await client.query("ALTER TABLE simulation_withdrawals ADD CONSTRAINT reviewed_state CHECK (status IN ('reserved','cancelled','pending_receipt','paid')) NOT VALID");
+    assert.equal((await inspectStagingWithdrawalSchema(client)).payout_state_constraint,false);
+    await client.query("ALTER TABLE simulation_withdrawals VALIDATE CONSTRAINT reviewed_state");
+    assert.equal((await inspectStagingWithdrawalSchema(client)).payout_state_constraint,true);
+    await client.query("ALTER TABLE simulation_withdrawals ALTER COLUMN status DROP NOT NULL");
+    assert.equal((await inspectStagingWithdrawalSchema(client)).extended_columns,false);
+  }finally{await client.query("ROLLBACK");client.release();}
+});

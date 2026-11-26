@@ -73,7 +73,7 @@ test("simulation rejects wrong staging database identity before enabling writers
 test("simulation refuses legacy withdrawal schema lacking payout state", async () => {
   const pool = { async query(sql) {
     if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }] };
-    if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
+    if (sql.includes("to_regclass") && !sql.includes("pg_attribute")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
     return { rows: [{ extended_columns: false, payout_state_constraint: false }] };
   } };
   await assert.rejects(createStagingSimulationHandlers(pool, {
@@ -85,7 +85,7 @@ test("simulation refuses legacy withdrawal schema lacking payout state", async (
 test("simulation refuses extended columns without a four-state payout constraint", async () => {
   const pool = { async query(sql) {
     if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }] };
-    if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
+    if (sql.includes("to_regclass") && !sql.includes("pg_attribute")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
     return { rows: [{ extended_columns: true, payout_state_constraint: false }] };
   } };
   await assert.rejects(createStagingSimulationHandlers(pool, {
@@ -97,7 +97,7 @@ test("simulation refuses extended columns without a four-state payout constraint
 test("simulation refuses payout constraint when required columns are missing", async () => {
   const pool = { async query(sql) {
     if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }] };
-    if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
+    if (sql.includes("to_regclass") && !sql.includes("pg_attribute")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
     return { rows: [{ extended_columns: false, payout_state_constraint: true }] };
   } };
   await assert.rejects(createStagingSimulationHandlers(pool, {
@@ -110,12 +110,14 @@ test("staging schema preflight checks every supported withdrawal state", async (
   let checkedConstraint = false;
   const pool = { async query(sql) {
     if (sql.includes("current_setting")) return { rows: [{ environment: "isolated-staging", database_marker: true, database_name: "profino_staging_it" }] };
-    if (sql.includes("to_regclass")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
+    if (sql.includes("to_regclass") && !sql.includes("pg_attribute")) return { rows: [{ investments: true, withdrawals: true, reviewers: true }] };
     for (const state of ["reserved", "cancelled", "pending_receipt", "paid"]) {
-      assert.ok(sql.includes(`LIKE '%${state}%'`), `missing constraint check for ${state}`);
+      assert.ok(sql.includes(`''${state}''::text`), `missing constraint check for ${state}`);
     }
     assert.ok(sql.includes("'status'"), "withdrawal status column must be checked");
     assert.ok(sql.includes("HAVING COUNT(*) = 7"), "all seven required withdrawal columns must exist");
+    assert.match(sql,/c\.convalidated/);
+    assert.match(sql,/c\.conkey=ARRAY/);
     checkedConstraint = true;
     return { rows: [{ extended_columns: true, payout_state_constraint: true }] };
   } };
