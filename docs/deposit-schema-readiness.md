@@ -19,7 +19,7 @@ Exit status 0 means the selected limited checks passed; 2 means prerequisites ar
 
 ## Migration boundaries
 
-A reviewed evidence-table candidate exists at migrations/20261121_verified_deposit_evidence.sql. This is not evidence that the migration was applied to production. Historical ownership candidate PR #197 is separate, draft and review-only. Do not apply either candidate automatically. Independent provenance, actual schema and privileges, operational backup and isolated restoration, and separate migration authorization remain mandatory. Never infer historical ownership from current assignments.
+A reviewed evidence-table candidate exists at migrations/20261121_verified_deposit_evidence.sql. This is not evidence that the migration was applied to production. The historical ownership migration is now included in the cumulative draft PR #226 at `migrations/20261125_deposit_ownership_history.review.sql`; PR #197 is historical, not an independent merge or execution target. Both migrations remain review-only for production. Do not apply either candidate automatically, merge an overlapping historical branch, or infer deployment from the candidate file inventory. Independent provenance, actual schema and privileges, operational backup and isolated restoration, and separate migration authorization remain mandatory. Never infer historical ownership from current assignments.
 
 ## Current operational evidence (2026-11-25)
 
