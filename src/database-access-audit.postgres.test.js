@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
 import pg from "pg";
 import { inspectDatabaseAccess } from "./database-access-audit.js";
-import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
+import { runReadOnlyDepositAudit, runCatalogReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 const url = process.env.CATALOG_REHEARSAL_URL;
 function safeTarget() {
   return isDisposablePostgresTarget(url, "catalog_rehearsal");
@@ -12,7 +12,7 @@ function safeTarget() {
 test("PostgreSQL 17 returns bounded current-role evidence inside read-only snapshot", {skip:!safeTarget()}, async () => {
   const pool = new pg.Pool({connectionString:url,max:1});
   try {
-    const result = await runReadOnlyDepositAudit(pool, inspectDatabaseAccess);
+    const result = await runCatalogReadOnlyDepositAudit(pool, inspectDatabaseAccess);
     assert.equal(result.read_only,true);
     assert.equal(result.server_major,17);
     assert.equal(typeof result.tls,"boolean");
@@ -56,7 +56,7 @@ test("access audit detects column-level, PUBLIC and delegable ledger privileges"
  const suffix=randomUUID().replaceAll("-","");
  const schema="access_"+suffix, role="role_"+suffix;
  const pool=new pg.Pool({connectionString:url,max:1});
- const inspect=()=>runReadOnlyDepositAudit(pool,client=>inspectDatabaseAccess(client,{schema}));
+ const inspect=()=>runCatalogReadOnlyDepositAudit(pool,client=>inspectDatabaseAccess(client,{schema}));
  try{
   await pool.query('CREATE SCHEMA "'+schema+'"');
   await pool.query('CREATE ROLE "'+role+'" NOLOGIN');
@@ -127,7 +127,7 @@ test("access audit distinguishes session role paths, callable privileged routine
  const suffix=randomUUID().replaceAll("-","");
  const schema="paths_"+suffix, login="login_"+suffix, owner="owner_"+suffix;
  const pool=new pg.Pool({connectionString:url,max:1});
- const inspect=()=>runReadOnlyDepositAudit(pool,client=>inspectDatabaseAccess(client,{schema}));
+ const inspect=()=>runCatalogReadOnlyDepositAudit(pool,client=>inspectDatabaseAccess(client,{schema}));
  try{
   await pool.query('CREATE SCHEMA "'+schema+'"');
   await pool.query('CREATE ROLE "'+login+'" NOLOGIN');
@@ -167,5 +167,27 @@ test("access audit distinguishes session role paths, callable privileged routine
    await pool.query('DROP ROLE IF EXISTS "'+login+'"');
    await pool.query('DROP ROLE IF EXISTS "'+owner+'"');
   }finally{await pool.end();}
+ }
+});
+
+test("access catalog audit resists caller name-operator shadowing without changing session identity", {skip:!safeTarget()},async()=>{
+ const schema="access_shadow_"+randomUUID().replaceAll("-","");
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const client=await pool.connect();
+ try{
+  await client.query(`CREATE SCHEMA "${schema}";
+    CREATE FUNCTION "${schema}".fixture_name_equal(pg_catalog.name,pg_catalog.name)
+    RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT false';
+    CREATE OPERATOR "${schema}".= (LEFTARG=pg_catalog.name,RIGHTARG=pg_catalog.name,FUNCTION="${schema}".fixture_name_equal)`);
+  await client.query(`SET search_path = "${schema}", pg_catalog`);
+  assert.equal((await client.query("SELECT current_user = session_user AS same")).rows[0].same,false);
+  const adapter={connect:async()=>({query:client.query.bind(client),release(error){assert.equal(error,undefined);}})};
+  const result=await runCatalogReadOnlyDepositAudit(adapter,inspectDatabaseAccess);
+  assert.equal(result.session_role_matches,true);
+  assert.equal(result.read_only,true);
+  assert.equal((await client.query("SELECT current_user = session_user AS same")).rows[0].same,false);
+ }finally{
+  try{await client.query("RESET search_path");await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);}
+  finally{client.release(true);await pool.end();}
  }
 });

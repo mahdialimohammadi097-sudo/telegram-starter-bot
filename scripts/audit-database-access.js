@@ -1,7 +1,7 @@
 // Run manually through an authorized private connection. Never auto-run on startup.
 import pg from "pg";
 import { resolveDatabaseTls } from "../src/database-tls-policy.js";
-import { runReadOnlyDepositAudit } from "../src/read-only-deposit-audit.js";
+import { runCatalogReadOnlyDepositAudit } from "../src/read-only-deposit-audit.js";
 import { inspectDatabaseAccess } from "../src/database-access-audit.js";
 
 let pool;
@@ -14,7 +14,7 @@ try {
     max: 1, connectionTimeoutMillis: 10000,
     options: "-c default_transaction_read_only=on -c statement_timeout=10000 -c search_path=pg_catalog" });
   pool.on("error",()=>{idleFailure=true;});
-  evidence = await runReadOnlyDepositAudit(pool, inspectDatabaseAccess);
+  evidence = await runCatalogReadOnlyDepositAudit(pool, inspectDatabaseAccess);
 } catch {
   failure="AUDIT_FAILED";
 } finally {
