@@ -49,7 +49,7 @@ export function registerOwnerRehearsal(bot, {
     let passed = false;
     let idleFailure = false;
     try {
-      const { rows: [production] } = await productionPool.query("SELECT current_database() AS name");
+      const { rows: [production] } = await productionPool.query("SELECT pg_catalog.current_database() AS name");
       if (!production?.name) throw new Error("Production database identity unavailable");
       sandbox = createPool({
         connectionString: env.PROFINO_TEST_DATABASE_URL, max: 1,

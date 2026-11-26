@@ -2,14 +2,14 @@
 // to identify an isolated database. Require the database-wide catalog entry
 // (not a role override), in addition to the current effective value and name.
 export const isolatedDatabaseIdentitySql = `SELECT
-  current_database() AS database_name,
-  current_setting('profino.environment', true) AS environment,
+  pg_catalog.current_database() AS database_name,
+  pg_catalog.current_setting('profino.environment', true) AS environment,
   EXISTS (
     SELECT 1
     FROM pg_catalog.pg_db_role_setting s
-    JOIN pg_catalog.pg_database d ON d.oid = s.setdatabase
-    WHERE d.datname = current_database() AND s.setrole = 0
-      AND 'profino.environment=isolated-staging' = ANY(s.setconfig)
+    JOIN pg_catalog.pg_database d ON d.oid OPERATOR(pg_catalog.=) s.setdatabase
+    WHERE d.datname OPERATOR(pg_catalog.=) pg_catalog.current_database() AND s.setrole OPERATOR(pg_catalog.=) 0::pg_catalog.oid
+      AND 'profino.environment=isolated-staging'::pg_catalog.text OPERATOR(pg_catalog.=) ANY(s.setconfig)
   ) AS database_marker`;
 
 export function isIsolatedDatabaseIdentity(row, expectedName) {
