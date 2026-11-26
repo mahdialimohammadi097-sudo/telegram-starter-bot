@@ -28,12 +28,18 @@ jobs:
           if not token:
               raise SystemExit("Configure PROFINO_PRIMARY_BOT_TOKEN and rerun this job.")
 
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect)
+
           def telegram(method, **fields):
               endpoint = f"https://api.telegram.org/bot{token}/{method}"
               data = urllib.parse.urlencode(fields).encode()
               try:
-                  with urllib.request.urlopen(endpoint, data=data, timeout=15) as response:
-                      payload = json.load(response)
+                  with opener.open(urllib.request.Request(endpoint, data=data), timeout=15) as response:
+                      payload = json.loads(response.read(65537))
               except urllib.error.HTTPError as error:
                   raise SystemExit(f"{method} returned HTTP {error.code}.") from None
               except (OSError, ValueError):
@@ -51,4 +57,8 @@ jobs:
           if member["status"] != "creator" and not member.get("can_post_messages"):
               raise SystemExit("Channel posting permission is missing.")
           print("Verified permission to post to @PROFINO1.")
+          for flag in ("can_manage_chat", "can_edit_messages", "can_delete_messages",
+                       "can_invite_users", "can_promote_members", "can_change_info"):
+              print(flag + ":", member["status"] == "creator" or member.get(flag) is True)
+          print("Read-only check complete; no messages or settings changed.")
           PY
