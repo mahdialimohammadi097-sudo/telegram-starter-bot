@@ -246,6 +246,19 @@ test("restricted role verifies runtime inventory without schema creation rights"
    await q("RESET SESSION AUTHORIZATION");
    await q(revoke+" FROM "+role);
   }
+  // A sequence is independently mutable even when its table has no write grants.
+  await q(`CREATE SEQUENCE "${schema}".unreviewed_sequence_fixture`);
+  for(const [privilege,grantee] of [["USAGE",role],["UPDATE",role],["USAGE","PUBLIC"]]){
+   await q(`GRANT ${privilege} ON SEQUENCE "${schema}".unreviewed_sequence_fixture TO ${grantee}`);
+   await q("SET SESSION AUTHORIZATION "+role);
+   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/unreviewed application object access/);
+   await q("RESET SESSION AUTHORIZATION");
+   await q(`REVOKE ${privilege} ON SEQUENCE "${schema}".unreviewed_sequence_fixture FROM ${grantee}`);
+  }
+  await q("SET SESSION AUTHORIZATION "+role);
+  assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
+  await q("RESET SESSION AUTHORIZATION");
+  await q(`DROP SEQUENCE "${schema}".unreviewed_sequence_fixture`);
   await q("CREATE FUNCTION "+schema+".unreviewed_privileged_fixture() RETURNS integer LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'");
   await q("SET SESSION AUTHORIZATION "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/unreviewed application object access/);

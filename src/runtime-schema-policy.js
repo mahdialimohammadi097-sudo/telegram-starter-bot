@@ -101,7 +101,7 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
     }
     const sequences = await client.query(`
       SELECT c.relname AS table_name, a.attidentity, d.deptype,
-        sn.nspname AS sequence_schema,
+        sn.nspname AS sequence_schema, s.oid::text AS sequence_oid,
         s.relpersistence='p' AND q.seqincrement=1 AND NOT q.seqcycle
           AND q.seqmin>=1 AND q.seqstart>=q.seqmin AS reviewed_sequence_policy,
         pg_catalog.pg_get_expr(ad.adbin,ad.adrelid) =
@@ -120,15 +120,18 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
       LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid=c.oid AND ad.adnum=a.attnum
       WHERE n.nspname=$1 AND c.relname=ANY($2::text[])
     `, [schema,generatedIdTables]);
+    const reviewedSequenceOids=[];
     for (const table of generatedIdTables) {
       const matches = sequences.rows?.filter(row=>row.table_name===table);
       const row = matches?.[0];
       const identity = ["a","d"].includes(row?.attidentity) && row.deptype==="i";
       const serial = row?.attidentity==="" && row.deptype==="a" && row.serial_default===true && row.can_use===true;
       if (matches?.length!==1 || row.sequence_schema!==schema || (!identity && !serial) ||
-          row.reviewed_sequence_policy!==true || row.owner_access!==false || row.excessive_access!==false) {
+          row.reviewed_sequence_policy!==true || row.owner_access!==false || row.excessive_access!==false ||
+          typeof row.sequence_oid!=="string" || !/^[1-9][0-9]*$/.test(row.sequence_oid)) {
         throw new Error("Runtime generated ID sequence missing or incompatible");
       }
+      reviewedSequenceOids.push(row.sequence_oid);
     }
     const privileges = await client.query(
       `SELECT current_user = session_user AS same_session_role,
@@ -164,6 +167,13 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
             OR pg_catalog.has_table_privilege(current_user,c.oid,'INSERT, UPDATE, DELETE, TRUNCATE, TRIGGER'))
       ) AS unexpected_relation_access,
       EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname=$1 AND c.relkind='S' AND NOT (c.oid=ANY($3::oid[]))
+          AND (pg_catalog.pg_has_role(current_user,c.relowner,'MEMBER')
+            OR pg_catalog.has_sequence_privilege(current_user,c.oid,'USAGE, UPDATE'))
+      ) AS unexpected_sequence_access,
+      EXISTS (
         SELECT 1 FROM pg_catalog.pg_proc p
         JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname=$1 AND p.prosecdef
@@ -171,9 +181,10 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
           AND (pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
             OR pg_catalog.pg_has_role(current_user,p.proowner,'MEMBER'))
       ) AS unexpected_definer_access
-    `, [schema,Object.keys(required)]);
+    `, [schema,Object.keys(required),reviewedSequenceOids]);
     if (extraAccess.rows?.length !== 1 ||
         extraAccess.rows[0]?.unexpected_relation_access !== false ||
+        extraAccess.rows[0]?.unexpected_sequence_access !== false ||
         extraAccess.rows[0]?.unexpected_definer_access !== false) {
       throw new Error("Runtime role has unreviewed application object access");
     }
