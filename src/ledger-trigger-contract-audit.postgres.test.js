@@ -39,7 +39,7 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(blocked.financialActivationReady,false);
     assert.deepEqual(disabled.checks.filter(c=>!c.compatible).map(c=>c.name),["protect_posted_ledger_entries"]);
     await pool.query("ALTER TABLE ledger_entries ENABLE TRIGGER protect_posted_ledger_entries");
-    await pool.query("CREATE OR REPLACE FUNCTION validate_posted_transaction(p_transaction_id bigint) RETURNS void LANGUAGE plpgsql AS $ BEGIN RETURN; END; $");
+    await pool.query("CREATE OR REPLACE FUNCTION validate_posted_transaction(p_transaction_id bigint) RETURNS void LANGUAGE plpgsql AS 'BEGIN RETURN; END;'");
     const altered=await collectLedgerReleaseEvidence(admin,{schema});
     assert.equal(altered.integrity.clean,true);
     assert.equal(altered.triggers.compatible,true);
