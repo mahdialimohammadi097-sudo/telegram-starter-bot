@@ -42,6 +42,8 @@ export function registerOwnerRehearsal(bot, {
     if (running) return say("An admin test is already running.", "آزمون مدیر در حال اجراست.");
     running = true;
     let sandbox;
+    let passed = false;
+    let idleFailure = false;
     try {
       const { rows: [production] } = await productionPool.query("SELECT current_database() AS name");
       if (!production?.name) throw new Error("Production database identity unavailable");
@@ -51,6 +53,11 @@ export function registerOwnerRehearsal(bot, {
           PROFINO_DB_TLS_MODE: env.PROFINO_TEST_DB_TLS_MODE ?? "disable",
           PROFINO_DB_TLS_CA_PEM: env.PROFINO_TEST_DB_TLS_CA_PEM }),
         connectionTimeoutMillis: 10000, query_timeout: 15000
+      });
+      // An idle pg client error must not crash the existing bot or leak DSN data.
+      sandbox.on("error", error => {
+        idleFailure = true;
+        console.error("[admin-test] idle test connection failed:", safeDiagnosticCode(error));
       });
       const { rows: [test] } = await sandbox.query(isolatedDatabaseIdentitySql);
       if (!isIsolatedDatabaseIdentity(test, env.PROFINO_TEST_DATABASE_NAME) ||
@@ -83,15 +90,25 @@ export function registerOwnerRehearsal(bot, {
       if (before.available !== after.available || before.hold !== after.hold) {
         throw new Error("Test wallet reconciliation failed");
       }
-      await say("Admin test passed. Reserved and released 1 test USDT. Balances reconciled.",
-        "آزمون مدیر موفق بود. ۱ تتر آزمایشی رزرو و آزاد شد و موجودی تطبیق داده شد.");
+      passed = true;
     } catch (error) {
       console.error("[admin-test] rehearsal failed:", safeDiagnosticCode(error));
-      await say("Admin test could not be completed. Review the test database and its logs.",
-        "آزمون مدیر کامل نشد. دیتابیس آزمایشی و گزارش آن را بررسی کنید.");
     } finally {
+      // Do not publish success until the isolated pool has closed successfully.
       try { await sandbox?.end(); }
-      finally { running = false; }
+      catch (error) {
+        passed = false;
+        console.error("[admin-test] test connection cleanup failed:", safeDiagnosticCode(error));
+      }
+      try {
+        if (passed && !idleFailure) {
+          await say("Admin test passed. Reserved and released 1 test USDT. Balances reconciled.",
+            "آزمون مدیر موفق بود. ۱ تتر آزمایشی رزرو و آزاد شد و موجودی تطبیق داده شد.");
+        } else {
+          await say("Admin test could not be completed. Review the test database and its logs.",
+            "آزمون مدیر کامل نشد. دیتابیس آزمایشی و گزارش آن را بررسی کنید.");
+        }
+      } finally { running = false; }
     }
   });
 }

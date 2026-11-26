@@ -44,7 +44,8 @@ export const fullAuditTests=Object.freeze([
   "integrity audit treats negative protected noncustomer balances as discrepancies",
   "integrity audit rejects duplicate or missing row identity evidence",
   "manual ledger catalog export uses a bounded catalog-first read-only snapshot",
-  "owner rehearsal requires exact intermediate reservation movement and rejects cancelled replay"
+  "owner rehearsal requires exact intermediate reservation movement and rejects cancelled replay",
+  "owner rehearsal publishes success only after isolated connection cleanup"
 ]);
 
 export function verifyFinancialTestEvidence(tap, {full=false}={}) {

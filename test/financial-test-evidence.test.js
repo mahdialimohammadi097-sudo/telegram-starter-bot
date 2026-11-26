@@ -80,3 +80,13 @@ test("full release gate requires the intermediate owner rehearsal reconciliation
    "\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";
  assert.throws(()=>verifyFinancialTestEvidence(tap.replace(name,"unrelated fixture"),{full:true}),/Missing or ambiguous critical test evidence/);
 });
+
+test("full release evidence requires owner rehearsal cleanup verification",()=>{
+ const name="owner rehearsal publishes success only after isolated connection cleanup";
+ assert.ok(fullAuditTests.includes(name));
+ const fullNames=[...names,...startupTests,...fullAuditTests];
+ const tap=fullNames.map((n,i)=>"ok "+(i+1)+" - "+n).join("\n")+
+   "\n# tests "+fullNames.length+"\n# pass "+fullNames.length+
+   "\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";
+ assert.throws(()=>verifyFinancialTestEvidence(tap.replace(name,"unrelated fixture"),{full:true}),/Missing or ambiguous critical test evidence/);
+});

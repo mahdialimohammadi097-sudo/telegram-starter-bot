@@ -2,16 +2,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { registerOwnerRehearsal } from "./owner-rehearsal.js";
 
-function setup({ name = "profino_test", marker = "isolated-staging", databaseMarker = true, configured = true, testUrl = "postgresql://localhost/profino_test", reservation = { id: "12", amount: "1", status: "reserved" }, snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "4", WITHDRAWAL_HOLD: "1" }, { AVAILABLE: "5" }] } = {}) {
+function setup({ name = "profino_test", marker = "isolated-staging", databaseMarker = true, configured = true, testUrl = "postgresql://localhost/profino_test", reservation = { id: "12", amount: "1", status: "reserved" }, closeError = false, idleError = false, cancelError = false, snapshots = [{ AVAILABLE: "5" }, { AVAILABLE: "4", WITHDRAWAL_HOLD: "1" }, { AVAILABLE: "5" }] } = {}) {
   let reads = 0;
   const calls = [];
   let handler;
+  let idleListener;
+  const replyStates = [];
   const sandbox = {
+    on(event, fn) { assert.equal(event, "error"); idleListener = fn; },
     async query(sql) {
       calls.push("sandbox-read");
       return { rows: sql.includes("current_database") ? [{ database_name: name, environment: marker, database_marker: databaseMarker }] : [{ id: "9" }] };
     },
-    async end() { calls.push("closed"); }
+    async end() {
+      calls.push("closed");
+      if (idleError) idleListener(new Error("private fixture idle error"));
+      if (closeError) throw new Error("private fixture close error");
+    }
   };
   registerOwnerRehearsal({ command(name, fn) { assert.equal(name, "admintest"); handler = fn; } }, {
     productionPool: { async query() { calls.push("production-read"); return { rows: [{ name: "profino-db" }] }; } },
@@ -23,12 +30,12 @@ function setup({ name = "profino_test", marker = "isolated-staging", databaseMar
       assert.equal(pool, sandbox); assert.equal(id, "9"); assert.equal(key, "owner-rehearsal:32");
       assert.equal(amount, "1"); calls.push("reserve"); return reservation;
     },
-    cancel: async pool => { assert.equal(pool, sandbox); calls.push("cancel"); }
+    cancel: async pool => { assert.equal(pool, sandbox); calls.push("cancel"); if (cancelError) throw new Error("private fixture cancellation error"); }
   });
   const messages = [];
   const ctx = { from: { id: 10 }, chat: { id: 10, type: "private" }, message: { message_id: 32 },
-    reply: async text => messages.push(text) };
-  return { handler, ctx, calls, messages };
+    reply: async text => { replyStates.push(calls.at(-1)); messages.push(text); } };
+  return { handler, ctx, calls, messages, replyStates };
 }
 test("same-bot owner rehearsal routes its writes exclusively to the isolated database", async () => {
   const s = setup();
@@ -101,4 +108,23 @@ test("owner rehearsal requires exact intermediate reservation movement and rejec
   const s=setup({snapshots:[{AVAILABLE:"5",WITHDRAWAL_HOLD:"2"},{AVAILABLE:"4",WITHDRAWAL_HOLD:"3"},{AVAILABLE:"5",WITHDRAWAL_HOLD:"2"}]});
   await s.handler(s.ctx);
   assert.match(s.messages[0],/موفق/);
+});
+
+test("owner rehearsal publishes success only after isolated connection cleanup",async()=>{
+  const clean=setup();
+  await clean.handler(clean.ctx);
+  assert.match(clean.messages[0],/موفق/);
+  assert.deepEqual(clean.replyStates,["closed"]);
+  for(const config of [{closeError:true},{idleError:true},{cancelError:true}]){
+    const s=setup(config);
+    await s.handler(s.ctx);
+    assert.equal(s.messages.length,1);
+    assert.match(s.messages[0],/کامل نشد/);
+    assert.deepEqual(s.replyStates,["closed"]);
+    assert.ok(s.calls.includes("cancel"));
+    // A failed cleanup must not permanently lock the command.
+    await s.handler(s.ctx);
+    assert.equal(s.calls.filter(call=>call==="production-read").length,2);
+    assert.doesNotMatch(s.messages[1],/در حال اجراست/);
+  }
 });
