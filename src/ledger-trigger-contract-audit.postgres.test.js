@@ -27,7 +27,7 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(connections,1);
     assert.equal(release.checksPassed,true);
     assert.equal(release.sameSnapshot,true);
-    assert.deepEqual(release.relations,{inheritanceFree:true,rewriteRuleFree:true});
+    assert.deepEqual(release.relations,{inheritanceFree:true,rewriteRuleFree:true,rowSecurityFree:true,rowPolicyFree:true});
     assert.equal(release.identityConstraints.checks.length,6);
     assert.equal(release.identityConstraints.compatible,true);
     assert.equal(release.foreignKeys.checks.length,3);
@@ -112,6 +112,15 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     await pool.query("CREATE RULE extra_ledger_rule AS ON UPDATE TO ledger_accounts DO INSTEAD NOTHING");
     await assert.rejects(collectLedgerReleaseEvidence(admin,{schema}),/unreviewed inheritance or rewrite rules/);
     await pool.query("DROP RULE extra_ledger_rule ON ledger_accounts");
+    await pool.query("ALTER TABLE ledger_entries ENABLE ROW LEVEL SECURITY");
+    await assert.rejects(collectLedgerReleaseEvidence(admin,{schema}),/unreviewed row security configuration/);
+    await pool.query("ALTER TABLE ledger_entries FORCE ROW LEVEL SECURITY");
+    await pool.query("ALTER TABLE ledger_entries DISABLE ROW LEVEL SECURITY");
+    await assert.rejects(collectLedgerReleaseEvidence(admin,{schema}),/unreviewed row security configuration/);
+    await pool.query("ALTER TABLE ledger_entries NO FORCE ROW LEVEL SECURITY");
+    await pool.query("CREATE POLICY dormant_fixture ON ledger_entries USING (false)");
+    await assert.rejects(collectLedgerReleaseEvidence(admin,{schema}),/unreviewed row security configuration/);
+    await pool.query("DROP POLICY dormant_fixture ON ledger_entries");
     assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).checksPassed,true);
     assert.equal(release.reviewedBodies.match,true);
     assert.equal(release.reviewedBodies.functionResolutionVerified,false);

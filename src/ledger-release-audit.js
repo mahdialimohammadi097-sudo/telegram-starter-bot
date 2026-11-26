@@ -9,7 +9,8 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
   if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) throw new Error("Invalid ledger schema");
   return runReadOnlyDepositAudit(pool,async client=>{
     const {rows}=await client.query(`
-      SELECT c.relname,c.relkind,c.relpersistence,
+      SELECT c.relname,c.relkind,c.relpersistence,c.relrowsecurity,c.relforcerowsecurity,
+        EXISTS (SELECT 1 FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid) AS has_policy,
         EXISTS (SELECT 1 FROM pg_catalog.pg_inherits i
           WHERE i.inhrelid=c.oid OR i.inhparent=c.oid) AS inheritance_link,
         EXISTS (SELECT 1 FROM pg_catalog.pg_rewrite rw
@@ -24,15 +25,23 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
     // Inheritance can expand a normal SELECT beyond the reviewed tables.
     // Rewrite rules can alter the meaning of future writes without a trigger.
     // Fail closed on either; do not return object names or rule definitions.
-    if(rows.some(r=>typeof r.inheritance_link!=="boolean"||typeof r.rewrite_rule!=="boolean")){
+    if(rows.some(r=>["inheritance_link","rewrite_rule","relrowsecurity","relforcerowsecurity","has_policy"].some(key=>typeof r[key]!=="boolean"))){
       throw new Error("Incomplete ledger relation evidence");
     }
     const relations={
       inheritanceFree:rows.every(r=>r.inheritance_link===false),
-      rewriteRuleFree:rows.every(r=>r.rewrite_rule===false)
+      rewriteRuleFree:rows.every(r=>r.rewrite_rule===false),
+      rowSecurityFree:rows.every(r=>r.relrowsecurity===false&&r.relforcerowsecurity===false),
+      rowPolicyFree:rows.every(r=>r.has_policy===false)
     };
     if(!relations.inheritanceFree||!relations.rewriteRuleFree){
       throw new Error("Ledger relations contain unreviewed inheritance or rewrite rules");
+    }
+    // Historical ledger contract contains no reviewed RLS policy. Even a
+    // privileged audit session may bypass a policy that filters runtime rows.
+    // Do not qualify an unreviewed policy, including dormant policies.
+    if(!relations.rowSecurityFree||!relations.rowPolicyFree){
+      throw new Error("Ledger relations contain unreviewed row security configuration");
     }
     // Compare the historical reviewed column contract before interpreting any
     // amounts. Floating point, unexpected precision and nullable required
