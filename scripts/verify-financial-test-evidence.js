@@ -14,7 +14,12 @@ export const criticalTests=Object.freeze([
   "one read-only snapshot reconciles simulated deposit, investment and withdrawal lifecycle"
 ]);
 
-export function verifyFinancialTestEvidence(tap) {
+export const startupTests=Object.freeze([
+  "misconfigured staging production bot cannot reach schema preparation or Telegram writes",
+  "misconfigured staging wrong database cannot reach schema preparation or Telegram writes"
+]);
+
+export function verifyFinancialTestEvidence(tap, {full=false}={}) {
   if(typeof tap!=="string") throw new Error("Missing TAP evidence");
   const lines=tap.split(/\r?\n/);
   const totals={};
@@ -29,19 +34,22 @@ export function verifyFinancialTestEvidence(tap) {
     throw new Error("Financial test evidence is not entirely successful");
   }
   if(lines.some(line=>/^\s*not ok\b/.test(line))) throw new Error("Failed TAP assertion");
-  for(const name of criticalTests){
+  const required=[...criticalTests, "staging preflight rejects permissive or unvalidated withdrawal state constraints", ...(full?startupTests:[])];
+  for(const name of required){
     // Require a top-level positive assertion with the complete expected name.
     // A directive such as # SKIP or a mere diagnostic does not count.
     const matches=lines.filter(line=>line.replace(/^ok [1-9][0-9]* - /,"")===name && /^ok [1-9][0-9]* - /.test(line));
     if(matches.length!==1) throw new Error("Missing or ambiguous critical test evidence: "+name);
   }
-  return {tests:String(totals.tests),critical:criticalTests.length};
+  return {tests:String(totals.tests),critical:required.length};
 }
 
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   try{
-    if(process.argv.length!==3) throw new Error("Exactly one TAP evidence file required");
-    const result=verifyFinancialTestEvidence(readFileSync(process.argv[2],"utf8"));
+    if(process.argv.length!==3 && !(process.argv.length===4 && process.argv[3]==="--full")) {
+      throw new Error("One TAP evidence file and optional --full required");
+    }
+    const result=verifyFinancialTestEvidence(readFileSync(process.argv[2],"utf8"),{full:process.argv[3]==="--full"});
     console.log("Verified test evidence: "+result.tests+" passed; "+result.critical+" critical tests present.");
   }catch(error){
     console.error("Financial test evidence verification failed:",error.message);
