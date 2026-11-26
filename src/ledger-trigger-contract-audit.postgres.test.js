@@ -31,6 +31,25 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(release.generatedIds.checks.length,3);
     assert.equal(release.generatedIds.compatible,true);
     assert.equal(release.generatedIds.currentSequencePositionVerified,false);
+    // Simulate a caller with an explicit non-catalog-first path and an
+    // operator that would hide catalog rows before the audit pins resolution.
+    await pool.query(`CREATE FUNCTION "${schema}".fixture_name_equal(name,name)
+      RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT false';
+      CREATE OPERATOR "${schema}".= (LEFTARG=name, RIGHTARG=name,
+        FUNCTION="${schema}".fixture_name_equal)`);
+    const drifted=await pool.connect();
+    try{
+      await drifted.query(`SET search_path = "${schema}",pg_catalog`);
+      assert.equal((await drifted.query("SELECT 'a'::name = 'a'::name AS equal")).rows[0].equal,false);
+      const adapter={connect:async()=>({query:drifted.query.bind(drifted),release(error){assert.equal(error,undefined);}})};
+      assert.equal((await collectLedgerReleaseEvidence(adapter,{schema})).checksPassed,true);
+      // SET LOCAL must not permanently change the caller's search path.
+      assert.equal((await drifted.query("SELECT 'a'::name = 'a'::name AS equal")).rows[0].equal,false);
+    }finally{
+      drifted.release(true);
+      await pool.query(`DROP OPERATOR "${schema}".= (name,name);
+        DROP FUNCTION "${schema}".fixture_name_equal(name,name)`);
+    }
     await pool.query("ALTER TABLE ledger_entries ALTER COLUMN id SET DEFAULT 1");
     const wrongDefault=await collectLedgerReleaseEvidence(admin,{schema});
     assert.equal(wrongDefault.integrity.clean,true);

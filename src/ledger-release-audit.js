@@ -8,6 +8,13 @@ import {runReadOnlyDepositAudit} from "./read-only-deposit-audit.js";
 export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
   if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) throw new Error("Invalid ledger schema");
   return runReadOnlyDepositAudit(pool,async client=>{
+    // Pin name/operator resolution before any catalog comparison or deparse.
+    // The later integrity scan independently verifies its own visibility.
+    const path=await client.query("SET LOCAL search_path = pg_catalog");
+    const state=await client.query("SELECT pg_catalog.current_setting('search_path') AS search_path");
+    if(path?.command!=="SET"||state.rows?.length!==1||state.rows[0].search_path!=="pg_catalog"){
+      throw new Error("Ledger catalog search path incompatible");
+    }
     const {rows}=await client.query(`
       SELECT c.relname,c.relkind,c.relpersistence,c.relrowsecurity,c.relforcerowsecurity,
         EXISTS (SELECT 1 FROM pg_catalog.pg_policy p WHERE p.polrelid=c.oid) AS has_policy,
