@@ -176,7 +176,7 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
     }
     const trigger = await client.query(
 `
-      SELECT t.tgenabled, t.tgtype::int AS trigger_type, p.proname, fn.nspname AS function_schema,
+      SELECT t.tgname, t.tgenabled, t.tgtype::int AS trigger_type, p.proname, fn.nspname AS function_schema,
         t.tgqual IS NULL AS unconditional, t.tgnargs = 0 AS no_arguments,
         p.prosrc AS function_body, p.prosecdef, p.prokind, p.provolatile,
         p.pronargs AS function_arguments, p.proconfig, l.lanname,
@@ -189,10 +189,14 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
       JOIN pg_catalog.pg_namespace fn ON fn.oid = p.pronamespace
       JOIN pg_catalog.pg_language l ON l.oid = p.prolang
       WHERE n.nspname = $1 AND c.relname = 'scheduled_posts'
-        AND t.tgname = 'trg_scheduled_post_history' AND NOT t.tgisinternal
+        AND NOT t.tgisinternal
     `, [schema]);
     const row = trigger.rows?.[0];
-    if (trigger.rows?.length !== 1 || !["O","A"].includes(row?.tgenabled) ||
+    // The history trigger is the only reviewed noninternal scheduled-post
+    // trigger. Extra triggers can change an approved publication or suppress
+    // history; even disabled triggers are unreviewed catalog configuration.
+    if (trigger.rows?.length !== 1 || row?.tgname !== "trg_scheduled_post_history" ||
+        !["O","A"].includes(row?.tgenabled) ||
         row.trigger_type !== 21 || row.proname !== "profino_log_scheduled_post_history" ||
         row.function_schema !== schema || row.unconditional !== true || row.no_arguments !== true ||
         typeof row.function_body !== "string" || row.function_body.trim() !== postHistoryTriggerBody.trim() ||

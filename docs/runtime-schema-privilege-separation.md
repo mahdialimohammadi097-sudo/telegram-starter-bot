@@ -53,3 +53,6 @@ The same restricted startup inventory now requires no inheritance links in eithe
 
 ### Topology fixture correction
 The dd6b263 matrix failed on Node 22/24/26 at the newly introduced CREATE TABLE fixture: SQLSTATE 42501, unqualified creation targeted pg_catalog because the reviewed search path deliberately puts pg_catalog first. Explicitly schema-qualify the child/parent creation, inheritance references and cleanup within the disposable random schema. Do not change the runtime search path, role grants, catalog guard, test assertions or CI gates. All other five workflows passed at dd6b263; the corrected exact-head matrix must pass before further integration work. No production action.
+
+### Scheduled-post trigger inventory (2026-11-26)
+The reviewed `scheduled_posts` contract permits exactly one noninternal trigger, the named history trigger with its existing reviewed definition and metadata. Additional user triggers, even disabled, invalidate the verify-only inventory; internal foreign-key triggers are not included in this specific check. Disposable PostgreSQL tests cover an added BEFORE UPDATE trigger that suppresses changes, its disabled state, and restoration of the reviewed inventory. This does not establish the trigger contracts of other production tables or change the legacy startup mode. Exact-head CI required; no production DDL or grant change.

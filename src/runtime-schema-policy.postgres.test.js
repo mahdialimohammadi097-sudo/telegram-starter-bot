@@ -274,6 +274,24 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/access or resolution mismatch/);
   await q("RESET SESSION AUTHORIZATION");
   await q("GRANT INSERT(action) ON admin_audit_logs TO "+role);
+  // Additional user-defined triggers must not qualify merely because the
+  // original reviewed history trigger is present and enabled.
+  await q(`CREATE FUNCTION "${schema}".extra_post_trigger_fixture() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END; $$;
+    CREATE TRIGGER extra_post_trigger_fixture BEFORE UPDATE ON "${schema}".scheduled_posts
+    FOR EACH ROW EXECUTE FUNCTION "${schema}".extra_post_trigger_fixture()`);
+  await q("SET SESSION AUTHORIZATION "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/trigger missing or incompatible/);
+  await q("RESET SESSION AUTHORIZATION");
+  await q("ALTER TABLE scheduled_posts DISABLE TRIGGER extra_post_trigger_fixture");
+  await q("SET SESSION AUTHORIZATION "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/trigger missing or incompatible/);
+  await q("RESET SESSION AUTHORIZATION");
+  await q(`DROP TRIGGER extra_post_trigger_fixture ON "${schema}".scheduled_posts;
+    DROP FUNCTION "${schema}".extra_post_trigger_fixture()`);
+  await q("SET SESSION AUTHORIZATION "+role);
+  assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
+  await q("RESET SESSION AUTHORIZATION");
   await q("ALTER TABLE scheduled_posts DISABLE TRIGGER trg_scheduled_post_history");
   await q("SET SESSION AUTHORIZATION "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/trigger missing or incompatible/);
