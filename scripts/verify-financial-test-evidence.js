@@ -21,7 +21,8 @@ export const criticalTests=Object.freeze([
   "PostgreSQL audit verifies effective settings and cannot write ordinary tables",
   "ledger integrity detects blank and padded identities, unused non-USDT accounts and non-finite amounts",
   "ledger catalog audit detects disabled or missing financial guards without mutating them",
-  "combined ledger release evidence rejects incomplete or non-table relations"
+  "combined ledger release evidence rejects incomplete or non-table relations",
+  "wallet balance rejects duplicate account roles instead of combining them"
 ]);
 
 export const startupTests=Object.freeze([
