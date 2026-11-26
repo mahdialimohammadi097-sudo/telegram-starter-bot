@@ -267,6 +267,26 @@ test("restricted role verifies runtime inventory without schema creation rights"
   await q("SET SESSION AUTHORIZATION "+role);
   assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
   await q("RESET SESSION AUTHORIZATION");
+  // Trigger execution does not require EXECUTE privilege at runtime.
+  // A revoked callable privilege must not hide an indirect definer path.
+  await q(`CREATE FUNCTION "${schema}".indirect_definer_fixture() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$ BEGIN RETURN NEW; END; $$;
+    REVOKE ALL ON FUNCTION "${schema}".indirect_definer_fixture() FROM PUBLIC;
+    CREATE TRIGGER indirect_definer_fixture BEFORE INSERT ON "${schema}".users
+    FOR EACH ROW EXECUTE FUNCTION "${schema}".indirect_definer_fixture()`);
+  await q("SET SESSION AUTHORIZATION "+role);
+  assert.equal((await q("SELECT pg_catalog.has_function_privilege(current_user,$1,'EXECUTE') AS allowed",[schema+".indirect_definer_fixture()"])).rows[0].allowed,false);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/unreviewed application object access/);
+  await q("RESET SESSION AUTHORIZATION");
+  await q(`ALTER TABLE "${schema}".users DISABLE TRIGGER indirect_definer_fixture`);
+  await q("SET SESSION AUTHORIZATION "+role);
+  await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/unreviewed application object access/);
+  await q("RESET SESSION AUTHORIZATION");
+  await q(`DROP TRIGGER indirect_definer_fixture ON "${schema}".users;
+    DROP FUNCTION "${schema}".indirect_definer_fixture()`);
+  await q("SET SESSION AUTHORIZATION "+role);
+  assert.deepEqual(await verifyRuntimeSchema(adapter,{schema}),{operationalInventoryVerified:true,financialActivationReady:false});
+  await q("RESET SESSION AUTHORIZATION");
   await q("GRANT UPDATE(telegram_id) ON users TO "+role);
   await q("SET SESSION AUTHORIZATION "+role);
   await assert.rejects(verifyRuntimeSchema(adapter,{schema}),/excessive operational or ledger access/);

@@ -181,12 +181,21 @@ export async function verifyRuntimeSchema(pool, { schema = "public" } = {}) {
           AND NOT (p.proname='profino_lock_active_owner' AND p.pronargs=0 AND p.prokind='f')
           AND (pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')
             OR pg_catalog.pg_has_role(current_user,p.proowner,'MEMBER'))
-      ) AS unexpected_definer_access
-    `, [schema,Object.keys(required),reviewedSequenceOids]);
+      ) AS unexpected_definer_access,
+      EXISTS (
+        SELECT 1 FROM pg_catalog.pg_trigger t
+        JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+        JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
+        WHERE n.nspname=$1 AND c.relname=ANY($4::text[])
+          AND NOT t.tgisinternal AND p.prosecdef
+      ) AS unexpected_definer_trigger
+    `, [schema,Object.keys(required),reviewedSequenceOids,Object.keys(insertColumns)]);
     if (extraAccess.rows?.length !== 1 ||
         extraAccess.rows[0]?.unexpected_relation_access !== false ||
         extraAccess.rows[0]?.unexpected_sequence_access !== false ||
-        extraAccess.rows[0]?.unexpected_definer_access !== false) {
+        extraAccess.rows[0]?.unexpected_definer_access !== false ||
+        extraAccess.rows[0]?.unexpected_definer_trigger !== false) {
       throw new Error("Runtime role has unreviewed application object access");
     }
     const trigger = await client.query(
