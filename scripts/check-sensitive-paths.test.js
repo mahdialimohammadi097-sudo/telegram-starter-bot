@@ -15,3 +15,11 @@ test("allows schema migrations, sample environment files and public keys", () =>
     "test/fixture.js", "keys/id_ed25519.pub", "package-lock.json"];
   assert.equal(countSensitivePaths(paths), 0);
 });
+
+test("blocks encrypted and compressed PostgreSQL exports and service configuration",()=>{
+  const paths=[".pg_service.conf","config/pg_service.conf","private/DB.DUMP.AGE",
+    "exports/db.backup.gpg","exports/db.pgdump","exports/db.dump.gz.enc",
+    "exports/db.sql.xz","exports/db.sql.zst.age","exports/db.sql.gpg","exports/db.backup.zip"];
+  assert.equal(countSensitivePaths(paths),paths.length);
+  assert.equal(countSensitivePaths(["migrations/schema.sql","docs/backup.md","sample.pg_service.conf.example","public/logo.svg"]),0);
+});

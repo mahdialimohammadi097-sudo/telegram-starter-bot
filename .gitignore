@@ -15,3 +15,24 @@ node_modules/
 *.dump
 *.backup
 *.sql.gz
+
+# PostgreSQL service configuration and protected archive variants
+.pg_service.conf
+pg_service.conf
+*.pgdump
+*.dump.*
+*.backup.*
+*.pgdump.*
+*.sql.bz2
+*.sql.xz
+*.sql.zst
+*.sql.zip
+*.sql.age
+*.sql.gpg
+*.sql.enc
+*.sql.aes
+*.sql.gz.*
+*.sql.bz2.*
+*.sql.xz.*
+*.sql.zst.*
+*.sql.zip.*

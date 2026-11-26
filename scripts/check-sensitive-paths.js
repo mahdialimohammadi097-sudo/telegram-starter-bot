@@ -5,8 +5,10 @@ export function isSensitivePath(path) {
   const basename = path.split("/").at(-1).toLowerCase();
   if (basename === ".env.example" || basename === ".env.sample") return false;
   return /^\.env(?:\.|$)/.test(basename) ||
-    /^\.pgpass$|^\.npmrc\.local$/.test(basename) ||
-    /\.(?:pem|key|p12|pfx|pgpass|dump|backup|sql\.gz)$/.test(basename) ||
+    /^(?:\.pgpass|\.?pg_service\.conf|\.npmrc\.local)$/.test(basename) ||
+    /\.(?:pem|key|p12|pfx|pgpass)$/.test(basename) ||
+    /\.(?:dump|backup|pgdump|sql\.(?:gz|bz2|xz|zst|zip))(?:\.(?:gz|bz2|xz|zst|zip|age|gpg|enc|aes))*$/.test(basename) ||
+    /\.sql\.(?:age|gpg|enc|aes)$/.test(basename) ||
     /^(?:id_rsa|id_ed25519|id_ecdsa|id_dsa)$/.test(basename);
 }
 
