@@ -183,7 +183,7 @@ export async function collectLedgerReleaseEvidence(pool,{schema="public"}={}) {
     if(!Array.isArray(amountChecks))throw new Error("Incomplete amount constraint evidence");
     const positiveAmount=amountChecks.some(x=>x.convalidated===true&&x.connoinherit===false&&
       typeof x.expression==="string"&&
-      ["amount>0::numeric","amount>0"].includes(x.expression.replace(/[()\\s]/g,"")));
+      ["amount>0::numeric","amount>0"].includes(x.expression.replace(/[()\s]/g,"")));
     const amountConstraint={positiveAmount,compatible:positiveAmount};
     const integrity=await inspectLedgerIntegrity(client,{schema});
     const triggers=await inspectLedgerTriggerContract(client,{schema});
