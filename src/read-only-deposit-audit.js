@@ -44,13 +44,16 @@ export async function runReadOnlyDepositAudit(pool, inspect = auditDepositSchema
 
 // Use only for inspections whose relation references are explicitly qualified
 // or are reviewed system catalogs. Do not mask drift in the runtime-role audit.
+export async function pinDepositCatalogSearchPath(client) {
+  const set = await client.query("SET LOCAL search_path = pg_catalog, pg_temp");
+  const state = await client.query("SELECT pg_catalog.current_setting('search_path') AS search_path");
+  if (set?.command !== "SET" || state.rows?.length !== 1 || state.rows[0].search_path !== "pg_catalog, pg_temp") {
+    throw new Error("Deposit catalog search path incompatible");
+  }
+}
 export async function runCatalogReadOnlyDepositAudit(pool, inspect = auditDepositSchema) {
   return runReadOnlyDepositAudit(pool, async client => {
-    const set = await client.query("SET LOCAL search_path = pg_catalog, pg_temp");
-    const state = await client.query("SELECT pg_catalog.current_setting('search_path') AS search_path");
-    if (set?.command !== "SET" || state.rows?.length !== 1 || state.rows[0].search_path !== "pg_catalog, pg_temp") {
-      throw new Error("Deposit catalog search path incompatible");
-    }
+    await pinDepositCatalogSearchPath(client);
     return inspect(client);
   });
 }

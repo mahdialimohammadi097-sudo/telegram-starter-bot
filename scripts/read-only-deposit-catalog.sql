@@ -2,8 +2,10 @@
 -- Execute only with a database role that has SELECT/catalog read permissions.
 -- Never paste database credentials or user wallet assignments into PR logs.
 -- No DDL, DML, migrations, writes, or live financial activation.
-BEGIN TRANSACTION READ ONLY;
-SET LOCAL statement_timeout = '15s';
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '10s';
+SET LOCAL lock_timeout = '3s';
+SET LOCAL search_path = pg_catalog, pg_temp;
 
 -- Table and column contract, including numeric precision and nullability.
 SELECT table_name,column_name,data_type,numeric_precision,numeric_scale,is_nullable
@@ -43,6 +45,9 @@ ORDER BY t.relname,c.contype,c.conname;
 -- Server metadata only; does not expose credentials or user records.
 SELECT current_database() AS database_name,
        current_setting('server_version') AS server_version,
-       current_schema() AS schema_name;
+       'public' AS inspected_schema,
+       current_setting('search_path') AS effective_search_path,
+       current_setting('transaction_read_only') AS read_only,
+       current_setting('transaction_isolation') AS isolation;
 
 ROLLBACK;

@@ -9,6 +9,7 @@ function withConfirmedControl(client){
   if(sql.startsWith("BEGIN "))return {command:"BEGIN"};
   if(sql.startsWith("SET LOCAL "))return {command:"SET"};
   if(sql.includes("pg_catalog.current_setting('transaction_read_only')"))return {rows:[validSettings]};
+  if(sql.includes("pg_catalog.current_setting('search_path')"))return {rows:[{search_path:"pg_catalog, pg_temp"}]};
   if(sql==="ROLLBACK")return {command:"ROLLBACK"};
   return result;
  }};
@@ -33,6 +34,8 @@ test("read-only schema audit reports missing evidence without accessing user row
  assert.ok(result.missing.includes("unique:verified_deposit_evidence.event_key"));
  assert.equal(statements[0],"BEGIN READ ONLY ISOLATION LEVEL REPEATABLE READ");
  assert.equal(statements.at(-1),"ROLLBACK");
+ assert.ok(statements.indexOf("SET LOCAL search_path = pg_catalog, pg_temp") < statements.findIndex(sql=>sql.includes("information_schema.columns")));
+ assert.ok(statements.includes("SET LOCAL search_path = pg_catalog, pg_temp"));
  assert.ok(!statements.some(sql=>/SELECT\s+\*|FROM\s+users\b/i.test(sql)));
 });
 test("read-only schema audit rolls back when catalog inspection fails",async()=>{
@@ -253,14 +256,15 @@ test("startup report rejects ineffective evidence constraints even when legacy k
  assert.equal(result.realDepositsEnabled,false);
 });
 
-for(const scenario of ["begin","set","read-only","isolation","statement-timeout","lock-timeout","completion","failure-rollback"]){
+for(const scenario of ["begin","set","read-only","isolation","statement-timeout","lock-timeout","search-path","search-path-set","completion","failure-rollback"]){
  test("startup audit rejects uncertain session: "+scenario,async()=>{
   const queries=[],releases=[];
   const original=new Error("fixture catalog failure");
   const client={async query(sql){
    queries.push(sql);
    if(sql.startsWith("BEGIN "))return {command:scenario==="begin"?undefined:"BEGIN"};
-   if(sql.startsWith("SET LOCAL "))return {command:scenario==="set"?undefined:"SET"};
+   if(sql.startsWith("SET LOCAL "))return {command:scenario==="set"||(scenario==="search-path-set"&&sql.includes("search_path"))?undefined:"SET"};
+   if(sql.includes("pg_catalog.current_setting('search_path')"))return {rows:[{search_path:scenario==="search-path"?"public, pg_catalog":"pg_catalog, pg_temp"}]};
    if(sql.includes("pg_catalog.current_setting('transaction_read_only')")){
     const settings={...validSettings};
     if(scenario==="read-only")settings.read_only="off";

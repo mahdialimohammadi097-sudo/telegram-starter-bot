@@ -1,6 +1,7 @@
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { auditDepositSchema } from "./deposit-schema-audit.js";
 import { rollbackTransaction } from "./transaction-safety.js";
+import { pinDepositCatalogSearchPath } from "./read-only-deposit-audit.js";
 // Basic historical guard inventory, not proof of function bodies, interval semantics,
 // effective privileges or historical provenance. A missing guard must fail closed.
 export async function inspectHistoricalGuardInventory(client,schema="public") {
@@ -64,7 +65,8 @@ export async function inspectDepositSchemaReadOnly(pool) {
    pg_catalog.current_setting('lock_timeout') AS lock_timeout`);
   const settings=state.rows?.[0];
   if(state.rows?.length!==1||settings?.read_only!=="on"||settings.isolation!=="repeatable read"||settings.statement_timeout!=="5s"||settings.lock_timeout!=="3s")throw new Error("Schema audit transaction settings incompatible");
-  const result=await client.query(`SELECT table_name,column_name,data_type FROM information_schema.columns
+  await pinDepositCatalogSearchPath(client);
+ const result=await client.query(`SELECT table_name,column_name,data_type FROM information_schema.columns
    WHERE table_schema='public' AND table_name=ANY($1::text[])`,[Object.keys(required)]);
   const present=new Set(result.rows.map(r=>r.table_name+"."+r.column_name));
   const missing=Object.entries(required).flatMap(([table,columns])=>
