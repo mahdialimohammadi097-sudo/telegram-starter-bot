@@ -104,8 +104,8 @@ test("restricted role verifies runtime inventory without schema creation rights"
    ["ALTER TABLE admin_users ENABLE ROW LEVEL SECURITY","ALTER TABLE admin_users DISABLE ROW LEVEL SECURITY"],
    ["ALTER TABLE ledger_entries FORCE ROW LEVEL SECURITY","ALTER TABLE ledger_entries NO FORCE ROW LEVEL SECURITY"],
    ["CREATE POLICY dormant_fixture ON users USING (false)","DROP POLICY dormant_fixture ON users"],
-   ["CREATE TABLE extra_users_fixture () INHERITS (users)","DROP TABLE extra_users_fixture"],
-   ["CREATE TABLE parent_ledger_fixture (id bigint); ALTER TABLE ledger_entries INHERIT parent_ledger_fixture","ALTER TABLE ledger_entries NO INHERIT parent_ledger_fixture; DROP TABLE parent_ledger_fixture"],
+   [`CREATE TABLE "${schema}".extra_users_fixture () INHERITS ("${schema}".users)`,`DROP TABLE "${schema}".extra_users_fixture`],
+   [`CREATE TABLE "${schema}".parent_ledger_fixture (id bigint); ALTER TABLE "${schema}".ledger_entries INHERIT "${schema}".parent_ledger_fixture`,`ALTER TABLE "${schema}".ledger_entries NO INHERIT "${schema}".parent_ledger_fixture; DROP TABLE "${schema}".parent_ledger_fixture`],
    ["CREATE RULE suppress_user_insert AS ON INSERT TO users DO INSTEAD NOTHING","DROP RULE suppress_user_insert ON users"]
   ]){
    await q(change);
