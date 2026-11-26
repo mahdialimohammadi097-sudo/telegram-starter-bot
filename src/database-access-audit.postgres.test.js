@@ -191,3 +191,35 @@ test("access catalog audit resists caller name-operator shadowing without changi
   finally{client.release(true);await pool.end();}
  }
 });
+
+test("access audit distinguishes unexpected named relations from permanent ordinary ledger tables", {skip:!safeTarget()},async()=>{
+ const schema="access_shape_"+randomUUID().replaceAll("-","");
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const inspect=()=>runCatalogReadOnlyDepositAudit(pool,client=>inspectDatabaseAccess(client,{schema}));
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  const empty=await inspect();
+  assert.equal(empty.ledger_tables_present,0);
+  assert.equal(empty.ledger_named_relations_shape_compatible,true);
+  await pool.query('CREATE UNLOGGED TABLE "'+schema+'".ledger_accounts(id bigint)');
+  assert.equal((await inspect()).ledger_named_relations_shape_compatible,false);
+  await pool.query('DROP TABLE "'+schema+'".ledger_accounts');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_accounts(id bigint)');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_transactions(id bigint) PARTITION BY RANGE(id)');
+  assert.equal((await inspect()).ledger_named_relations_shape_compatible,false);
+  await pool.query('DROP TABLE "'+schema+'".ledger_transactions');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_transactions(id bigint)');
+  await pool.query('CREATE VIEW "'+schema+'".ledger_entries AS SELECT 1 AS id');
+  const wrong=await inspect();
+  assert.equal(wrong.ledger_tables_present,2);
+  assert.equal(wrong.ledger_named_relations_shape_compatible,false);
+  await pool.query('DROP VIEW "'+schema+'".ledger_entries');
+  await pool.query('CREATE TABLE "'+schema+'".ledger_entries(id bigint)');
+  const clean=await inspect();
+  assert.equal(clean.ledger_tables_present,3);
+  assert.equal(clean.ledger_named_relations_shape_compatible,true);
+ }finally{
+  try{await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');}
+  finally{await pool.end();}
+ }
+});

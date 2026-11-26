@@ -9,7 +9,7 @@ const fixture = { read_only:true, tls:false, server_major:17, privileged_role_me
  ledger_tables_rls_enabled:0,ledger_tables_delegable:3,ledger_tables_public_write:0,
  session_can_assume_other_role:true,schema_callable_security_definer:false,
  session_can_assume_ledger_function_owner:false,ledger_functions_public_execute:false,
- ledger_tables_session_owner_access:3,
+ ledger_tables_session_owner_access:3, ledger_named_relations_shape_compatible:true,
  ledger_tables_rls_forced:0,ledger_tables_rls_active:0,
  ledger_tables_with_policies:0,ledger_tables_public_write_policy:0 };
 test("access audit returns only explicit role and transport evidence", async () => {
@@ -18,6 +18,7 @@ test("access audit returns only explicit role and transport evidence", async () 
    assert.match(sql,/pg_has_role/);
    assert.match(sql,/has_any_column_privilege/);
    assert.match(sql,/aclexplode/);
+   assert.match(sql,/shape\.relpersistence/);
    assert.deepEqual(params,["public"]);
    return {rows:[{...fixture, unexpected:"synthetic sensitive data"}]};
  }});
@@ -25,7 +26,7 @@ test("access audit returns only explicit role and transport evidence", async () 
  assert.ok(Object.isFrozen(result));
 });
 test("access audit rejects incomplete and non-read-only evidence",async()=>{
- for (const patch of [{read_only:false},{tls:null},{ledger_tables_present:0},{server_major:null},{ledger_tables_owned:4},{session_role_matches:null},{ledger_tables_public_write:-1},{ledger_tables_delegable:4},{schema_callable_security_definer:null},{ledger_tables_session_owner_access:4},{ledger_tables_rls_active:1},{ledger_tables_rls_forced:1},{ledger_tables_public_write_policy:1}]) {
+ for (const patch of [{read_only:false},{tls:null},{ledger_tables_present:0},{server_major:null},{ledger_tables_owned:4},{session_role_matches:null},{ledger_tables_public_write:-1},{ledger_tables_delegable:4},{ledger_named_relations_shape_compatible:null},{schema_callable_security_definer:null},{ledger_tables_session_owner_access:4},{ledger_tables_rls_active:1},{ledger_tables_rls_forced:1},{ledger_tables_public_write_policy:1}]) {
    await assert.rejects(inspectDatabaseAccess({query:async()=>({rows:[{...fixture,...patch}]})}),/incomplete or unsafe/);
  }
  await assert.rejects(inspectDatabaseAccess({query:async()=>({rows:[]})}),/unexpected result/);
@@ -33,4 +34,9 @@ test("access audit rejects incomplete and non-read-only evidence",async()=>{
 
 test("database access audit rejects unsafe schema before query",async()=>{
  await assert.rejects(inspectDatabaseAccess({query(){assert.fail("unexpected query");}},{schema:"public;invalid"}),/Invalid database access audit schema/);
+});
+
+test("access audit retains incompatible relation shape as a negative finding",async()=>{
+ const report=await inspectDatabaseAccess({query:async()=>({rows:[{...fixture,ledger_named_relations_shape_compatible:false}]})});
+ assert.equal(report.ledger_named_relations_shape_compatible,false);
 });

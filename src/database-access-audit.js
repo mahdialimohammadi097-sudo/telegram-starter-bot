@@ -47,6 +47,13 @@ export async function inspectDatabaseAccess(client,{schema="public"}={}) {
         SELECT 1 FROM pg_catalog.pg_namespace n
         WHERE n.nspname = 'public' AND has_schema_privilege(current_user, n.oid, 'CREATE')
       ) AS public_schema_create,
+      NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class shape
+        JOIN pg_catalog.pg_namespace sn ON sn.oid=shape.relnamespace
+        WHERE sn.nspname=$1
+          AND shape.relname IN ('ledger_accounts','ledger_transactions','ledger_entries')
+          AND (shape.relkind<>'r' OR shape.relpersistence<>'p' OR shape.relispartition)
+      ) AS ledger_named_relations_shape_compatible,
       count(c.oid)::int AS ledger_tables_present,
       count(c.oid) FILTER (WHERE pg_has_role(current_user, c.relowner, 'MEMBER'))::int AS ledger_tables_owned,
       count(c.oid) FILTER (WHERE pg_catalog.pg_has_role(session_user,c.relowner,'SET'))::int AS ledger_tables_session_owner_access,
@@ -89,7 +96,7 @@ export async function inspectDatabaseAccess(client,{schema="public"}={}) {
   const flags = ["read_only","tls","privileged_role_membership","public_schema_create",
     "session_role_matches","can_set_replication_role","replication_role_origin",
     "session_can_assume_other_role","schema_callable_security_definer",
-    "session_can_assume_ledger_function_owner","ledger_functions_public_execute"];
+    "session_can_assume_ledger_function_owner","ledger_functions_public_execute","ledger_named_relations_shape_compatible"];
   const counts = ["ledger_tables_present","ledger_tables_owned","ledger_tables_truncatable","ledger_tables_trigger_privilege",
     "ledger_tables_insertable","ledger_tables_updatable","ledger_tables_deletable","ledger_tables_rls_enabled",
     "ledger_tables_delegable","ledger_tables_public_write","ledger_tables_session_owner_access",
@@ -104,6 +111,8 @@ export async function inspectDatabaseAccess(client,{schema="public"}={}) {
       row.ledger_tables_public_write_policy > row.ledger_tables_with_policies || !row.read_only) {
     throw new Error("Database access audit evidence is incomplete or unsafe");
   }
+  // Shape compatibility excludes unexpected named objects, but does not imply all three tables exist.
+  // Privilege counts retain ordinary and partitioned tables for visibility.
   // Findings describe only this DSN, not every role or the hosting network.
   return Object.freeze(Object.fromEntries([...flags,"server_major",...counts].map(key => [key,row[key]])));
 }
