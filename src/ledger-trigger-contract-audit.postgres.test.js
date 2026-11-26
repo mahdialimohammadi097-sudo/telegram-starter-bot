@@ -27,6 +27,15 @@ test("ledger catalog audit detects disabled or missing financial guards without 
     assert.equal(connections,1);
     assert.equal(release.checksPassed,true);
     assert.equal(release.sameSnapshot,true);
+    assert.deepEqual(release.relations,{inheritanceFree:true,rewriteRuleFree:true});
+    // Empty extra relations and rules must be detected independently of row integrity.
+    await pool.query("CREATE TABLE extra_ledger_child () INHERITS (ledger_entries)");
+    await assert.rejects(collectLedgerReleaseEvidence(admin,{schema}),/unreviewed inheritance or rewrite rules/);
+    await pool.query("DROP TABLE extra_ledger_child");
+    await pool.query("CREATE RULE extra_ledger_rule AS ON UPDATE TO ledger_accounts DO INSTEAD NOTHING");
+    await assert.rejects(collectLedgerReleaseEvidence(admin,{schema}),/unreviewed inheritance or rewrite rules/);
+    await pool.query("DROP RULE extra_ledger_rule ON ledger_accounts");
+    assert.equal((await collectLedgerReleaseEvidence(admin,{schema})).checksPassed,true);
     assert.equal(release.reviewedBodies.match,true);
     assert.equal(release.reviewedBodies.functionResolutionVerified,false);
     assert.equal(release.financialActivationReady,false);
