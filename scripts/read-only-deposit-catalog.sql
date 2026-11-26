@@ -13,7 +13,7 @@ FROM information_schema.columns
 WHERE table_schema='public'
   AND table_name IN ('users','wallets','user_wallet_assignments',
     'wallet_transfers','deposit_requests','ledger_accounts',
-    'ledger_transactions','ledger_entries','verified_deposit_evidence')
+    'ledger_transactions','ledger_entries','verified_deposit_evidence','deposit_address_ownership_history')
 ORDER BY table_name,ordinal_position;
 
 -- Unique index validity and scope: event identity and transaction idempotency.
@@ -26,7 +26,7 @@ JOIN pg_class t ON t.oid=x.indrelid
 JOIN pg_namespace n ON n.oid=t.relnamespace
 JOIN pg_class i ON i.oid=x.indexrelid
 WHERE n.nspname='public'
-  AND t.relname IN ('verified_deposit_evidence','ledger_transactions',
+  AND t.relname IN ('verified_deposit_evidence','deposit_address_ownership_history','ledger_transactions',
                    'wallets','user_wallet_assignments')
 ORDER BY t.relname,i.relname;
 
@@ -37,7 +37,7 @@ FROM pg_constraint c
 JOIN pg_class t ON t.oid=c.conrelid
 JOIN pg_namespace n ON n.oid=t.relnamespace
 WHERE n.nspname='public'
-  AND t.relname IN ('verified_deposit_evidence','wallets',
+  AND t.relname IN ('verified_deposit_evidence','deposit_address_ownership_history','wallets',
                     'user_wallet_assignments','ledger_accounts',
                     'ledger_transactions','ledger_entries')
 ORDER BY t.relname,c.contype,c.conname;

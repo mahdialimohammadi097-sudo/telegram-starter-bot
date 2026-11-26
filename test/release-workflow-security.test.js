@@ -67,3 +67,23 @@ test("legacy integration workflows enforce complete financial evidence and reset
   assert.doesNotMatch(workflow,/continue-on-error:|pull_request_target:|contents:\s*write\b/,file);
  }
 });
+
+test("manual deposit catalog scripts pin public inspection and include historical ownership evidence",()=>{
+ for(const file of ["deposit-wallet-catalog.sql","read-only-deposit-catalog.sql"]){
+  const sql=readFileSync(new URL("../scripts/"+file,import.meta.url),"utf8");
+  assert.match(sql,/BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;/,file);
+  assert.match(sql,/SET LOCAL statement_timeout = '10s';/,file);
+  assert.match(sql,/SET LOCAL lock_timeout = '[23]s';/,file);
+  assert.match(sql,/SET LOCAL search_path = pg_catalog, pg_temp;/,file);
+  assert.doesNotMatch(sql,/current_schema\s*\(/i,file);
+  assert.match(sql,/'public' AS inspected_schema/,file);
+  assert.match(sql,/ROLLBACK;\s*$/,file);
+  const inventories=sql.split(";").filter(statement=>/table_name IN|relname IN|tablename IN/.test(statement));
+  assert.equal(inventories.length,file==="deposit-wallet-catalog.sql"?4:3,file);
+  for(const statement of inventories){
+   assert.match(statement,/'verified_deposit_evidence'/,file);
+   assert.match(statement,/'deposit_address_ownership_history'/,file);
+   assert.match(statement,/(?:table_schema|n\.nspname|schemaname)\s*=\s*'public'/,file);
+  }
+ }
+});
