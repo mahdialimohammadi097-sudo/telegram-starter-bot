@@ -1,0 +1,312 @@
+import { randomUUID } from "node:crypto";
+import { assertBalancedLedgerEntries, toUsdtUnitsExact } from "./ledger-safety.js";
+import { rollbackTransaction } from "./transaction-safety.js";
+
+function normalizeAccountId(value) {
+  if (typeof value === "number" && !Number.isSafeInteger(value)) {
+    throw new TypeError("Unsafe numeric ledger account id; provide a decimal string");
+  }
+  const id = String(value ?? "").trim();
+  if (!/^[1-9][0-9]{0,18}$/.test(id) || BigInt(id) > 9223372036854775807n) {
+    throw new TypeError("Invalid ledger account id");
+  }
+  return BigInt(id).toString();
+}
+
+function decimalFromUnits(units) {
+  const whole = units / 100000000n;
+  const fraction = String(units % 100000000n).padStart(8, "0");
+  return whole.toString() + "." + fraction;
+}
+
+function normalizeEntries(entries) {
+  if (!Array.isArray(entries) || entries.length < 2) {
+    throw new Error("A ledger transaction requires at least two entries");
+  }
+
+  const normalized = entries.map((entry) => {
+    const currency = String(entry.currency ?? "").trim().toUpperCase();
+    const entryType = String(entry.entry_type ?? "").trim().toLowerCase();
+    const accountId = normalizeAccountId(entry.account_id);
+    const units = toUsdtUnitsExact(entry.amount);
+
+    if (currency !== "USDT") {
+      throw new Error("Only USDT ledger posting is supported");
+    }
+    if (!["debit", "credit"].includes(entryType) || units <= 0n) {
+      throw new Error("Invalid ledger entry");
+    }
+
+    return {
+      account_id: accountId,
+      entry_type: entryType,
+      amount: decimalFromUnits(units),
+      currency,
+      units
+    };
+  });
+
+  assertBalancedLedgerEntries(normalized);
+  return normalized;
+}
+
+function canonicalEntries(entries) {
+  return entries
+    .map((entry) => ({
+      account_id: normalizeAccountId(entry.account_id),
+      entry_type: String(entry.entry_type).toLowerCase(),
+      currency: String(entry.currency).toUpperCase(),
+      units: toUsdtUnitsExact(entry.amount).toString()
+    }))
+    .sort((a, b) =>
+      a.account_id.localeCompare(b.account_id) ||
+      a.entry_type.localeCompare(b.entry_type) ||
+      a.currency.localeCompare(b.currency) ||
+      a.units.localeCompare(b.units)
+    );
+}
+
+function sameEntries(left, right) {
+  return JSON.stringify(canonicalEntries(left)) ===
+    JSON.stringify(canonicalEntries(right));
+}
+
+// The callback and its journal share one PostgreSQL transaction.
+export async function withLedgerTransaction(pool, operation) {
+  if (!pool || typeof pool.connect !== "function") {
+    throw new TypeError("A PostgreSQL pool is required");
+  }
+  const client = await pool.connect();
+  let transactionOpen = false;
+  let releaseError = null;
+
+  try {
+    const started = await client.query("BEGIN");
+    if (started?.command !== "BEGIN") throw new Error("Ledger transaction start unconfirmed");
+    transactionOpen = true;
+
+    const result = await operation(client);
+    const completion = await client.query("COMMIT");
+    transactionOpen = false;
+    // PostgreSQL can respond with command tag ROLLBACK when COMMIT is issued
+    // inside an aborted transaction, for example after a caught SQL error.
+    if (completion?.command === "ROLLBACK") {
+      throw new Error("Ledger transaction was rolled back instead of committed");
+    }
+    if (completion?.command !== "COMMIT") {
+      throw new Error("Ledger transaction commit unconfirmed");
+    }
+    return result;
+  } catch (error) {
+    if (transactionOpen) {
+      releaseError = await rollbackTransaction(client, error);
+    } else {
+      // A failed BEGIN may leave the connection in an unknown state.
+      releaseError = error instanceof Error ? error : new Error("PostgreSQL BEGIN failed");
+    }
+    throw error;
+  } finally {
+    client.release(releaseError);
+  }
+}
+
+export async function postLedgerTransaction({ pool, ...journal }) {
+  return withLedgerTransaction(pool, client => postJournalInTransaction(client, journal));
+}
+
+// The caller owns BEGIN, COMMIT, and ROLLBACK. A savepoint requires an
+// explicit PostgreSQL transaction and prevents partial journals surviving a
+// caught posting error. The surrounding business operation must still roll
+// back its own domain changes on failure. No parallel work on one client.
+export async function postJournalInTransaction(client, journal) {
+  const savepoint = "profino_journal_" + randomUUID().replaceAll("-", "");
+  const started = await client.query("SAVEPOINT " + savepoint);
+  if (started?.command !== "SAVEPOINT") throw new Error("Ledger savepoint start unconfirmed");
+  try {
+    const result = await postJournalWithinSavepoint(client, journal);
+    const released = await client.query("RELEASE SAVEPOINT " + savepoint);
+    if (released?.command !== "RELEASE") throw new Error("Ledger savepoint release unconfirmed");
+    return result;
+  } catch (error) {
+    try {
+      const rolledBack = await client.query("ROLLBACK TO SAVEPOINT " + savepoint);
+      if (rolledBack?.command !== "ROLLBACK") throw new Error("Ledger savepoint rollback unconfirmed");
+      const released = await client.query("RELEASE SAVEPOINT " + savepoint);
+      if (released?.command !== "RELEASE") throw new Error("Ledger savepoint release unconfirmed");
+    } catch (cleanupError) {
+      // The outer transaction must abort if savepoint cleanup is uncertain.
+      // Preserve the original failure for diagnosis.
+      if (error && typeof error === "object") {
+        try { error.savepointError = cleanupError; } catch {}
+      }
+      throw new Error("Ledger savepoint cleanup failed; outer transaction must roll back", { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function postJournalWithinSavepoint(client, {
+  transactionType,
+  referenceId = null,
+  idempotencyKey,
+  description = null,
+  entries
+}) {
+  const type = String(transactionType ?? "").trim();
+  const key = String(idempotencyKey ?? "").trim();
+  const normalizedReferenceId = referenceId == null ? null : String(referenceId);
+  const normalizedDescription = description == null ? null : String(description);
+  if (!type || Array.from(type).length > 30) throw new TypeError("Invalid transaction type");
+  if (!key || Array.from(key).length > 150) throw new TypeError("Invalid idempotency key");
+
+  if (normalizedReferenceId !== null && Array.from(normalizedReferenceId).length > 100) {
+    throw new TypeError("Invalid reference id");
+  }
+
+  const normalizedEntries = normalizeEntries(entries);
+  const accountIds = [...new Set(normalizedEntries.map((entry) => entry.account_id))]
+    .sort((a, b) => BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0);
+
+  // Serialize retries with the same key, including requests racing on separate
+  // application instances. PostgreSQL releases this lock at transaction end.
+  // The account-row locks below serialize writers, but do not refresh a
+  // REPEATABLE READ snapshot. A waiter could otherwise read a pre-debit
+  // balance after the first writer commits. Reject unsupported isolation
+  // before acquiring the key lock or touching any journal.
+  const keyLock = await client.query(
+    `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))
+     WHERE current_setting('transaction_isolation') = 'read committed'`,
+    [key]
+  );
+  if (keyLock.rowCount !== 1) {
+    throw new Error("Ledger posting requires READ COMMITTED transaction isolation");
+  }
+
+  const existing = await client.query(
+    `SELECT id, transaction_type, reference_id, description, status
+     FROM ledger_transactions
+     WHERE idempotency_key = $1
+     FOR UPDATE`,
+    [key]
+  );
+
+  if (existing.rowCount) {
+    const transaction = existing.rows[0];
+    const priorEntries = await client.query(
+      `SELECT account_id, entry_type, trim_scale(amount)::text AS amount, currency
+       FROM ledger_entries
+       WHERE transaction_id = $1
+       ORDER BY account_id, entry_type, amount, currency`,
+      [transaction.id]
+    );
+
+    const sameMetadata =
+      transaction.transaction_type === type &&
+      (transaction.reference_id ?? null) === normalizedReferenceId &&
+      (transaction.description ?? null) === normalizedDescription;
+
+    if (!sameMetadata || !sameEntries(priorEntries.rows, normalizedEntries)) {
+      throw new Error("Idempotency key was already used for a different request");
+    }
+    if (transaction.status !== "posted") {
+      throw new Error("Existing idempotent transaction is not posted");
+    }
+
+    return { transactionId: String(transaction.id), posted: true, idempotent: true };
+  }
+
+  const accountResult = await client.query(
+    `SELECT id, account_type, currency
+     FROM ledger_accounts
+     WHERE id = ANY($1::bigint[])
+     ORDER BY id
+     FOR UPDATE`,
+    [accountIds]
+  );
+
+  if (accountResult.rowCount !== accountIds.length) {
+    throw new Error("One or more ledger accounts do not exist");
+  }
+
+  const accounts = new Map(
+    accountResult.rows.map((account) => [String(account.id), account])
+  );
+
+  for (const entry of normalizedEntries) {
+    const account = accounts.get(entry.account_id);
+    if (!account || String(account.currency).toUpperCase() !== entry.currency) {
+      throw new Error("Ledger account currency does not match the entry");
+    }
+  }
+
+  const byAccount = new Map();
+  for (const entry of normalizedEntries) {
+    const current = byAccount.get(entry.account_id) ?? { debit: 0n, credit: 0n };
+    current[entry.entry_type] += entry.units;
+    byAccount.set(entry.account_id, current);
+  }
+
+  for (const [accountId, movement] of byAccount) {
+    const account = accounts.get(accountId);
+    const accountType = String(account.account_type).toUpperCase();
+    // An investment settlement or withdrawal release must not spend a
+    // principal/hold that no longer exists, even with a distinct request key.
+    if (!["AVAILABLE", "INVESTED", "WITHDRAWAL_HOLD"].includes(accountType)) continue;
+
+    const balanceResult = await client.query(
+      `SELECT trim_scale(COALESCE(
+                SUM(CASE WHEN le.entry_type = 'credit'
+                         THEN le.amount ELSE -le.amount END),
+                0
+              ))::text AS balance
+       FROM ledger_entries le
+       JOIN ledger_transactions lt ON lt.id = le.transaction_id
+       WHERE le.account_id = $1
+         AND le.currency = 'USDT'
+         AND lt.status = 'posted'`,
+      [accountId]
+    );
+    const currentBalance = toUsdtUnitsExact(balanceResult.rows[0].balance);
+    if (currentBalance + movement.credit - movement.debit < 0n) {
+      throw new Error(accountType === "AVAILABLE" ? "Insufficient available balance" : "Insufficient reserved ledger balance");
+    }
+  }
+
+  const inserted = await client.query(
+    `INSERT INTO ledger_transactions
+       (transaction_type, reference_id, idempotency_key, description, status)
+     VALUES ($1, $2, $3, $4, 'pending')
+     RETURNING id`,
+    [type, normalizedReferenceId, key, normalizedDescription]
+  );
+  const transactionId = inserted.rows[0]?.id;
+  if (transactionId === undefined || transactionId === null) {
+    throw new Error("Ledger transaction insert returned no id");
+  }
+
+  for (const entry of normalizedEntries) {
+    const insertedEntry = await client.query(
+      `INSERT INTO ledger_entries
+         (transaction_id, account_id, entry_type, amount, currency)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [transactionId, entry.account_id, entry.entry_type, entry.amount, entry.currency]
+    );
+    if (insertedEntry.rowCount !== 1) {
+      throw new Error("Ledger entry insert did not create exactly one row");
+    }
+  }
+
+  const posted = await client.query(
+    `UPDATE ledger_transactions
+     SET status = 'posted'
+     WHERE id = $1 AND status = 'pending'`,
+    [transactionId]
+  );
+  if (posted.rowCount !== 1) {
+    throw new Error("Ledger transaction could not transition from pending to posted");
+  }
+
+  return { transactionId: String(transactionId), posted: true, idempotent: false };
+}
+
+export { normalizeEntries, canonicalEntries };

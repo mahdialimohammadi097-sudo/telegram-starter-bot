@@ -1,10 +1,7 @@
 name: FadeHost schema audit safety tests
 on:
+  # Release checks must report on every PR, including transitive changes.
   pull_request:
-    paths:
-      - 'scripts/fadehost-schema-audit.js'
-      - 'scripts/fadehost-schema-audit.test.js'
-      - '.github/workflows/fadehost-schema-audit-tests.yml'
   push:
     branches:
       - ops/read-only-fadehost-schema-audit
@@ -13,11 +10,14 @@ permissions:
 jobs:
   safe-audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: node --check scripts/fadehost-schema-audit.js
       - run: node --test scripts/fadehost-schema-audit.test.js

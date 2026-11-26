@@ -1,2 +1,44 @@
 node_modules/
 .env
+
+# Local credentials, keys and database exports must never be committed.
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.pgpass
+.pgpass
+.npmrc.local
+*.dump
+*.backup
+*.sql.gz
+
+# PostgreSQL service configuration and protected archive variants
+.pg_service.conf
+pg_service.conf
+*.pgdump
+*.dump.*
+*.backup.*
+*.pgdump.*
+*.sql.bz2
+*.sql.xz
+*.sql.zst
+*.sql.zip
+*.sql.age
+*.sql.gpg
+*.sql.enc
+*.sql.aes
+*.sql.gz.*
+*.sql.bz2.*
+*.sql.xz.*
+*.sql.zst.*
+*.sql.zip.*
+
+# Wrapped or temporary encrypted SQL archives
+*.sql.age.*
+*.sql.gpg.*
+*.sql.enc.*
+*.sql.aes.*

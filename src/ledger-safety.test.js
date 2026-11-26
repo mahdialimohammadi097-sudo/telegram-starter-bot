@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { formatUsdt, toUsdtUnits, toUsdtUnitsExact, assertBalancedLedgerEntries, assertNonNegativeAvailableBalance } from "./ledger-safety.js";
+import { isConfirmationCurrent } from "./admin-status-guard.js";
 
 test("USDT formatting preserves eight-decimal precision", () => {
   assert.equal(formatUsdt("0.00000001"), "0.00000001");
@@ -51,4 +52,36 @@ test("available balance cannot be overdrawn or rounded", () => {
   assert.throws(() => assertNonNegativeAvailableBalance("10", "10.00000001"), /Insufficient/);
   assert.throws(() => assertNonNegativeAvailableBalance("0", "0"), /Insufficient/);
   assert.throws(() => assertNonNegativeAvailableBalance("1.000000001", "1"), /exceeds eight decimal places/);
+});
+
+
+test("admin status confirmation rejects stale, repeated, and unknown transitions", () => {
+  assert.equal(isConfirmationCurrent("active", "active", "blocked"), true);
+  assert.equal(isConfirmationCurrent("blocked", "blocked", "active"), true);
+  assert.equal(isConfirmationCurrent("blocked", "active", "blocked"), false);
+  assert.equal(isConfirmationCurrent("active", "active", "active"), false);
+  assert.equal(isConfirmationCurrent("deleted", "deleted", "active"), false);
+});
+
+test("exact USDT parsing rejects unsafe JavaScript numbers but preserves decimal strings", () => {
+  assert.throws(() => toUsdtUnitsExact(Number.MAX_SAFE_INTEGER + 1), /Unsafe numeric USDT/);
+  assert.throws(() => toUsdtUnitsExact(Infinity), /Unsafe numeric USDT/);
+  assert.throws(() => toUsdtUnitsExact(NaN), /Unsafe numeric USDT/);
+  assert.equal(toUsdtUnitsExact("9007199254740992"), 900719925474099200000000n);
+});
+
+test("financial amount boundary refuses already-rounded numeric fractions", () => {
+  for (const amount of [0.1, 1.25, 90071992.54740993, 100000000.00000001]) {
+    assert.throws(() => toUsdtUnitsExact(amount), /Unsafe numeric USDT/);
+  }
+  assert.equal(toUsdtUnitsExact("90071992.54740993"), 9007199254740993n);
+  assert.equal(toUsdtUnitsExact(25), 2500000000n);
+  assert.equal(toUsdtUnitsExact(25n), 2500000000n);
+  assert.equal(formatUsdt(1.25), "1.25000000");
+});
+
+test("exact ledger validation refuses implicit conversion from objects", () => {
+  for (const amount of [null, undefined, true, ["1"], { toString: () => "1" }]) {
+    assert.throws(() => toUsdtUnitsExact(amount), /Invalid USDT amount/);
+  }
 });

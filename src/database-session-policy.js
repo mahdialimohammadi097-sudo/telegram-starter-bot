@@ -1,0 +1,65 @@
+// Startup options shared by all restricted pool connections and the operator audit.
+// Keep legacy startup unchanged until separately authorized.
+export function restrictedRuntimeConnectionOptions(env=process.env,{schema="public",force=false}={}){
+  if(!force&&env.PROFINO_RUNTIME_SCHEMA_MODE!=="verify-only")return {};
+  if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)){
+    throw new Error("Invalid restricted runtime schema");
+  }
+  let url;
+  try{url=new URL(env.DATABASE_URL??"postgresql://localhost");}
+  catch{throw new Error("Invalid DATABASE_URL configuration");}
+  // node-postgres connection-string settings can override explicit options.
+  // Reject ambiguity instead of attempting to merge arbitrary startup commands.
+  for(const key of url.searchParams.keys()){
+    if(key.toLowerCase()==="options")throw new Error("Restricted runtime URL startup options conflict");
+  }
+  // Explicit pg_temp last prevents PostgreSQL's implicit temp-first lookup.
+  return {options:"-c search_path=pg_catalog,"+schema+",pg_temp"};
+}
+
+// Verify each checked-out connection, including pool.query's callback path.
+// Discard drifted clients, never silently repair or return them to the pool.
+export function guardRestrictedPoolCheckouts(pool,{schema="public"}={}){
+  if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)){
+    throw new Error("Invalid restricted runtime schema");
+  }
+  const connect=pool.connect.bind(pool);
+  async function checkedConnect(){
+    const client=await connect();
+    try{
+      // New clients can initially report null; after a completed probe only
+      // an idle ReadyForQuery status is accepted. Never probe an open transaction.
+      if(typeof client.getTransactionStatus!=="function")throw new Error("Transaction status API unavailable");
+      const before=client.getTransactionStatus();
+      if(before!==null&&before!=="I")throw new Error("Unsafe transaction state");
+      const {rows}=await client.query(`
+        SELECT current_user OPERATOR(pg_catalog.=) session_user AS same_role,
+          pg_catalog.current_schemas(true)::pg_catalog.text[] OPERATOR(pg_catalog.=)
+            ARRAY['pg_catalog'::pg_catalog.text,$1::pg_catalog.text] AS safe_path,
+          pg_catalog.current_setting('session_replication_role') OPERATOR(pg_catalog.=) 'origin' AS origin_mode
+      `,[schema]);
+      if(rows?.length!==1||rows[0].same_role!==true||rows[0].safe_path!==true||rows[0].origin_mode!==true||client.getTransactionStatus()!=="I"){
+        throw new Error("Restricted runtime connection settings incompatible");
+      }
+      const release=client.release.bind(client);
+      client.release=function(error){
+        // Destroy an unfinished/aborted session rather than implicitly
+        // committing or reusing it. The driver closes the connection.
+        let idle=false;
+        try{idle=client.getTransactionStatus()==="I";}catch{}
+        return release(error||!idle||undefined);
+      };
+      return client;
+    }catch{
+      client.release(true);
+      throw new Error("Restricted runtime connection settings incompatible");
+    }
+  }
+  pool.connect=function(callback){
+    const pending=checkedConnect();
+    if(typeof callback!=="function")return pending;
+    // pg.Pool.query obtains clients through the callback form.
+    pending.then(client=>callback(null,client,client.release),error=>callback(error));
+  };
+  return pool;
+}

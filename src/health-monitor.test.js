@@ -63,3 +63,115 @@ test("monitor reports webhook receiver health through the status callback", asyn
   monitor.stop();
   assert.deepEqual(observed, { telegram: false, database: true });
 });
+
+test("an undelivered outage retries, deduplicates and reports recovery", async t => {
+  const attempts = [];
+  const diagnostics = [];
+  let databaseReady = false;
+  const monitor = startHealthMonitor({
+    telegramCheck: async () => true,
+    pool: { query: async () => { if (!databaseReady) throw new Error("fixture outage"); } },
+    bot: { api: { sendMessage: async (_recipient, text) => {
+      attempts.push(text);
+      if (attempts.length === 1) throw Object.assign(new Error("fixture detail"), { error_code: "private fixture value" });
+    } } },
+    logger: { warn() {}, error(...args) { diagnostics.push(args); } },
+    intervalMs: 60000
+  });
+  t.after(() => monitor.stop());
+  await monitor.ready;
+  await monitor.check();
+  await monitor.check();
+  databaseReady = true;
+  await monitor.check();
+  await monitor.check();
+  assert.equal(attempts.length, 3);
+  assert.match(attempts[0], /DATABASE: UNAVAILABLE/);
+  assert.match(attempts[1], /DATABASE: UNAVAILABLE/);
+  assert.match(attempts[2], /DATABASE: RECOVERED/);
+  assert.deepEqual(diagnostics, [["[health] alert delivery failed:", "telegram_send_failed"]]);
+});
+
+test("stopping during a health probe suppresses stale status and alerts", async () => {
+  let failProbe;
+  let checks = 0;
+  const events = [];
+  const monitor = startHealthMonitor({
+    telegramCheck: async () => true,
+    pool: { query() {
+      checks++;
+      return new Promise((_resolve, reject) => { failProbe = reject; });
+    } },
+    bot: { api: { sendMessage: async () => { events.push("alert"); } } },
+    onStatus: () => { events.push("status"); },
+    logger: { warn() {}, error() {} }
+  });
+  // Probes are now dispatched in a microtask to contain synchronous failures.
+  // Wait until the probe has actually started before testing in-flight shutdown.
+  await Promise.resolve();
+  assert.equal(typeof failProbe, "function");
+  monitor.stop();
+  failProbe(new Error("offline"));
+  await monitor.ready;
+  assert.deepEqual(events, []);
+  await monitor.check();
+  assert.equal(checks, 1);
+});
+
+test("synchronous probe failure marks only the affected service unavailable", async (t) => {
+  const statuses = [];
+  const monitor = startHealthMonitor({
+    bot: { api: { sendMessage: async () => {} } },
+    pool: { query() { throw new Error("synthetic database failure"); } },
+    telegramCheck: () => true,
+    onStatus: status => statuses.push(status),
+    logger: { warn() {}, error() {} }
+  });
+  t.after(() => monitor.stop());
+  await monitor.ready;
+  assert.deepEqual(statuses, [{ telegram: true, database: false }]);
+});
+
+
+test("a synchronous Telegram probe failure does not prevent the database health check", async () => {
+  const states = [];
+  let databaseChecks = 0;
+  const monitor = startHealthMonitor({
+    bot: { api: { sendMessage() { throw new Error("must not send"); } } },
+    pool: { query() { databaseChecks++; return Promise.resolve({}); } },
+    telegramCheck() { throw new Error("synthetic probe failure"); },
+    onStatus: state => states.push(state),
+    logger: { warn() {}, error() {} }
+  });
+  try {
+    await monitor.ready;
+    assert.equal(databaseChecks, 1);
+    assert.deepEqual(states, [{ telegram: false, database: true }]);
+  } finally { monitor.stop(); }
+});
+
+test("stop waits for an in-flight alert and prevents additional probes", async t => {
+  let finishSend, started;
+  const sendStarted = new Promise(resolve => { started = resolve; });
+  const blocked = new Promise(resolve => { finishSend = resolve; });
+  let checks = 0, sends = 0, drained = false;
+  const monitor = startHealthMonitor({
+    telegramCheck: async () => true,
+    pool: { async query() { checks++; throw new Error("fixture outage"); } },
+    bot: { api: { async sendMessage() { sends++; started(); await blocked; } } },
+    logger: { warn() {}, error() {} }
+  });
+  t.after(async () => { finishSend(); await monitor.stop(); });
+  await sendStarted;
+  assert.equal(monitor.check(), monitor.ready);
+  const stopping = monitor.stop().then(() => { drained = true; });
+  await Promise.resolve();
+  assert.equal(drained, false);
+  await monitor.check();
+  assert.equal(checks, 1);
+  finishSend();
+  await stopping;
+  await monitor.stop();
+  assert.equal(drained, true);
+  assert.equal(sends, 1);
+});

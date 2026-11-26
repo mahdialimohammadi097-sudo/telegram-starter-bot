@@ -1,30 +1,52 @@
-# FadeHost production schema audit — controlled execution
+# FadeHost read-only schema audit — existing service
 
-Status: **NOT DEPLOYED**. This document does not authorize merging PR #81, changing the production bot, or enabling deposits.
+The integration candidate retains the existing schedule command and delegates to the reviewed deposit catalog audit. This is not evidence that the candidate is deployed. A push to main automatically deploys the existing bot; do not merge before release review and operational approval.
 
-## Preflight
+## Controlled execution
 
-1. Obtain explicit owner approval for a **code-only deployment** to the existing `telegram-bot` service. Approval to deploy diagnostics is **not** approval to receive or transfer real USDT.
-2. Review PR #81 and verify both CI checks pass. Verify the PR contains only the audit script, its tests, the workflow and CI dependency fix, and this guide.
-3. Before merging, verify the service's current `main` commit, runtime health, database connection and a rollback path. GitHub pushes to `main` auto-deploy on FadeHost.
-4. Do not copy `DATABASE_URL` or any credentials into a schedule, chat, log or PR.
+Confirm the deployed commit, service health, private database connection and rollback path. Use the existing schedule command in telegram-bot:
 
-## Running after approved deployment
+    node scripts/fadehost-schema-audit.js
 
-1. Confirm the FadeHost deployed commit contains `scripts/fadehost-schema-audit.js`.
-2. In **telegram-bot → Schedules**, add a temporary UTC cron schedule using exactly:
-   `node scripts/fadehost-schema-audit.js`
-3. The scheduler is recurring, not a guaranteed immediate one-shot. Select the next available UTC minute with enough lead time to save; record the schedule and remove it after its first execution. Avoid duplicating the existing cleanup schedule. Execution time limit: 60 seconds.
-4. Read the **last answer** in Schedules. Copy only sanitized JSON output, never environment variables or credentials. The script has a single 8-second statement timeout and an 8-second connection timeout.
-5. Delete the temporary schedule once it has run, whether successful or failed, to avoid recurring database checks.
+Inspect the sanitized JSON output only. If a temporary recurring schedule is used, remove it after its first execution, including on failure. Never put database credentials into the schedule or share them in logs. The command uses a bounded read-only repeatable-read transaction with the existing TLS policy, 8-second connection timeout, a verified 10-second transaction-local statement timeout, and a verified 3-second lock timeout. The shared audit wrapper verifies the effective read-only and repeatable-read settings before catalog inspection. These are per-statement limits, not a total runtime deadline.
 
-## Interpreting output
+## Interpretation
 
-- `ready: false, missing: [...]`: expected columns or uniqueness checks are missing. This is a **blocker**, not permission to apply migrations blindly.
-- `ready: true, missing: []`: only the script's limited table/column/unique-index inventory passed. It does **not** validate ledger correctness, chain receipts, security, ownership, reconciliation or legal readiness.
-- `error: DATABASE_URL_NOT_CONFIGURED`: connection environment not available.
-- `error: READ_ONLY_AUDIT_FAILED`: audit could not complete. The `code` is a sanitized SQLSTATE or UNKNOWN; investigate privately.
+- Exit 0 / ready true: reviewed structural checks passed, including required columns, precision, nullability, immediate unique indexes, validated foreign keys and reviewed evidence CHECK definitions. This does not certify historical ownership, real balances, role isolation, network security, backup/restore or financial activation.
+- Exit 2 / ready false: missing or incompatible catalog requirements. The missing array retains legacy unique: markers; incompatible provides detailed findings. Review differences before any migration.
+- Exit 3: missing configuration, read-only execution failure or cleanup failure. Investigate privately using sanitized diagnostics.
 
-## Hard boundaries
+Successful structural reports explicitly set financialActivationReady and realDepositsEnabled to false. Error reports never authorize financial operations. No migrations, user records, wallet balances or money movements are performed. Real operations require independent verification and separate final owner approval.
 
-The script executes only metadata SELECT statements in a PostgreSQL READ ONLY transaction and uses read-only session options. It does not insert, update, delete, migrate, approve deposits, start Telegram polling or move USDT. Real financial operations remain disabled until independent security and accounting verification and explicit owner approval.
+### Catalog-only snapshot resolution
+Historical-wallet inspection, legacy/combined assignment audit and the one-shot FadeHost schema CLI now pin and verify transaction-local `pg_catalog, pg_temp` before inspection. Explicit application relation qualification and catalog-first resolution prevent a caller's local function/operator shadowing from concealing conflicts. The disposable historical fixture demonstrates a shadow `lower(text)` concealing a case-variant conflicting record and checks that audit rejection restores the caller search path. The runtime-role inventory intentionally continues to inspect original session settings, not a repaired path. No production DDL, role grants, financial activation or provider command. Exact-head CI required.
+
+### Startup and manual catalog alignment
+Exact predecessor b4af975 passed all six workflows, full 620/620, focused 148/148, required 23/21 and synthetic restore checks (Node 22 job 139848005181). The startup metadata diagnostic now calls the same verified catalog-path helper before its first metadata query, preserves its existing five-second statement/three-second lock limits and rollback/discard behavior, and rejects path-setting or effective-value failure. Unit regressions exercise both. The existing operator SQL script also pins catalog-first resolution, repeatable-read/read-only isolation and bounded statement/lock waits; its report names the inspected public schema separately from the effective search path. The manual script is not executed against production in this change. The runtime-role verification still inspects original settings. No production DDL, grant, deployment or financial operation. Exact-head CI required.
+
+### Remaining standalone audit entrypoints
+Exact predecessor 05b2a6c passed six workflows/eight jobs, full 622/622, focused 148/148, 23/21 named checks, no failed/skipped/cancelled/todo and synthetic recovery (Node 22 job 139850239380). The default `audit:deposit-schema` CLI and standalone ledger trigger catalog audit now use the existing verified catalog snapshot helper, matching the already-protected combined paths. CLI subprocess mock covers valid metadata inspection and path drift refusal; existing disposable PostgreSQL operator-shadow fixture additionally verifies the standalone trigger report and caller path restoration. The restricted runtime inventory still observes original session settings. No production execution or changes; exact-head CI required.
+
+### Current-connection access evidence
+Exact predecessor 9005057 passed all six workflows/eight jobs: 623 full, 148 focused, 23/21 required named tests and synthetic recovery (Node 22 job 139858371449). The current-connection privilege audit CLI now verifies catalog-first resolution inside its read-only snapshot rather than relying on startup options alone. The CLI path-drift case rejects before reporting; disposable PostgreSQL checks demonstrate a caller's shadow name equality cannot falsify the session/current-role comparison and that the original path returns afterward. Role identity, effective grants and transport remain observations, not production approval. The restricted runtime inventory remains unchanged. No production execution or changes. Exact-head CI required.
+
+### Current-connection ledger relation shape evidence
+Exact predecessor 2fb8d59 passed six workflows/eight jobs (625 full and 149 focused; Node 22 job 139866416346). The access audit now additionally reports whether existing expected ledger names resolve to ordinary permanent non-partition relations in the inspected schema. An incompatible object produces a negative shape finding; the existing privilege counts are unchanged and missing relations are still represented by the table count. True shape compatibility alone is not evidence of completeness or readiness. Disposable PostgreSQL fixtures cover absent, unlogged, partitioned, view and ordinary relations; CLI evidence remains explicitly non-activating. No production audit or changes. Exact-head CI required.
+
+### Standalone ledger integrity relation preflight
+Exact predecessor 66004dd passed six workflows/eight jobs, 628 full/150 focused, zero failures/skips/cancellations/todo, and synthetic recovery (Node 22 job 139880411606). The standalone integrity scan now verifies exactly three permanent ordinary relations without inheritance or rewrite rules inside its existing read-only snapshot before scanning rows. Missing, view, unlogged, inherited and rewrite-rule fixtures cannot yield a clean result. This is a relation visibility preflight, not full column/constraint, custody, runtime-role or recovery proof. The combined release audit keeps its existing stricter catalog checks. Unit and disposable PostgreSQL tests added. Exact-head CI pending; no production execution or change.
+
+### Standalone ledger integrity row visibility
+Exact predecessor 63ca685 passed six workflows/eight jobs, 630 full/151 focused, no failures, skips, cancellations or todo, and synthetic recovery (Node 22 job 139884939545). The standalone integrity preflight now also refuses enabled or forced RLS and any existing policy, including dormant policies, before financial row inspection. This deliberately matches the historical ledger's no-policy contract; a future intentional RLS design requires separate review. Unit and disposable PostgreSQL regressions cover false/missing visibility evidence, enabled/forced RLS and dormant policy refusal. No production audit or configuration change; exact-head CI required. A successful scan remains neither runtime authorization nor proof of production recovery.
+
+### Protected noncustomer ledger balances
+The posting code protects AVAILABLE, INVESTED and WITHDRAWAL_HOLD against negative balances regardless of account owner, normalizing account type to uppercase. The integrity scan previously limited its negative-balance check to customer-owned, uppercase types. It now applies that protected-type rule to both ownership categories, preserving the existing customer count and adding a separate aggregate noncustomer count. Unit and disposable PostgreSQL tests cover a negative platform reserve, mixed-case protected customer account and balanced recovery. No user or account identifiers are returned. This is internal ledger evidence only; custody, actual role, production recovery and financial release remain unverified. Exact-head CI required; no production execution or changes.
+
+### Standalone ledger row identity evidence
+Exact predecessor ee5c7f7 passed six workflows/eight jobs, 634 full/153 focused, zero failures/skips/cancellations/todo and synthetic recovery (Node 22 job 139887685293). The standalone integrity audit now counts invalid ID groups (duplicate IDs or null IDs) independently within each of the three ledger relations, rather than relying on their expected constraints. This is a group count, not a row count, and no ID is emitted. Unit and disposable PostgreSQL regressions cover duplicate balanced entry IDs and additional ambiguous account/journal IDs. A clean row scan does not prove constraints exist; the separate combined release audit remains mandatory. Exact-head CI pending; no live operations or changes.
+
+### Bounded manual ledger catalog comparison
+Exact predecessor 8a4d6ca passed six workflows/eight jobs, 636 full/154 focused, no failures/skips/cancellations/todo and synthetic recovery (Node 22 job 139891238794). The existing ledger catalog SQL (also embedded in the generated comparison query) now uses repeatable-read/read-only, 10-second statement and 3-second lock limits, and an explicit catalog-first path with temporary schema last. The disposable restore workflow additionally compares output from a session containing temporary relations named like system catalogs. Regenerate both reference catalogs with the same script revision; older reference artifacts may differ in deparse qualification. This is limited catalog comparison, not full backup or live recovery evidence. Raw catalog definitions are for authorized private inspection. No production execution, change or deployment; exact-head CI pending.
+
+### Required release regression evidence checkpoint
+Exact predecessor 2de672a passed six workflows/eight jobs, 637 full/154 focused, zero failures/skips/cancellations/todo and known npm vulnerabilities (Node 22 job 139893898718). The actual restore comparison and temporary catalog shadow regression also passed. The existing TAP release gate now requires six more named PostgreSQL regressions and seven full-suite audit/CLI regressions; independent test lists reject missing, skipped or duplicated success assertions. Expected required names increase from 21 to 27 focused and 23 to 36 full; exact-head CI still required. This does not change financial execution, actual role configuration or production data. Independent review of the cumulative candidate, current live revision/catalog/role, production backup restoration, provider approval/continuity and final authorization remain open. Do not infer readiness from this gate alone.

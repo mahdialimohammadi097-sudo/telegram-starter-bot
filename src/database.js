@@ -1,4 +1,7 @@
 import pg from "pg";
+import { safeDiagnosticCode } from "./diagnostic-safety.js";
+import { resolveDatabaseTls } from "./database-tls-policy.js";
+import { restrictedRuntimeConnectionOptions, guardRestrictedPoolCheckouts } from "./database-session-policy.js";
 
 const { Pool } = pg;
 
@@ -11,16 +14,18 @@ export const pool = new Pool({
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
-  ssl: false,
+  ssl: resolveDatabaseTls(),
+  ...restrictedRuntimeConnectionOptions(),
 });
 
-// Idle clients can disconnect after network interruptions. PostgreSQL removes
-// the failed client automatically; handle the pool event to avoid a process crash.
-// Do not log raw error messages: they may include connection details.
-pool.on("error", (error) => {
-  const code = typeof error?.code === "string" && /^[A-Z0-9]{2,8}$/.test(error.code)
-    ? error.code : "UNKNOWN";
-  console.error("[database] idle PostgreSQL client disconnected", { code });
+if(process.env.PROFINO_RUNTIME_SCHEMA_MODE==="verify-only"){
+  guardRestrictedPoolCheckouts(pool);
+}
+
+// pg removes a disconnected idle client; handle its error without crashing
+// the bot or exposing connection strings from the driver error message.
+pool.on("error", error => {
+  console.error("[database] idle client error:", safeDiagnosticCode(error));
 });
 
 export async function testDatabaseConnection() {

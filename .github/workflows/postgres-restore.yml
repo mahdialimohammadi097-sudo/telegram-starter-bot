@@ -1,0 +1,41 @@
+name: PostgreSQL 17 restore drill
+
+on:
+  push:
+    branches: [feature/integrated-postgres-matrix]
+  # Transitive runtime dependencies can affect rollback compatibility.
+  # Run on every PR rather than relying on an incomplete path inventory.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Exact reviewed main base for PR #226; re-review this pin if main advances.
+      - name: Check out pinned rollback reference
+        uses: actions/checkout@v4
+        with:
+          ref: e0d7509b43605493beb6a20485d5d17ce0ef8e16
+          path: rollback-reference
+          persist-credentials: false
+      - name: Verify matching dependency locks
+        run: cmp package-lock.json rollback-reference/package-lock.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Run synthetic dump and restore on PostgreSQL 17
+        run: |
+          docker run --rm --network none --user postgres \
+            --volume "$GITHUB_WORKSPACE:/work:ro" \
+            --volume "$(realpath "$(command -v node)"):/usr/local/bin/node:ro" \
+            --workdir /work postgres:17-bookworm bash scripts/test-postgres-restore.sh

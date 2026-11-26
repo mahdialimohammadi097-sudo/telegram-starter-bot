@@ -1,0 +1,72 @@
+import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { detectSecretKinds } from "./check-secret-patterns.js";
+import { countSensitivePaths } from "./check-sensitive-paths.js";
+
+// Exact reviewed blobs of synthetic diagnostics and disposable CI fixtures.
+// Only its database-url classification is excluded; no file or path is globally exempt.
+// Historical version of health-report.test.js contains the same reviewed synthetic redaction fixture.
+const reviewedFixtures = new Set(["c8a61100ee20e7f89e1b6c4d017f1c19aba4118f","601880bad18f3787b771778846a67be7b240cdfb","19385375fcfd398a49af2e17054ec0a63b9c5e67","832a6cc04728d65f11417716887ebd8439adb67d","3162bc0ee3c1653a22207d09847002c1eee4c6db","64cc3858851e4c8edfbd89c9607c6d39a648ac01",
+  // Reviewed CI hardening revision: all five URL matches are identical to the previous disposable localhost catalog fixture.
+  "c89ff6e48dda4d0f13390241ab72109cd5cc049e",
+  // PR #182: reviewed diagnostic test blob; its sole synthetic database URL is unchanged from 832a6cc0.
+  "1fe4f4a88d2e04d1b7da6871d8a611d56a3f8b1f",
+  // PR #185: historical catalog CI blob has exactly two reviewed localhost disposable DSNs.
+  "8ea44466ed4b9db07f9a12baea16b814f612d0c8"]);
+const maxBuffer = 32 * 1024 * 1024;
+
+export function scanHistory(cwd = process.cwd()) {
+  const git = (args, extra = {}) => execFileSync("git", args, {
+    cwd, maxBuffer, stdio: ["pipe", "pipe", "pipe"], ...extra
+  });
+  if (git(["rev-parse", "--is-shallow-repository"], { encoding: "utf8" }).trim() !== "false") {
+    throw new Error("Full history required");
+  }
+  // Include paths removed or renamed in reachable history, not just HEAD.
+  // Disable rename detection and split NUL-delimited paths to preserve whitespace.
+  const historicalPaths = new Set(git(["log", "--format=", "--name-only", "-z",
+    "--full-history", "-m", "--no-renames", "HEAD", "--"], { encoding: "utf8" })
+    .split("\0").filter(Boolean));
+  const sensitivePathCount = countSensitivePaths([...historicalPaths]);
+  const objects = git(["rev-list", "--objects", "--no-object-names", "HEAD"], { encoding: "utf8" });
+  const metadata = git(["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], {
+    input: objects, encoding: "utf8"
+  }).trim().split("\n").filter(Boolean);
+  const findings = new Map();
+  const findingObjects = [];
+  let scanned = 0, binary = 0, reviewed = 0;
+  for (const line of metadata) {
+    const match = /^([a-f0-9]{40,64}) (blob|commit|tree|tag) (\d+)$/.exec(line);
+    if (!match) throw new Error("Unexpected Git metadata");
+    const [, oid, type] = match;
+    if (type !== "blob") continue;
+    const bytes = git(["cat-file", "blob", oid]);
+    if (bytes.includes(0)) { binary++; continue; }
+    scanned++;
+    for (const kind of detectSecretKinds(bytes.toString("utf8"))) {
+      if (reviewedFixtures.has(oid) && kind === "database-url") { reviewed++; continue; }
+      findings.set(kind, (findings.get(kind) ?? 0) + 1);
+      findingObjects.push({ kind, oid });
+    }
+  }
+  return { scanned, binary, reviewed, findings, findingObjects, sensitivePathCount };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    const result = scanHistory();
+    console.log("Historical text blobs scanned: " + result.scanned + "; binary excluded: " + result.binary + "; reviewed fixture matches: " + result.reviewed);
+    for (const [kind, count] of result.findings) console.error("History secret policy: " + kind + " in " + count + " unique blob(s).");
+    // Git object identifiers allow a reviewer to locate historical content without
+    // publishing any matching values, filenames or raw errors in CI logs.
+    for (const { kind, oid } of result.findingObjects) console.error("History review object: " + kind + " " + oid);
+    if (result.sensitivePathCount) {
+      // Do not emit paths; even a historical filename may contain secrets.
+      console.error("History credential/backup filename policy failed: " + result.sensitivePathCount + " prohibited historical path(s).");
+    }
+    if (result.findings.size || result.sensitivePathCount) process.exitCode = 1;
+  } catch {
+    console.error("History secret scan could not complete.");
+    process.exitCode = 1;
+  }
+}

@@ -1,0 +1,133 @@
+name: Catalog ownership PostgreSQL
+on:
+  pull_request:
+  push:
+    branches:
+      - feature/catalog-owner-adapter
+permissions:
+  contents: read
+jobs:
+  concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: catalog_rehearsal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PROFINO_DISPOSABLE_POSTGRES: 'yes'
+      CATALOG_REHEARSAL_URL: postgresql://postgres:postgres@localhost:5432/catalog_rehearsal
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/profino_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - name: Create a separate disposable ledger test database
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE profino_test'
+      - name: Run catalog and ledger suites without silent skips
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in deposit-evidence-migration confirmed-deposit-posting deposit-schema-audit verified-deposit-evidence-store catalog-deposit-owner legacy-deposit-assignment-audit deposit-ownership-history-migration deposit-historical-wallet-db-inspection; do
+            node --test --test-reporter=tap "src/$suite.postgres.test.js" | tee "$RUNNER_TEMP/$suite.tap"
+            grep -Eq '^# tests [1-9][0-9]*$' "$RUNNER_TEMP/$suite.tap"
+            grep -Fxq '# skipped 0' "$RUNNER_TEMP/$suite.tap"
+          done
+      - name: Rehearse backup and restore of both reviewed schemas using synthetic data
+        shell: bash
+        env:
+          CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          test "$PROFINO_DISPOSABLE_POSTGRES" = yes
+          test -n "$CI_POSTGRES_CONTAINER"
+          db() { docker exec -i "$CI_POSTGRES_CONTAINER" psql -X -U postgres -v ON_ERROR_STOP=1 "$@"; }
+          db -d postgres -c 'CREATE DATABASE deposit_restore_source'
+          db -d postgres -c 'CREATE DATABASE deposit_restore_target'
+          db -d deposit_restore_source <<'SQL'
+          CREATE EXTENSION btree_gist WITH SCHEMA public;
+          CREATE TABLE public.users(id bigint PRIMARY KEY);
+          CREATE TABLE public.wallets(id bigint PRIMARY KEY, chain_id bigint NOT NULL, wallet_address text NOT NULL, is_platform_controlled boolean NOT NULL);
+          INSERT INTO public.users VALUES (11);
+          INSERT INTO public.wallets VALUES (1,56,'0x'||repeat('a',40),true);
+          SQL
+          db -d deposit_restore_source < migrations/20261121_verified_deposit_evidence.sql
+          db -d deposit_restore_source < migrations/20261125_deposit_ownership_history.review.sql
+          db -d deposit_restore_source <<'SQL'
+          INSERT INTO public.deposit_address_ownership_history(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source) VALUES (1,11,56,'0x'||repeat('a',40),100,200,'synthetic-rehearsal');
+          INSERT INTO public.verified_deposit_evidence(event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units) VALUES ('bsc:56:0x'||repeat('c',64)||':0','0x'||repeat('d',64),199,'0x'||repeat('b',40),'0x'||repeat('a',40),1000000000000000000);
+          SQL
+          docker exec "$CI_POSTGRES_CONTAINER" pg_dump -U postgres -Fc deposit_restore_source > "$RUNNER_TEMP/deposit-rehearsal.dump"
+          test -s "$RUNNER_TEMP/deposit-rehearsal.dump"
+          docker exec -i "$CI_POSTGRES_CONTAINER" pg_restore -U postgres --exit-on-error -d deposit_restore_target < "$RUNNER_TEMP/deposit-rehearsal.dump"
+          db -d deposit_restore_target <<'SQL'
+          DO $check$
+          BEGIN
+            IF (SELECT count(*) FROM public.deposit_address_ownership_history) <> 1 OR
+               (SELECT count(*) FROM public.verified_deposit_evidence) <> 1 OR
+               NOT EXISTS (SELECT 1 FROM public.verified_deposit_evidence e JOIN public.deposit_address_ownership_history h ON h.wallet_address=e.deposit_address AND h.start_block<=e.block_number AND e.block_number<h.end_block WHERE h.user_id=11 AND e.amount_base_units=1000000000000000000) THEN
+              RAISE EXCEPTION 'Synthetic restore content mismatch';
+            END IF;
+            BEGIN
+              UPDATE public.verified_deposit_evidence SET block_number=200;
+              RAISE EXCEPTION 'Restored evidence guard missing';
+            EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+            END;
+            BEGIN
+              DELETE FROM public.deposit_address_ownership_history;
+              RAISE EXCEPTION 'Restored history guard missing';
+            EXCEPTION WHEN raise_exception THEN
+              IF SQLERRM <> 'Deposit ownership history is immutable' THEN RAISE; END IF;
+            END;
+            IF (SELECT count(*) FROM pg_catalog.pg_trigger WHERE tgrelid IN ('public.verified_deposit_evidence'::regclass,'public.deposit_address_ownership_history'::regclass) AND NOT tgisinternal AND tgenabled='A') <> 4 THEN
+              RAISE EXCEPTION 'Restored ALWAYS trigger configuration mismatch';
+            END IF;
+            -- A restored snapshot must also preserve uniqueness and exclusion.
+            BEGIN
+              INSERT INTO public.verified_deposit_evidence(event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units)
+                SELECT event_key,block_hash,block_number,token_contract,deposit_address,amount_base_units FROM public.verified_deposit_evidence;
+              RAISE EXCEPTION 'Restored event uniqueness missing';
+            EXCEPTION WHEN unique_violation THEN NULL;
+            END;
+            BEGIN
+              INSERT INTO public.deposit_address_ownership_history(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
+                VALUES (1,11,56,'0x'||repeat('a',40),150,250,'synthetic-rehearsal');
+              RAISE EXCEPTION 'Restored interval exclusion missing';
+            EXCEPTION WHEN exclusion_violation THEN NULL;
+            END;
+            IF EXISTS (
+              SELECT 1 FROM pg_catalog.pg_class c
+                CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(c.relacl,pg_catalog.acldefault(CASE WHEN c.relkind='S' THEN 'S' ELSE 'r' END::"char",c.relowner))) acl
+              WHERE c.oid IN ('public.verified_deposit_evidence'::regclass,'public.deposit_address_ownership_history'::regclass,'public.deposit_address_ownership_history_id_seq'::regclass) AND acl.grantee=0
+            ) OR EXISTS (
+              SELECT 1 FROM pg_catalog.pg_proc p
+                CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
+              WHERE p.oid IN ('public.reject_verified_deposit_evidence_mutation()'::regprocedure,'public.validate_deposit_ownership_wallet_identity()'::regprocedure,'public.reject_deposit_ownership_history_mutation()'::regprocedure) AND acl.grantee=0
+            ) THEN
+              RAISE EXCEPTION 'Restored object PUBLIC grants are unsafe';
+            END IF;
+            INSERT INTO public.deposit_address_ownership_history(wallet_id,user_id,chain_id,wallet_address,start_block,end_block,verified_source)
+              VALUES (1,11,56,'0x'||repeat('a',40),200,300,'synthetic-rehearsal');
+            IF NOT EXISTS (SELECT 1 FROM public.deposit_address_ownership_history WHERE start_block=200 AND id>1) THEN
+              RAISE EXCEPTION 'Restored identity sequence did not advance';
+            END IF;
+          END
+          $check$;
+          SQL
+          rm -f "$RUNNER_TEMP/deposit-rehearsal.dump"
+          echo "Synthetic PostgreSQL 17 backup and independent restore passed; no production evidence."
