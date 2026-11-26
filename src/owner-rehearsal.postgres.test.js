@@ -16,6 +16,9 @@ test("owner rehearsal uses a separate marked PostgreSQL database and rejects rep
   const database="owner_rehearsal_test_"+randomUUID().replaceAll("-","");
   const admin=new pg.Pool({connectionString:process.env.DATABASE_URL});
   let fixture,created=false;
+  let idleFailures=0;
+  const onIdleError=()=>{idleFailures++;};
+  admin.on("error",onIdleError);
   try{
     const {rows:[identity]}=await admin.query("SELECT current_database() AS name");
     assert.equal(identity.name,"profino_test");
@@ -26,6 +29,7 @@ test("owner rehearsal uses a separate marked PostgreSQL database and rejects rep
     const url=new URL(process.env.DATABASE_URL);
     url.pathname="/"+database;
     fixture=new pg.Pool({connectionString:url.href});
+    fixture.on("error",onIdleError);
     await fixture.query(await readFile(new URL("../test/fixtures/ledger-contract.sql",import.meta.url),"utf8"));
     await createSimulationWithdrawalTables(fixture);
     await fixture.query(`ALTER TABLE users ADD COLUMN telegram_id bigint UNIQUE, ADD COLUMN status text;
@@ -73,8 +77,11 @@ test("owner rehearsal uses a separate marked PostgreSQL database and rejects rep
   }finally{
     try{if(fixture)await fixture.end();}
     finally{
-      try{if(created)await admin.query('DROP DATABASE "'+database+'" WITH (FORCE)');}
+      // Do not terminate a leaked connection to make cleanup appear successful.
+      // Ordinary DROP requires every sandbox connection to have closed.
+      try{if(created)await admin.query('DROP DATABASE "'+database+'"');}
       finally{await admin.end();}
     }
   }
+  assert.equal(idleFailures,0,"Unexpected idle error in disposable rehearsal fixture");
 });
