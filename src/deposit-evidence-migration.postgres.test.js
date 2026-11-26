@@ -30,7 +30,17 @@ test("staged evidence migration creates constrained table and refuses existing r
   await client.query("ROLLBACK TO SAVEPOINT create_conflict");
   assert.deepEqual((await client.query("SELECT sentinel FROM public.verified_deposit_evidence")).rows,[{sentinel:"preserve"}]);
   await client.query("ROLLBACK TO SAVEPOINT existing_incompatible");
+  // A caller-controlled path can otherwise bind a permissive text regex
+  // operator into persistent CHECK expressions at CREATE TABLE time.
+  const shadow="evidence_shadow_"+(await import("node:crypto")).randomUUID().replaceAll("-","");
+  await client.query('CREATE SCHEMA "'+shadow+'"');
+  await client.query('CREATE FUNCTION "'+shadow+'".always_matches(text,text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT true $$');
+  await client.query('CREATE OPERATOR "'+shadow+'".~ (LEFTARG=text, RIGHTARG=text, FUNCTION="'+shadow+'".always_matches)');
+  await client.query('SET LOCAL search_path = "'+shadow+'", pg_catalog, public');
+  assert.equal((await client.query("SELECT 'invalid'::text ~ '^valid$'::text AS matched")).rows[0].matched,true);
   await client.query(ddl);
+  assert.equal((await client.query("SHOW search_path")).rows[0].search_path,"pg_catalog");
+  assert.equal((await client.query("SELECT 'invalid'::text ~ '^valid$'::text AS matched")).rows[0].matched,false);
   // A repeated invocation is a deliberate failure, even for a matching table.
   await client.query("SAVEPOINT repeated_create");
   await assert.rejects(client.query(ddl), error=>error.code==="42P07");

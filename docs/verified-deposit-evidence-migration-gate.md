@@ -36,3 +36,6 @@ The historical ownership candidate requires a trusted preinstalled btree_gist ex
 
 ## Deposit identity checkpoint — 2026-11-25
 PR #210 head `1544557c09b1f837a8e1cf1501867415a117ebfe` passed 68 focused unit tests, 4 safety tests and 38 PostgreSQL tests across eight suites; zero failures/skips. Job 139261298322 verified direct SQL rejection of oversized/invalid indices and zero addresses, acceptance of uint256 maximum, exact catalog compatibility and rejection of missing or weakened constraints. Backup and restore rehearsal passed on disposable PostgreSQL 17. Merged only into draft #207 at `68a72ce16172fe8906fd5b87b7ddc466e76628af`; tree matches tested #210 head. Fresh integrated matrix and operational gates remain required. No main merge, production migration or financial activation.
+
+### Migration name-resolution boundary
+The create-only evidence migration pins its transaction-local search path to pg_catalog before defining constraints and defaults. The disposable PostgreSQL regression places an intentionally permissive text regex operator ahead of pg_catalog, confirms the shadow is active, applies the candidate, then exercises the existing direct SQL rejection and replay checks. This does not establish actual production roles, schema ownership, extension safety or migration authorization. No production DDL has been executed. Exact-head CI is required.

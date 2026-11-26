@@ -3,6 +3,8 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
+-- Resolve CHECK operators, types and defaults against the built-in catalog.
+SET LOCAL search_path = pg_catalog;
 -- Create only: an existing relation is an unexpected state requiring review.
 CREATE TABLE public.verified_deposit_evidence (
  event_key text PRIMARY KEY,
