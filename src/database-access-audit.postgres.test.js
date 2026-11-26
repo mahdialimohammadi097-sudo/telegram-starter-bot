@@ -1,6 +1,7 @@
 import { isDisposablePostgresTarget } from "../test-support/disposable-postgres-target.js";
 import test from "node:test";
 import assert from "node:assert/strict";
+import {randomUUID} from "node:crypto";
 import pg from "pg";
 import { inspectDatabaseAccess } from "./database-access-audit.js";
 import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
@@ -49,4 +50,52 @@ test("PostgreSQL audit verifies effective settings and cannot write ordinary tab
   }),error=>error.code==="25006");
   assert.equal((await pool.query("SELECT to_regclass('public.forbidden_read_only_fixture') AS name")).rows[0].name,null);
  }finally{await pool.end();}
+});
+
+test("access audit detects column-level, PUBLIC and delegable ledger privileges",{skip:!safeTarget()},async()=>{
+ const suffix=randomUUID().replaceAll("-","");
+ const schema="access_"+suffix, role="role_"+suffix;
+ const pool=new pg.Pool({connectionString:url,max:1});
+ const inspect=()=>runReadOnlyDepositAudit(pool,client=>inspectDatabaseAccess(client,{schema}));
+ try{
+  await pool.query('CREATE SCHEMA "'+schema+'"');
+  await pool.query('CREATE ROLE "'+role+'" NOLOGIN');
+  for(const table of ["ledger_accounts","ledger_transactions","ledger_entries"]){
+   await pool.query('CREATE TABLE "'+schema+'".'+table+'(id bigint, amount numeric)');
+  }
+  await pool.query('GRANT USAGE ON SCHEMA "'+schema+'" TO "'+role+'"');
+  await pool.query('GRANT SELECT ON ALL TABLES IN SCHEMA "'+schema+'" TO "'+role+'"');
+  await pool.query('SET ROLE "'+role+'"');
+  const clean=await inspect();
+  assert.equal(clean.session_role_matches,false);
+  assert.equal(clean.privileged_role_membership,false);
+  assert.equal(clean.can_set_replication_role,false);
+  assert.equal(clean.replication_role_origin,true);
+  assert.equal(clean.ledger_tables_present,3);
+  for(const field of ["ledger_tables_owned","ledger_tables_insertable","ledger_tables_updatable","ledger_tables_deletable","ledger_tables_delegable","ledger_tables_public_write"])assert.equal(clean[field],0);
+  await pool.query("RESET ROLE");
+  await pool.query('GRANT UPDATE(amount) ON "'+schema+'".ledger_entries TO "'+role+'" WITH GRANT OPTION');
+  await pool.query('GRANT INSERT(amount) ON "'+schema+'".ledger_accounts TO PUBLIC');
+  await pool.query('GRANT DELETE ON "'+schema+'".ledger_transactions TO "'+role+'"');
+  await pool.query('ALTER TABLE "'+schema+'".ledger_accounts ENABLE ROW LEVEL SECURITY');
+  await pool.query('GRANT SET ON PARAMETER session_replication_role TO "'+role+'"');
+  await pool.query('SET ROLE "'+role+'"');
+  const excess=await inspect();
+  assert.equal(excess.ledger_tables_updatable,1);
+  assert.equal(excess.ledger_tables_insertable,1);
+  assert.equal(excess.ledger_tables_deletable,1);
+  assert.equal(excess.ledger_tables_delegable,1);
+  assert.equal(excess.ledger_tables_public_write,1);
+  assert.equal(excess.ledger_tables_rls_enabled,1);
+  assert.equal(excess.can_set_replication_role,true);
+  assert.equal(JSON.stringify(excess).includes(role),false);
+  assert.equal(JSON.stringify(excess).includes(schema),false);
+ }finally{
+  try{
+   await pool.query("RESET ROLE");
+   await pool.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
+   await pool.query('REVOKE SET ON PARAMETER session_replication_role FROM "'+role+'"');
+   await pool.query('DROP ROLE IF EXISTS "'+role+'"');
+  }finally{await pool.end();}
+ }
 });
