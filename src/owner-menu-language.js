@@ -41,7 +41,7 @@ export function sectionText(choice,language="en") {
  "Daily Profits":["DAILY PROFITS\n\nVerified profit records will appear here when available.","سود روزانه\n\nسوابق سود تأییدشده پس از آماده‌شدن در این بخش نمایش داده می‌شوند."],
  "Referral Program":["REFERRAL PROGRAM\n\nYour referral details will appear here.","برنامه معرفی\n\nجزئیات معرفی شما در این بخش نمایش داده می‌شوند."],
  "Transaction History":["TRANSACTION HISTORY\n\nYour transaction records will appear here.","تاریخچه تراکنش‌ها\n\nسوابق تراکنش‌های شما در این بخش نمایش داده می‌شوند."],
- "Support":["SUPPORT\n\nPlease contact our support team.","پشتیبانی\n\nلطفاً با تیم پشتیبانی تماس بگیرید."]
+ "Support":["PROFINO Management — SUPPORT\n\nPlease contact our support team.","PROFINO Management — پشتیبانی\n\nلطفاً با تیم پشتیبانی تماس بگیرید."]
  };
  return sections[choice]?.[language==="fa"?1:0]??null;
 }
