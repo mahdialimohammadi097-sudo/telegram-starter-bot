@@ -52,3 +52,12 @@ test("checkout and release discard non-idle and unverified transaction states",a
  status="I";const healthy=await pool.connect();healthy.release();
  assert.deepEqual(discarded,[true,true,true,true,undefined]);
 });
+
+test("restricted checkout fails closed when driver transaction status API is unavailable",async()=>{
+ const discarded=[];
+ const client={query(){assert.fail("unverified driver must not execute SQL");},release(reason){discarded.push(reason);}};
+ const pool={async connect(){return client;}};
+ guardRestrictedPoolCheckouts(pool);
+ await assert.rejects(pool.connect(),error=>error.message==="Restricted runtime connection settings incompatible");
+ assert.deepEqual(discarded,[true]);
+});

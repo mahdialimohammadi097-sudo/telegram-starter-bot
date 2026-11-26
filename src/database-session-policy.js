@@ -29,6 +29,7 @@ export function guardRestrictedPoolCheckouts(pool,{schema="public"}={}){
     try{
       // New clients can initially report null; after a completed probe only
       // an idle ReadyForQuery status is accepted. Never probe an open transaction.
+      if(typeof client.getTransactionStatus!=="function")throw new Error("Transaction status API unavailable");
       const before=client.getTransactionStatus();
       if(before!==null&&before!=="I")throw new Error("Unsafe transaction state");
       const {rows}=await client.query(`
