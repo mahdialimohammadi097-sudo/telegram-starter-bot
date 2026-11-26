@@ -16,3 +16,36 @@ export function restrictedRuntimeConnectionOptions(env=process.env,{schema="publ
   // Explicit pg_temp last prevents PostgreSQL's implicit temp-first lookup.
   return {options:"-c search_path=pg_catalog,"+schema+",pg_temp"};
 }
+
+// Verify each checked-out connection, including pool.query's callback path.
+// Discard drifted clients, never silently repair or return them to the pool.
+export function guardRestrictedPoolCheckouts(pool,{schema="public"}={}){
+  if(typeof schema!=="string"||!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)){
+    throw new Error("Invalid restricted runtime schema");
+  }
+  const connect=pool.connect.bind(pool);
+  async function checkedConnect(){
+    const client=await connect();
+    try{
+      const {rows}=await client.query(`
+        SELECT current_user=session_user AS same_role,
+          pg_catalog.current_schemas(true)::text[]=ARRAY['pg_catalog'::text,$1::text] AS safe_path,
+          pg_catalog.current_setting('session_replication_role')='origin' AS origin_mode
+      `,[schema]);
+      if(rows?.length!==1||rows[0].same_role!==true||rows[0].safe_path!==true||rows[0].origin_mode!==true){
+        throw new Error("Restricted runtime connection settings incompatible");
+      }
+      return client;
+    }catch{
+      client.release(true);
+      throw new Error("Restricted runtime connection settings incompatible");
+    }
+  }
+  pool.connect=function(callback){
+    const pending=checkedConnect();
+    if(typeof callback!=="function")return pending;
+    // pg.Pool.query obtains clients through the callback form.
+    pending.then(client=>callback(null,client,client.release),error=>callback(error));
+  };
+  return pool;
+}

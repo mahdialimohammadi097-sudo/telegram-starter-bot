@@ -1,7 +1,7 @@
 import pg from "pg";
 import { safeDiagnosticCode } from "./diagnostic-safety.js";
 import { resolveDatabaseTls } from "./database-tls-policy.js";
-import { restrictedRuntimeConnectionOptions } from "./database-session-policy.js";
+import { restrictedRuntimeConnectionOptions, guardRestrictedPoolCheckouts } from "./database-session-policy.js";
 
 const { Pool } = pg;
 
@@ -17,6 +17,10 @@ export const pool = new Pool({
   ssl: resolveDatabaseTls(),
   ...restrictedRuntimeConnectionOptions(),
 });
+
+if(process.env.PROFINO_RUNTIME_SCHEMA_MODE==="verify-only"){
+  guardRestrictedPoolCheckouts(pool);
+}
 
 // pg removes a disconnected idle client; handle its error without crashing
 // the bot or exposing connection strings from the driver error message.

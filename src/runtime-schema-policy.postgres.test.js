@@ -5,7 +5,7 @@ import {randomUUID} from "node:crypto";
 import pg from "pg";
 import {Bot} from "grammy";
 import {verifyRuntimeSchema} from "./runtime-schema-policy.js";
-import {restrictedRuntimeConnectionOptions} from "./database-session-policy.js";
+import {restrictedRuntimeConnectionOptions,guardRestrictedPoolCheckouts} from "./database-session-policy.js";
 import {activeOwnerLockBody} from "./restricted-owner-lock.js";
 import {postHistoryTriggerBody} from "./post-history-trigger-body.js";
 const url=process.env.CATALOG_REHEARSAL_URL;
@@ -298,6 +298,35 @@ test("restricted startup options apply to two independent PostgreSQL pool connec
  }finally{
   if(first)first.release(true);
   if(second)second.release(true);
+  if(scoped)await scoped.end();
+  try{await admin.query("DROP SCHEMA IF EXISTS "+schema+" CASCADE");}finally{await admin.end();}
+ }
+});
+
+test("restricted checkout rejects reused session drift before application queries",{skip:!safeTarget()},async()=>{
+ const schema="checkout_"+randomUUID().replaceAll("-","");
+ const admin=new pg.Pool({connectionString:url,max:1});
+ let scoped,client;
+ try{
+  await admin.query("CREATE SCHEMA "+schema);
+  scoped=new pg.Pool({connectionString:url,max:1,
+    ...restrictedRuntimeConnectionOptions({DATABASE_URL:url},{force:true,schema})});
+  guardRestrictedPoolCheckouts(scoped,{schema});
+  const first=(await scoped.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+  client=await scoped.connect();
+  assert.equal((await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid,first);
+  await client.query("SET search_path=pg_catalog");
+  client.release();client=undefined;
+  await assert.rejects(scoped.query("SELECT 1"),/Restricted runtime connection settings incompatible/);
+  const next=(await scoped.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+  assert.notEqual(next,first);
+  client=await scoped.connect();
+  await client.query("SET session_replication_role=replica");
+  client.release();client=undefined;
+  await assert.rejects(scoped.connect(),/Restricted runtime connection settings incompatible/);
+  assert.equal((await scoped.query("SELECT 1 AS value")).rows[0].value,1);
+ }finally{
+  if(client)client.release(true);
   if(scoped)await scoped.end();
   try{await admin.query("DROP SCHEMA IF EXISTS "+schema+" CASCADE");}finally{await admin.end();}
  }
