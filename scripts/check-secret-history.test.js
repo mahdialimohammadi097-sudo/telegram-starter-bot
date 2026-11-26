@@ -44,3 +44,25 @@ test("history scan rejects shallow repositories rather than claiming complete co
   git(root, "clone", "--depth=1", "file://" + origin, shallow);
   assert.throws(() => scanHistory(shallow), /Full history required/);
 });
+
+test("history scan counts removed and renamed protected archive paths without disclosing names", t => {
+  const cwd = mkdtempSync(join(tmpdir(), "profino-historical-paths-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd, stdio: "pipe" });
+  git("init");
+  git("config", "user.name", "Fixture");
+  git("config", "user.email", "fixture@example.invalid");
+  writeFileSync(join(cwd, "synthetic backup.dump.tmp"), Buffer.from([0, 1, 2]));
+  writeFileSync(join(cwd, "synthetic.sql.age.partial"), Buffer.from([0, 3, 4]));
+  writeFileSync(join(cwd, "schema.sql"), "SELECT 1;");
+  git("add", ".");
+  git("commit", "-m", "synthetic protected paths");
+  git("mv", "synthetic backup.dump.tmp", "renamed.bin");
+  git("rm", "synthetic.sql.age.partial");
+  git("commit", "-m", "rename and remove fixtures");
+  const result = scanHistory(cwd);
+  assert.equal(result.sensitivePathCount, 2);
+  assert.equal(result.findings.size, 0);
+  assert.equal(JSON.stringify(result).includes("synthetic backup.dump.tmp"), false);
+  assert.equal(JSON.stringify(result).includes("synthetic.sql.age.partial"), false);
+});

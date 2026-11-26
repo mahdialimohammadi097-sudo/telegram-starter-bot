@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { detectSecretKinds } from "./check-secret-patterns.js";
+import { countSensitivePaths } from "./check-sensitive-paths.js";
 
 // Exact reviewed blobs of synthetic diagnostics and disposable CI fixtures.
 // Only its database-url classification is excluded; no file or path is globally exempt.
@@ -21,6 +22,12 @@ export function scanHistory(cwd = process.cwd()) {
   if (git(["rev-parse", "--is-shallow-repository"], { encoding: "utf8" }).trim() !== "false") {
     throw new Error("Full history required");
   }
+  // Include paths removed or renamed in reachable history, not just HEAD.
+  // Disable rename detection and split NUL-delimited paths to preserve whitespace.
+  const historicalPaths = new Set(git(["log", "--format=", "--name-only", "-z",
+    "--full-history", "-m", "--no-renames", "HEAD", "--"], { encoding: "utf8" })
+    .split("\0").filter(Boolean));
+  const sensitivePathCount = countSensitivePaths([...historicalPaths]);
   const objects = git(["rev-list", "--objects", "--no-object-names", "HEAD"], { encoding: "utf8" });
   const metadata = git(["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"], {
     input: objects, encoding: "utf8"
@@ -42,7 +49,7 @@ export function scanHistory(cwd = process.cwd()) {
       findingObjects.push({ kind, oid });
     }
   }
-  return { scanned, binary, reviewed, findings, findingObjects };
+  return { scanned, binary, reviewed, findings, findingObjects, sensitivePathCount };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -53,7 +60,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // Git object identifiers allow a reviewer to locate historical content without
     // publishing any matching values, filenames or raw errors in CI logs.
     for (const { kind, oid } of result.findingObjects) console.error("History review object: " + kind + " " + oid);
-    if (result.findings.size) process.exitCode = 1;
+    if (result.sensitivePathCount) {
+      // Do not emit paths; even a historical filename may contain secrets.
+      console.error("History credential/backup filename policy failed: " + result.sensitivePathCount + " prohibited historical path(s).");
+    }
+    if (result.findings.size || result.sensitivePathCount) process.exitCode = 1;
   } catch {
     console.error("History secret scan could not complete.");
     process.exitCode = 1;
