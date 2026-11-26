@@ -48,6 +48,7 @@ test("FadeHost schedule uses the full reviewed read-only catalog audit",()=>{
     if(sql==="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")return {command:"BEGIN"};
     if(sql.startsWith("SET LOCAL"))return {command:"SET"};
     if(sql.includes("pg_catalog.current_setting('transaction_read_only')"))return {rows:[{read_only:"on",isolation:"repeatable read",statement_timeout:"10s",lock_timeout:"3s"}]};
+    if(sql.includes("pg_catalog.current_setting('search_path')"))return {rows:[{search_path:"pg_catalog, pg_temp"}]};
     if(sql.includes("information_schema.columns"))return {rows:[]};
     if(sql.includes("FROM pg_index"))return {rows:[]};
     if(sql.includes("c.contype='f'"))return {rows:[]};

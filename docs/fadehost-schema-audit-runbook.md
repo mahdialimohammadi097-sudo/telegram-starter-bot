@@ -17,3 +17,6 @@ Inspect the sanitized JSON output only. If a temporary recurring schedule is use
 - Exit 3: missing configuration, read-only execution failure or cleanup failure. Investigate privately using sanitized diagnostics.
 
 Successful structural reports explicitly set financialActivationReady and realDepositsEnabled to false. Error reports never authorize financial operations. No migrations, user records, wallet balances or money movements are performed. Real operations require independent verification and separate final owner approval.
+
+### Catalog-only snapshot resolution
+Historical-wallet inspection, legacy/combined assignment audit and the one-shot FadeHost schema CLI now pin and verify transaction-local `pg_catalog, pg_temp` before inspection. Explicit application relation qualification and catalog-first resolution prevent a caller's local function/operator shadowing from concealing conflicts. The disposable historical fixture demonstrates a shadow `lower(text)` concealing a case-variant conflicting record and checks that audit rejection restores the caller search path. The runtime-role inventory intentionally continues to inspect original session settings, not a repaired path. No production DDL, role grants, financial activation or provider command. Exact-head CI required.

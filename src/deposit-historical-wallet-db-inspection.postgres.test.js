@@ -45,6 +45,17 @@ test("historical wallet snapshot checks real PostgreSQL without write locks or f
   // Orphan and case-variant records must remain visible and prevent ambiguous attribution.
   await pool.query(insert,[999,12,address.toUpperCase().replace("0X","0x"),"110","180"]);
   await assert.rejects(inspect(pool,input),/Missing or ambiguous/);
+  // A caller search path may resolve a shadow lower(text) which conceals a
+  // case-variant conflicting owner. Pin catalog resolution for the audit only.
+  const initialPath=(await pool.query("SHOW search_path")).rows[0].search_path;
+  await pool.query(`CREATE FUNCTION "${schema}".lower(pg_catalog.text) RETURNS pg_catalog.text
+    LANGUAGE sql IMMUTABLE AS 'SELECT $1'`);
+  await pool.query(`SET search_path = "${schema}", pg_catalog`);
+  const raw=await pool.query("SELECT count(*)::int AS n FROM "+prefix+"deposit_address_ownership_history WHERE lower(wallet_address)=$1 AND start_block<=150 AND (end_block IS NULL OR 150<end_block)",[address]);
+  assert.equal(raw.rows[0].n,1);
+  await assert.rejects(inspect(pool,input),/Missing or ambiguous/);
+  assert.equal((await pool.query("SHOW search_path")).rows[0].search_path,schema+", pg_catalog");
+  await pool.query("SELECT pg_catalog.set_config('search_path',$1,false)",[initialPath]);
   await pool.query("DELETE FROM "+prefix+"deposit_address_ownership_history WHERE wallet_id=999");
   await pool.query("UPDATE "+prefix+"wallets SET is_platform_controlled=false WHERE id=1");
   await assert.rejects(inspect(pool,input),/identity mismatch/);

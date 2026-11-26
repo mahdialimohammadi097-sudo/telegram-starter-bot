@@ -1,4 +1,4 @@
-import { runReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
+import { runCatalogReadOnlyDepositAudit } from "./read-only-deposit-audit.js";
 import { auditDepositSchema } from "./deposit-schema-audit.js";
 import { inspectHistoricalGuardInventory } from "./admin-schema-audit.js";
 
@@ -18,13 +18,13 @@ function validateSchema(schema) {
 
 export async function auditLegacyDepositAssignments(pool, { schema = "public" } = {}) {
   validateSchema(schema);
-  return runReadOnlyDepositAudit(pool, client => inspectLegacyAssignments(client, schema));
+  return runCatalogReadOnlyDepositAudit(pool, client => inspectLegacyAssignments(client, schema));
 }
 
 // All three inspections share one bounded read-only transaction.
 export async function auditCombinedDepositPreflight(pool, { schema = "public" } = {}) {
   validateSchema(schema);
-  return runReadOnlyDepositAudit(pool, async client => {
+  return runCatalogReadOnlyDepositAudit(pool, async client => {
     const assignments = await inspectLegacyAssignments(client, schema);
     const catalog = await auditDepositSchema(client, { schema });
     const historicalBasicGuardsPresent = await inspectHistoricalGuardInventory(client, schema);

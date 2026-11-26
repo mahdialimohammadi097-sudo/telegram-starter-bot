@@ -1,4 +1,4 @@
-import {runReadOnlyDepositAudit} from "./read-only-deposit-audit.js";
+import {runCatalogReadOnlyDepositAudit} from "./read-only-deposit-audit.js";
 import {verifyHistoricalWalletRecord,isValidHistoricalBlockNumber} from "./deposit-historical-wallet-record.js";
 
 // Read-only historical consistency inspection. Never credits balances.
@@ -12,7 +12,7 @@ export async function inspectHistoricalWalletSnapshot(pool,{eventBlockNumber,wal
     !isValidHistoricalBlockNumber(eventBlockNumber))
   throw new TypeError("Invalid historical inspection input");
  // Read-only snapshot, not a posting lock or independent historical proof.
- return runReadOnlyDepositAudit(pool,async client=>{
+ return runCatalogReadOnlyDepositAudit(pool,async client=>{
  // Do not report a consistent owner when a policy hides conflicting rows.
  // This setting does not bypass RLS; PostgreSQL rejects filtered queries.
  const setting=await client.query("SET LOCAL row_security = off");

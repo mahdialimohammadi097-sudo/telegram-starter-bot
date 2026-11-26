@@ -14,6 +14,7 @@ function fixture(rows, visibility="off"){
    return {rows,rowCount:rows.length};
   }
   if(sql.includes("pg_catalog.current_setting('transaction_read_only')")) return {rows:[{read_only:"on",isolation:"repeatable read",statement_timeout:"10s",lock_timeout:"3s"}]};
+  if(sql.includes("pg_catalog.current_setting('search_path')")) return {rows:[{search_path:"pg_catalog, pg_temp"}]};
   if(sql.includes("pg_catalog.current_setting('row_security')")) return {rows:[{row_security:visibility}]};
   return {command:sql.split(" ")[0]};
  },release(){}})}};
